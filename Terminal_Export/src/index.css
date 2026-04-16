@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 0%; /* Absolute black */
+    --foreground: 210 20% 90%;
+
+    --card: 0 0% 2%;
+    --card-foreground: 210 20% 90%;
+
+    --popover: 0 0% 2%;
+    --popover-foreground: 210 20% 90%;
+
+    --primary: 142 60% 45%; /* Kept original green */
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 210 15% 70%;
+
+    --muted: 0 0% 10%;
+    --muted-foreground: 215 12% 50%;
+
+    --accent: 142 60% 45%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 142 60% 45%;
+
+    --radius: 0.125rem;
+
+    --font-heading: 'JetBrains Mono', monospace;
+    --font-body: 'JetBrains Mono', monospace;
+    --font-mono: 'JetBrains Mono', monospace;
+
+    --sidebar-background: 0 0% 2%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 142 60% 45%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 10%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 142 60% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+
+  code, pre {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer utilities {
+  .font-heading {
+    font-family: var(--font-heading);
+  }
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Markdown content styling */
+.analysis-content h1 {
+  @apply text-xl font-bold mb-4 mt-6 text-foreground font-heading;
+}
+.analysis-content h2 {
+  @apply text-lg font-semibold mb-3 mt-5 text-foreground font-heading;
+}
+.analysis-content h3 {
+  @apply text-base font-medium mb-2 mt-4 text-foreground font-heading;
+}
+.analysis-content p {
+  @apply mb-3 leading-relaxed;
+}
+.analysis-content ul, .analysis-content ol {
+  @apply mb-3 pl-5;
+}
+.analysis-content li {
+  @apply mb-1;
+}
+.analysis-content strong {
+  @apply text-foreground font-semibold;
+}
+.analysis-content table {
+  @apply w-full mb-4 text-sm;
+}
+.analysis-content th {
+  @apply text-left p-2 border-b border-border text-muted-foreground font-mono text-xs uppercase tracking-wider;
+}
+.analysis-content td {
+  @apply p-2 border-b border-border;
+}
+.analysis-content blockquote {
+  @apply border-l-2 border-primary pl-4 my-3 italic text-muted-foreground;
+}
+.analysis-content code {
+  @apply bg-secondary px-1.5 py-0.5 rounded text-sm font-mono;
+}
+.analysis-content hr {
+  @apply my-4 border-border;
+}
+
+/* Pulse animation for loading */
+@keyframes terminal-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+.terminal-cursor::after {
+  content: '▌';
+  animation: terminal-blink 1s infinite;
+  color: hsl(var(--primary));
+}
