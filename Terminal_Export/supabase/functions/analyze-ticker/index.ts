@@ -389,8 +389,8 @@ serve(async (req) => {
       );
     }
 
-    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("Anthropic");
-    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
     const FINNHUB_KEY = (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "";
     const TAVILY_KEY = (Deno.env.get("TAVILY_API_KEY") || Deno.env.get("Tavily")) ?? "";
@@ -476,18 +476,16 @@ serve(async (req) => {
       tavily_missing_data: missingDataSearch?.results?.length ?? 0,
     });
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8096,
-        system: buildSystemPrompt(),
+        model: "gemini-2.5-pro",
         messages: [
+          { role: "system", content: buildSystemPrompt() },
           {
             role: "user",
             content: `${dataContext}
@@ -523,48 +521,7 @@ Si el ticker no corresponde a una empresa conocida, indícalo claramente.`,
       );
     }
 
-    // Convert Claude's SSE format to OpenAI-compatible SSE format for the frontend
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = writable.getWriter();
-    const encoder = new TextEncoder();
-
-    (async () => {
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-
-          let nl: number;
-          while ((nl = buf.indexOf("\n")) !== -1) {
-            const line = buf.slice(0, nl).replace(/\r$/, "");
-            buf = buf.slice(nl + 1);
-
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            try {
-              const event = JSON.parse(jsonStr);
-              if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-                const chunk = JSON.stringify({ choices: [{ delta: { content: event.delta.text } }] });
-                await writer.write(encoder.encode(`data: ${chunk}\n\n`));
-              } else if (event.type === "message_stop") {
-                await writer.write(encoder.encode("data: [DONE]\n\n"));
-              }
-            } catch { /* skip malformed events */ }
-          }
-        }
-      } catch (e) {
-        console.error("Stream conversion error:", e);
-      } finally {
-        writer.close();
-      }
-    })();
-
-    return new Response(readable, {
+    return new Response(response.body, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
