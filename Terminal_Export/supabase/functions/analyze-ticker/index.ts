@@ -533,7 +533,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gemini-2.5-pro",
+        model: "gemini-2.5-flash",
         max_tokens: 16000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
