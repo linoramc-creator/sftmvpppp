@@ -533,7 +533,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gemini-2.5-flash",
+        model: "gemini-2.0-flash",
         max_tokens: 16000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
@@ -561,16 +561,16 @@ Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resu
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+      const errBody = await response.text();
+      console.error("Gemini API error:", response.status, errBody);
       if (response.status === 402) {
         return new Response(
-          JSON.stringify({ error: "Créditos agotados." }),
+          JSON.stringify({ error: `Créditos agotados. Detalle: ${errBody.substring(0, 200)}` }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
       return new Response(
-        JSON.stringify({ error: `API Error (${response.status}): ${t.substring(0, 100)}` }),
+        JSON.stringify({ error: `API Error (${response.status}): ${errBody.substring(0, 200)}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
