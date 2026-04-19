@@ -424,7 +424,7 @@ REGLAS DE FORMATO:
 // ── Main handler ───────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
-  console.log("analyze-ticker v3-OR started");
+  console.log("analyze-ticker v4-GEMINI started");
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -439,8 +439,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") || Deno.env.get("OpenRouter");
-    if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
     const FINNHUB_KEY = (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "";
     const TAVILY_KEY = (Deno.env.get("TAVILY_API_KEY") || Deno.env.get("Tavily")) ?? "";
@@ -526,17 +526,15 @@ Deno.serve(async (req) => {
       tavily_missing_data: missingDataSearch?.results?.length ?? 0,
     });
 
-    console.log("Calling OpenRouter API...");
-    const orResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    console.log("Calling Gemini API...");
+    const orResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://sftmvpppp.vercel.app",
-        "X-Title": "Financial Terminal",
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-3.3-70b-instruct:free",
+        model: "gemini-2.0-flash",
         max_tokens: 8000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
@@ -557,11 +555,11 @@ Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resu
       }),
     });
 
-    console.log("OpenRouter response status:", orResponse.status);
+    console.log("Gemini response status:", orResponse.status);
 
     if (!orResponse.ok) {
       const errBody = await orResponse.text();
-      console.error("OpenRouter API error:", orResponse.status, errBody);
+      console.error("Gemini API error:", orResponse.status, errBody);
       if (orResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: "Límite de solicitudes excedido. Inténtalo en unos segundos." }),
@@ -575,7 +573,7 @@ Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resu
         );
       }
       return new Response(
-        JSON.stringify({ error: `OpenRouter Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
+        JSON.stringify({ error: `Gemini Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
