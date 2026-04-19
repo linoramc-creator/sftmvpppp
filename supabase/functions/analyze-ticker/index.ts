@@ -425,6 +425,7 @@ REGLAS DE FORMATO:
 // ── Main handler ───────────────────────────────────────────────────────
 
 serve(async (req) => {
+  console.log("analyze-ticker v2-GROQ started");
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
