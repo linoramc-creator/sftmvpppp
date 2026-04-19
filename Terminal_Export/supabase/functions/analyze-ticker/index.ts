@@ -534,7 +534,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "mistralai/mistral-7b-instruct:free",
+        model: "openai/gpt-oss-120b:free",
         max_tokens: 8000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
