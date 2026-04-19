@@ -424,7 +424,7 @@ REGLAS DE FORMATO:
 // ── Main handler ───────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
-  console.log("analyze-ticker v4-GEMINI started");
+  console.log("analyze-ticker v5-GROQ started");
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -439,8 +439,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini");
-    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || Deno.env.get("Groq");
+    if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
 
     const FINNHUB_KEY = (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "";
     const TAVILY_KEY = (Deno.env.get("TAVILY_API_KEY") || Deno.env.get("Tavily")) ?? "";
@@ -526,15 +526,15 @@ Deno.serve(async (req) => {
       tavily_missing_data: missingDataSearch?.results?.length ?? 0,
     });
 
-    console.log("Calling Gemini API...");
-    const orResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+    console.log("Calling Groq API...");
+    const orResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${GEMINI_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gemini-1.5-flash-latest",
+        model: "llama-3.3-70b-versatile",
         max_tokens: 8000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
@@ -555,11 +555,11 @@ Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resu
       }),
     });
 
-    console.log("Gemini response status:", orResponse.status);
+    console.log("Groq response status:", orResponse.status);
 
     if (!orResponse.ok) {
       const errBody = await orResponse.text();
-      console.error("Gemini API error:", orResponse.status, errBody);
+      console.error("Groq API error:", orResponse.status, errBody);
       if (orResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: "Límite de solicitudes excedido. Inténtalo en unos segundos." }),
@@ -573,14 +573,14 @@ Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resu
         );
       }
       return new Response(
-        JSON.stringify({ error: `Gemini Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
+        JSON.stringify({ error: `Groq Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     if (!orResponse.body) {
       return new Response(
-        JSON.stringify({ error: "Gemini returned empty response body" }),
+        JSON.stringify({ error: "Groq returned empty response body" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
