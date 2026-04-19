@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -424,8 +423,8 @@ REGLAS DE FORMATO:
 
 // ── Main handler ───────────────────────────────────────────────────────
 
-serve(async (req) => {
-  console.log("analyze-ticker v2-GROQ started");
+Deno.serve(async (req) => {
+  console.log("analyze-ticker v3-OR started");
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -527,11 +526,14 @@ serve(async (req) => {
       tavily_missing_data: missingDataSearch?.results?.length ?? 0,
     });
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    console.log("Calling OpenRouter API...");
+    const orResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
+        "HTTP-Referer": "https://sftmvpppp.vercel.app",
+        "X-Title": "Financial Terminal",
       },
       body: JSON.stringify({
         model: "openai/gpt-oss-120b:free",
@@ -555,34 +557,51 @@ Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resu
       }),
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
+    console.log("OpenRouter response status:", orResponse.status);
+
+    if (!orResponse.ok) {
+      const errBody = await orResponse.text();
+      console.error("OpenRouter API error:", orResponse.status, errBody);
+      if (orResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: "Límite de solicitudes excedido. Inténtalo en unos segundos." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      const errBody = await response.text();
-      console.error("Gemini API error:", response.status, errBody);
-      if (response.status === 402) {
+      if (orResponse.status === 402) {
         return new Response(
           JSON.stringify({ error: `Créditos agotados. Detalle: ${errBody.substring(0, 200)}` }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       return new Response(
-        JSON.stringify({ error: `API Error (${response.status}): ${errBody.substring(0, 200)}` }),
+        JSON.stringify({ error: `OpenRouter Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+    if (!orResponse.body) {
+      return new Response(
+        JSON.stringify({ error: "OpenRouter returned empty response body" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log("Streaming response to client...");
+    return new Response(orResponse.body, {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+      },
     });
   } catch (e) {
-    console.error("analyze-ticker error:", e);
+    const msg = e instanceof Error ? e.message : String(e);
+    const stack = e instanceof Error ? e.stack : "";
+    console.error("analyze-ticker fatal error:", msg, stack);
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Error desconocido" }),
+      JSON.stringify({ error: msg }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
