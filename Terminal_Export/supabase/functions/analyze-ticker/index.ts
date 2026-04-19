@@ -534,7 +534,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        max_tokens: 16000,
+        max_tokens: 8000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
           {
