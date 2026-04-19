@@ -580,7 +580,7 @@ Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resu
 
     if (!orResponse.body) {
       return new Response(
-        JSON.stringify({ error: "OpenRouter returned empty response body" }),
+        JSON.stringify({ error: "Gemini returned empty response body" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
