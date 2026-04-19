@@ -536,7 +536,7 @@ Deno.serve(async (req) => {
         "X-Title": "Financial Terminal",
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b:free",
+        model: "meta-llama/llama-3.3-70b-instruct:free",
         max_tokens: 8000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
