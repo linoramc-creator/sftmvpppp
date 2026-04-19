@@ -35,12 +35,12 @@ async function fetchFinnhubData(ticker: string, key: string) {
     recommendations: Array.isArray(recs) && recs.length > 0 ? recs[0] : null,
     allRecommendations: Array.isArray(recs) ? recs.slice(0, 6) : [],
     news: Array.isArray(news)
-      ? news.slice(0, 15).map((n: any) => ({
+      ? news.slice(0, 5).map((n: any) => ({
           headline: n.headline,
           source: n.source,
         }))
       : [],
-    peers: Array.isArray(peers) ? peers.filter((p: string) => p !== ticker).slice(0, 5) : [],
+    peers: Array.isArray(peers) ? peers.filter((p: string) => p !== ticker).slice(0, 4) : [],
   };
 }
 
@@ -118,7 +118,7 @@ async function fetchTavilySearch(
       answer: data.answer ?? "",
       results: (data.results ?? []).map((r: any) => ({
         title: r.title,
-        content: (r.content ?? "").slice(0, 600),
+        content: (r.content ?? "").slice(0, 250),
         published_date: r.published_date ?? "",
       })),
     };
@@ -468,32 +468,32 @@ Deno.serve(async (req) => {
     ] = await Promise.all([
       FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitico regulatorio riesgo aranceles 2025 2026`, TAVILY_KEY, 4)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitico regulatorio riesgo aranceles 2025 2026`, TAVILY_KEY, 3)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} noticias ultimos dias`, TAVILY_KEY, 7, 7, "news")
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} noticias ultimos dias`, TAVILY_KEY, 3, 7, "news")
         : Promise.resolve(null),
       TAVILY_KEY && sector
-        ? fetchTavilySearch(`${sector} sector noticias tendencias`, TAVILY_KEY, 6, 7, "news")
+        ? fetchTavilySearch(`${sector} sector noticias tendencias`, TAVILY_KEY, 3, 7, "news")
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating upgrade downgrade 2025 2026`, TAVILY_KEY, 5)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating 2025`, TAVILY_KEY, 3)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} earnings results revenue quarterly 2025 2026`, TAVILY_KEY, 5)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} earnings results revenue 2025`, TAVILY_KEY, 3)
         : Promise.resolve(null),
       TAVILY_KEY && peers.length > 0
         ? fetchTavilySearch(
-            `${companyName} vs ${peers.slice(0, 3).join(" ")} market share competitive position ${sector}`,
+            `${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive position`,
             TAVILY_KEY,
-            4,
+            3,
           )
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership top holders vanguard blackrock recent changes 2025 2026`, TAVILY_KEY, 4)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership vanguard blackrock 2025`, TAVILY_KEY, 3)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} current financial metrics P/E ratio ROE market cap EBITDA multiples 2025 2026`, TAVILY_KEY, 4)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} P/E ratio market cap EBITDA 2025`, TAVILY_KEY, 3)
         : Promise.resolve(null),
     ]);
 
@@ -535,7 +535,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        max_tokens: 8000,
+        max_tokens: 5000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
           {
