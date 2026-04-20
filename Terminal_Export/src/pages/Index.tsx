@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Search, TrendingUp, AlertCircle, Loader2, Download, TerminalSquare } from "lucide-react";
+import { TrendingUp, AlertCircle, Loader2, Download, BarChart2 } from "lucide-react";
 import { streamAnalysis } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 import { downloadAnalysisPdf } from "@/lib/reportPdf";
@@ -67,87 +67,85 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col font-mono text-foreground">
-      <header className="border-b-2 border-border/50 px-6 py-4 bg-black">
+    <div className="min-h-screen bg-background flex flex-col text-foreground">
+      <header className="border-b border-border/60 px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <TerminalSquare className="h-6 w-6 text-primary" />
-            <span className="font-heading text-lg font-bold tracking-widest text-primary">
-              BBG-TERMINAL<span className="text-muted-foreground ml-1">v2.0</span>
+          <div className="flex items-center gap-2.5">
+            <BarChart2 className="h-5 w-5 text-primary" />
+            <span className="font-heading text-base font-semibold text-foreground tracking-tight">
+              Análisis Financiero
             </span>
+            <span className="text-xs text-muted-foreground/60 hidden sm:inline">— Research institucional</span>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-primary/70 animate-pulse hidden sm:inline-block">
-              ● REAL-TIME CONNECTION ESTABLISHED
-            </span>
-            <span className="px-2 py-1 bg-primary/10 text-primary border border-primary/20 text-xs rounded">
-              GOV / CORP / MTGE / M-MKT
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-primary/60 hidden sm:inline-block">
+              Datos en tiempo real
             </span>
           </div>
         </div>
       </header>
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-6 py-8 flex flex-col">
-        <div className="mb-6 bg-secondary/30 p-4 border border-border/50 rounded-sm">
+        <div className="mb-6 bg-secondary/20 p-4 border border-border/40 rounded-lg">
           <div className="flex gap-3">
             <div className="relative flex-1">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary/50 text-sm">{">"}</span>
               <input
                 type="text"
                 value={ticker}
                 onChange={(e) => setTicker(e.target.value.toUpperCase())}
                 onKeyDown={handleKeyDown}
-                placeholder="ENTER TICKER (E.G. AAPL) OR COMMAND..."
+                placeholder="Introduce un ticker (ej. AAPL, MSFT, NVDA)..."
                 maxLength={20}
-                className="w-full h-12 pl-8 pr-4 bg-black border border-border/70 rounded-sm text-primary font-mono text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-colors uppercase tracking-widest"
+                className="w-full h-11 px-4 bg-card border border-border/60 rounded-md text-foreground font-mono text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 transition-colors"
               />
             </div>
             <button
               onClick={handleAnalyze}
               disabled={isLoading || !ticker.trim()}
-              className="h-12 px-8 bg-primary text-primary-foreground font-heading text-sm font-bold rounded-sm hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2 uppercase tracking-wider"
+              className="h-11 px-7 bg-primary text-primary-foreground font-heading text-sm font-semibold rounded-md hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  PROCESSING
+                  Analizando...
                 </>
               ) : (
-                "SEARCH <GO>"
+                "Analizar"
               )}
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-destructive/10 border border-destructive rounded-sm flex items-start gap-3">
+          <div className="mb-6 p-4 bg-destructive/10 border border-destructive/50 rounded-lg flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
-            <p className="text-sm text-destructive uppercase tracking-wide">{error}</p>
+            <p className="text-sm text-destructive">{error}</p>
           </div>
         )}
 
         {(analysis || isLoading) && (
-          <div className="flex-1 flex flex-col border border-border/50 rounded-sm bg-black shadow-2xl overflow-hidden min-h-[600px]">
-            <div className="px-4 py-2 border-b border-border/50 flex flex-wrap items-center justify-between bg-secondary/20 min-h-[44px]">
+          <div className="flex-1 flex flex-col border border-border/40 rounded-xl bg-card shadow-xl overflow-hidden min-h-[600px]">
+            <div className="px-5 py-3 border-b border-border/40 flex flex-wrap items-center justify-between bg-secondary/10 min-h-[48px]">
               <div className="flex items-center gap-3">
-                <div className={`h-2.5 w-2.5 rounded-sm ${isLoading ? "bg-primary animate-pulse" : "bg-primary"}`} />
-                <span className="font-mono text-sm font-bold text-primary tracking-widest">
-                  {currentTicker} <span className="text-muted-foreground ml-2">EQUITY</span>
+                <div className={`h-2 w-2 rounded-full ${isLoading ? "bg-primary animate-pulse" : "bg-primary"}`} />
+                <span className="font-mono text-sm font-semibold text-primary tracking-wide">
+                  {currentTicker}
                 </span>
+                <span className="text-xs text-muted-foreground">Informe de análisis</span>
               </div>
               <div className="flex items-center gap-4">
                 {isLoading && (
-                  <span className="text-xs text-[#FF9900] font-mono animate-pulse uppercase tracking-wider">
-                    STREAMING DATA...
+                  <span className="text-xs text-muted-foreground animate-pulse">
+                    Generando informe...
                   </span>
                 )}
                 {!isLoading && analysis && (
                   <button
                     onClick={() => downloadAnalysisPdf(analysis, currentTicker)}
-                    className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/70 transition-colors font-mono uppercase border border-primary/30 px-2 py-1 rounded-sm"
+                    className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/70 transition-colors font-mono border border-primary/30 px-3 py-1.5 rounded-md"
                   >
                     <Download className="h-3.5 w-3.5" />
-                    EXPORT PDF
+                    Exportar PDF
                   </button>
                 )}
               </div>
@@ -163,16 +161,15 @@ const Index = () => {
         )}
 
         {!analysis && !isLoading && !error && (
-          <div className="text-center py-32 flex-1 flex flex-col justify-center items-center opacity-30">
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              <div className="h-24 w-32 border border-primary/30 rounded-sm flex items-center justify-center"><TrendingUp className="text-primary h-8 w-8" /></div>
-              <div className="h-24 w-32 border border-primary/30 rounded-sm flex items-center justify-center"><TerminalSquare className="text-primary h-8 w-8" /></div>
+          <div className="text-center py-32 flex-1 flex flex-col justify-center items-center opacity-40">
+            <div className="mb-6 p-6 rounded-2xl border border-primary/20 bg-primary/5">
+              <TrendingUp className="text-primary h-10 w-10" />
             </div>
-            <p className="text-primary font-bold tracking-widest mb-2 uppercase">
-              SYSTEM STANDBY
+            <p className="text-foreground font-semibold text-lg mb-2">
+              Análisis de empresas cotizadas
             </p>
-            <p className="text-muted-foreground font-mono text-xs uppercase tracking-widest">
-              AWAITING INPUT...
+            <p className="text-muted-foreground text-sm">
+              Introduce un ticker para obtener un informe financiero completo
             </p>
           </div>
         )}
@@ -186,50 +183,49 @@ const Index = () => {
 function AnalysisTabsRenderer({ content, isLoading, activeTab, setActiveTab }: { content: string; isLoading: boolean, activeTab: string, setActiveTab: (t: string) => void }) {
   const sections = parseSections(content);
   const computedTabs = Object.keys(sections);
-  
+
   if (computedTabs.length === 0) {
     return (
-      <div className="flex-1 p-6 flex flex-col items-center justify-center text-primary/50 text-sm">
-        <Loader2 className="h-8 w-8 animate-spin mb-4 text-[#FF9900]" />
-        INITIALIZING MATRICES...
+      <div className="flex-1 p-6 flex flex-col items-center justify-center text-muted-foreground text-sm gap-3">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+        <span>Recopilando datos...</span>
       </div>
     );
   }
 
-  // Find if current requested tab has data. If not, fallback to first computed tab.
   const displayTab = sections[activeTab] ? activeTab : computedTabs[0];
   const currentTabContent = sections[displayTab] || [];
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 bg-[#050505]">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Tab Navigation */}
-      <div className="flex border-b border-border/50 bg-[#000000] overflow-x-auto overflow-y-hidden custom-scrollbar shrink-0">
+      <div className="flex border-b border-border/40 bg-secondary/10 overflow-x-auto overflow-y-hidden shrink-0">
         {EXPECTED_TABS.map((expectedTab) => {
           const hasContent = !!sections[expectedTab];
           const isActive = displayTab === expectedTab;
 
-          // Only mapping expected tabs. If AI generates arbitrary ones, they are ignored for UI cleanlyness, 
-          // but we can add them at the end.
           return (
             <button
               key={expectedTab}
               onClick={() => hasContent && setActiveTab(expectedTab)}
               disabled={!hasContent && !isLoading}
               className={`
-                px-5 py-2 text-xs font-bold font-mono tracking-wider whitespace-nowrap uppercase transition-all
-                border-r border-border/50 select-none outline-none
-                ${isActive ? "bg-primary/10 text-primary border-b-[3px] border-b-primary shadow-sm" : "text-muted-foreground border-b-[3px] border-b-transparent hover:bg-white/5"}
+                px-5 py-2.5 text-xs font-medium whitespace-nowrap transition-all
+                border-r border-border/30 select-none outline-none
+                ${isActive
+                  ? "bg-background text-primary border-b-2 border-b-primary"
+                  : "text-muted-foreground border-b-2 border-b-transparent hover:text-foreground hover:bg-background/50"}
                 ${!hasContent ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}
               `}
             >
-              {expectedTab} {isLoading && !hasContent && EXPECTED_TABS.indexOf(expectedTab) === computedTabs.length ? "..." : ""}
+              {expectedTab}
             </button>
           );
         })}
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 p-6 analysis-content text-sm text-[#FF9900] leading-relaxed overflow-y-auto">
+      <div className="flex-1 p-6 analysis-content text-sm text-foreground/90 leading-relaxed overflow-y-auto">
         {renderElements(currentTabContent)}
         {isLoading && displayTab === computedTabs[computedTabs.length - 1] && <span className="terminal-cursor text-primary ml-1" />}
       </div>
@@ -279,40 +275,39 @@ function parseSections(content: string): Record<string, React.ReactNode[]> {
 
     if (line.startsWith("### ")) {
       currentElements.push(
-        <h3 key={i} className="text-base font-bold mb-3 mt-6 text-primary uppercase tracking-wide border-b border-primary/20 pb-1">
+        <h3 key={i} className="text-sm font-semibold mb-2 mt-6 text-primary border-b border-primary/15 pb-1.5 tracking-wide">
           {line.slice(4)}
         </h3>
       );
     } else if (line.match(/^---+$/)) {
-      currentElements.push(<hr key={i} className="my-5 border-border/50" />);
+      currentElements.push(<hr key={i} className="my-4 border-border/40" />);
     } else if (line.match(/^[-*] /)) {
       currentElements.push(
-        <li key={i} className="ml-2 mb-2 list-none flex items-start">
-          <span className="text-primary mr-3 mt-0.5 select-none">■</span>
-          <span className="flex-1">{renderInline(line.slice(2))}</span>
+        <li key={i} className="ml-1 mb-2 list-none flex items-start">
+          <span className="text-primary/60 mr-2.5 mt-1 text-xs select-none">●</span>
+          <span className="flex-1 text-foreground/85">{renderInline(line.slice(2))}</span>
         </li>
       );
     } else if (line.match(/^\d+\. /)) {
       const match = line.match(/^(\d+)\. (.*)$/);
       if (match) {
         currentElements.push(
-          <li key={i} className="ml-6 mb-2 list-decimal text-primary marker:text-primary marker:font-bold">
-            <span className="text-[#FF9900]">{renderInline(match[2])}</span>
+          <li key={i} className="ml-5 mb-2 list-decimal text-muted-foreground marker:text-primary marker:font-semibold">
+            <span className="text-foreground/85">{renderInline(match[2])}</span>
           </li>
         );
       }
     } else if (line.startsWith("> ")) {
       currentElements.push(
-        <blockquote key={i} className="border-l-4 border-primary/50 pl-4 py-1 my-4 text-[#FF9900]/80 italic bg-primary/5">
+        <blockquote key={i} className="border-l-3 border-primary/40 pl-4 py-1 my-3 text-muted-foreground italic bg-primary/5 rounded-r">
           {line.slice(2)}
         </blockquote>
       );
     } else if (line.trim() === "") {
-      currentElements.push(<div key={i} className="h-3" />);
+      currentElements.push(<div key={i} className="h-2" />);
     } else {
-      // Normal paragraph
       currentElements.push(
-        <p key={i} className="mb-3">
+        <p key={i} className="mb-2.5 text-foreground/85 leading-relaxed">
           {renderInline(line)}
         </p>
       );
@@ -356,16 +351,15 @@ function renderTable(tableLines: string[], baseKey: number) {
 
   const dataRows = tableLines.slice(startDataIndex).filter((l) => !isSeparator(l));
 
-  // A very Bloomberg-ish grid table
   return (
-    <div key={`table-${baseKey}`} className="my-6 overflow-x-auto border-y border-border/40 bg-black/50 custom-scrollbar pb-2">
+    <div key={`table-${baseKey}`} className="my-5 overflow-x-auto rounded-lg border border-border/40 bg-secondary/10 pb-1">
       <table className="w-full text-xs font-mono min-w-max">
         <thead>
-          <tr className="border-b-2 border-border/60">
+          <tr className="border-b border-border/40 bg-secondary/20">
             {headerCells.map((cell, j) => (
               <th
                 key={j}
-                className="px-4 py-3 text-left font-bold text-primary uppercase tracking-wider"
+                className="px-4 py-2.5 text-left font-semibold text-muted-foreground tracking-wide text-[11px] uppercase"
               >
                 {cell}
               </th>
@@ -376,18 +370,20 @@ function renderTable(tableLines: string[], baseKey: number) {
           {dataRows.map((row, ri) => {
             const cells = parseRow(row);
             return (
-              <tr key={ri} className="hover:bg-primary/10 transition-colors group">
+              <tr key={ri} className="hover:bg-primary/5 transition-colors">
                 {headerCells.map((_, j) => {
                   const content = cells[j] ?? "N/D";
-                  const isNumberOrNA = /^[-$]?\d|N\/D|%/.test(content);
-                  const isNegative = content.startsWith("-");
-                  let colorClass = "text-foreground";
+                  const isND = content === "N/D";
+                  const isNumeric = /^[-+$]?\d/.test(content) || content.includes("%") || content.includes("x");
+                  const isNegative = /^-/.test(content) && content !== "N/D";
+                  let colorClass = j === 0 ? "text-foreground font-medium" : "text-foreground/80";
 
-                  if (isNumberOrNA) colorClass = "text-[#FF9900]";
-                  if (isNegative) colorClass = "text-destructive";
+                  if (isNumeric && !isNegative) colorClass = "text-primary font-mono";
+                  if (isNegative) colorClass = "text-destructive font-mono";
+                  if (isND) colorClass = "text-muted-foreground/50";
 
                   return (
-                    <td key={j} className={`px-4 py-2.5 whitespace-nowrap ${colorClass}`}>
+                    <td key={j} className={`px-4 py-2 whitespace-nowrap ${colorClass}`}>
                       {renderInline(content)}
                     </td>
                   );
@@ -407,7 +403,7 @@ function renderInline(text: string): React.ReactNode {
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return (
-        <strong key={i} className="text-primary font-bold">
+        <strong key={i} className="text-foreground font-semibold">
           {part.slice(2, -2)}
         </strong>
       );
@@ -417,7 +413,7 @@ function renderInline(text: string): React.ReactNode {
     return codeParts.map((cp, j) => {
       if (cp.startsWith("`") && cp.endsWith("`")) {
         return (
-          <code key={`${i}-${j}`} className="bg-primary/20 text-primary px-1.5 py-0.5 rounded-[2px] text-xs font-mono font-bold">
+          <code key={`${i}-${j}`} className="bg-primary/15 text-primary px-1.5 py-0.5 rounded text-xs font-mono">
             {cp.slice(1, -1)}
           </code>
         );

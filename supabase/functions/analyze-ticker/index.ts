@@ -87,6 +87,61 @@ async function fetchPeerData(peers: string[], key: string) {
   return results;
 }
 
+// ── Quarterly financials ──────────────────────────────────────────────
+
+function fmt(val: number | null | undefined, unit: "M" | "B" | "pct" | "x" | "raw" = "M"): string {
+  if (val == null || isNaN(val)) return "N/D";
+  if (unit === "pct") return `${val >= 0 ? "+" : ""}${val.toFixed(1)}%`;
+  if (unit === "B") return `$${(val / 1_000_000_000).toFixed(2)}B`;
+  if (unit === "M") return `$${(val / 1_000_000).toFixed(0)}M`;
+  if (unit === "x") return `${val.toFixed(2)}x`;
+  return val.toFixed(2);
+}
+
+async function fetchQuarterlyFinancials(ticker: string, key: string) {
+  const t = encodeURIComponent(ticker);
+  const [icRaw, cfRaw] = await Promise.all([
+    finnhubGet(`/stock/financials?symbol=${t}&statement=ic&freq=quarterly`, key),
+    finnhubGet(`/stock/financials?symbol=${t}&statement=cf&freq=quarterly`, key),
+  ]);
+
+  // Finnhub may nest data differently depending on version
+  const icList: any[] = icRaw?.data?.financials ?? icRaw?.financials ?? [];
+  const cfList: any[] = cfRaw?.data?.financials ?? cfRaw?.financials ?? [];
+
+  if (!icList.length) return [];
+
+  // Build a map period → CF data for quick lookup
+  const cfByPeriod = new Map<string, any>(cfList.map((q: any) => [q.period, q]));
+
+  return icList.slice(0, 6).map((q: any) => {
+    const cf = cfByPeriod.get(q.period) ?? {};
+    const rev = q.revenue ?? null;
+    const revGrowth = q.revenueGrowth ?? null; // decimal e.g. 0.056
+    const grossProfit = q.grossProfit ?? null;
+    const ebit = q.ebit ?? q.operatingIncome ?? null;
+    const ebitda = q.ebitda ?? null;
+    const netIncome = q.netIncome ?? null;
+    const eps = q.eps ?? null;
+    const opCF = cf.operatingCashFlow ?? null;
+    const fcf = cf.freeCashFlow ?? null;
+
+    return {
+      period: q.period ?? "",
+      revenue: fmt(rev, "B"),
+      revenueGrowth: revGrowth != null ? `${revGrowth >= 0 ? "+" : ""}${(revGrowth * 100).toFixed(1)}%` : "N/D",
+      grossMargin: rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+      ebitda: fmt(ebitda, "B"),
+      ebit: fmt(ebit, "B"),
+      netIncome: fmt(netIncome, "B"),
+      netMargin: rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+      eps: eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
+      operatingCF: fmt(opCF, "B"),
+      freeCashFlow: fmt(fcf, "B"),
+    };
+  });
+}
+
 // ── Tavily helpers ────────────────────────────────────────────────────
 
 async function fetchTavilySearch(
@@ -130,6 +185,7 @@ async function fetchTavilySearch(
 function buildDataContext(
   data: any,
   peerData: any[],
+  quarterlyHistory: any[],
   geo: any,
   sectorNews: any,
   tickerNews: any,
@@ -138,6 +194,7 @@ function buildDataContext(
   competitiveSearch: any,
   institutionalSearch: any,
   missingDataSearch: any,
+  risksCatalystsSearch: any,
 ): string {
   if (!data || (!data.quote && !data.profile)) {
     return "[Nota: datos en tiempo real no disponibles para este ticker]";
@@ -153,15 +210,40 @@ function buildDataContext(
     ? (r.strongBuy ?? 0) + (r.buy ?? 0) + (r.hold ?? 0) + (r.sell ?? 0) + (r.strongSell ?? 0)
     : 0;
 
-  // Calculate EV/EBITDA
-  const currentEv = m?.currentEv;
-  const ebitdPerShare = m?.ebitdPerShareTTM;
-  const sharesOut = p?.shareOutstanding;
+  // Calculate EV/EBITDA — try multiple Finnhub field combinations
+  const currentEv = m?.currentEv ?? m?.enterpriseValue ?? null;
+  const ebitdPerShare = m?.ebitdPerShareTTM ?? m?.ebitdaPerShareTTM ?? null;
+  const sharesOut = p?.shareOutstanding ?? null;
   let evEbitda: string | number = "N/D";
   if (currentEv && ebitdPerShare && sharesOut && ebitdPerShare > 0) {
     const ebitda = ebitdPerShare * sharesOut;
     if (ebitda > 0) evEbitda = (currentEv / ebitda).toFixed(1);
   }
+  // Fallback: direct EV/EBITDA field
+  if (evEbitda === "N/D" && m?.evToEbitda != null) evEbitda = Number(m.evToEbitda).toFixed(1);
+
+  // FCF/Share — try all known Finnhub field names
+  const fcfPerShare =
+    m?.fcfPerShareTTM ??
+    m?.freeCashFlowPerShareTTM ??
+    m?.cashFlowPerShareTTM ??
+    null;
+  // Derive FCF/Share from quarterly data if still missing
+  let fcfPerShareStr = fcfPerShare != null ? String(Number(fcfPerShare).toFixed(2)) : "N/D";
+  if (fcfPerShareStr === "N/D" && quarterlyHistory.length > 0) {
+    const latestQ = quarterlyHistory[0];
+    if (latestQ.freeCashFlow !== "N/D") {
+      fcfPerShareStr = `~${latestQ.freeCashFlow} (trimestral, ver historial)`;
+    }
+  }
+
+  // Debt/Equity — try all variants
+  const debtEquity =
+    m?.totalDebtToEquityAnnual ??
+    m?.totalDebtToEquityQuarterly ??
+    m?.longTermDebtToEquityAnnual ??
+    m?.longTermDebtToEquityQuarterly ??
+    null;
 
   const lines = [
     "=== DATOS EN TIEMPO REAL (FINNHUB) ===",
@@ -182,11 +264,11 @@ function buildDataContext(
     `Market Cap: $${p?.marketCapitalization ? Number(p.marketCapitalization).toFixed(0) + "M" : "N/D"}`,
     `Shares Outstanding: ${p?.shareOutstanding ? Number(p.shareOutstanding).toFixed(2) + "M" : "N/D"}`,
     `P/E (TTM): ${m?.peBasicExclExtraTTM ?? m?.peTTM ?? "N/D"}`,
-    `P/E NTM (Forward): ${m?.peNTM ?? "N/D"}`,
+    `P/E NTM (Forward): ${m?.peNTM ?? m?.forwardPE ?? "N/D"}`,
     `P/B: ${m?.pbAnnual ?? m?.pbQuarterly ?? "N/D"}`,
-    `P/S (TTM): ${m?.psTTM ?? "N/D"}`,
+    `P/S (TTM): ${m?.psTTM ?? m?.priceToSalesTTM ?? "N/D"}`,
     `EV/EBITDA: ${evEbitda}`,
-    `Deuda/Equity: ${m?.totalDebtToEquityAnnual ?? m?.totalDebtToEquityQuarterly ?? "N/D"}`,
+    `Deuda/Equity: ${debtEquity != null ? Number(debtEquity).toFixed(2) : "N/D"}`,
     `ROE (TTM): ${m?.roeTTM ?? "N/D"}%`,
     `ROA (TTM): ${m?.roaTTM ?? "N/D"}%`,
     `ROI (TTM): ${m?.roiTTM ?? "N/D"}%`,
@@ -194,12 +276,12 @@ function buildDataContext(
     `EPS Growth YoY: ${m?.epsGrowthTTMYoy ?? "N/D"}%`,
     `EPS (TTM): ${m?.epsTTM ?? "N/D"}`,
     `Dividend Yield: ${m?.dividendYieldIndicatedAnnual ?? "N/D"}%`,
-    `Current Ratio: ${m?.currentRatioAnnual ?? "N/D"}`,
-    `Quick Ratio: ${m?.quickRatioAnnual ?? "N/D"}`,
+    `Current Ratio: ${m?.currentRatioAnnual ?? m?.currentRatioQuarterly ?? "N/D"}`,
+    `Quick Ratio: ${m?.quickRatioAnnual ?? m?.quickRatioQuarterly ?? "N/D"}`,
     `Gross Margin (TTM): ${m?.grossMarginTTM ?? "N/D"}%`,
     `Operating Margin (TTM): ${m?.operatingMarginTTM ?? "N/D"}%`,
     `Net Margin (TTM): ${m?.netProfitMarginTTM ?? "N/D"}%`,
-    `Free Cash Flow/Share (TTM): ${m?.fcfPerShareTTM ?? "N/D"}`,
+    `Free Cash Flow/Share (TTM): ${fcfPerShareStr}`,
     `Beta: ${m?.beta ?? "N/D"}`,
     `52W High: $${m?.["52WeekHigh"] ?? "N/D"} | 52W Low: $${m?.["52WeekLow"] ?? "N/D"}`,
     `52W Price Return: ${m?.["52WeekPriceReturnDaily"] ?? "N/D"}%`,
@@ -308,12 +390,33 @@ function buildDataContext(
     }
   }
 
+  // Risks & catalysts news
+  if (risksCatalystsSearch?.results?.length > 0) {
+    lines.push("", "--- RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES ---");
+    if (risksCatalystsSearch.answer) lines.push(risksCatalystsSearch.answer);
+    for (const result of risksCatalystsSearch.results) {
+      lines.push(`- [${result.published_date ?? ""}] ${result.title}`);
+      if (result.content) lines.push(`  ${result.content}`);
+    }
+  }
+
   // Geo/regulatory context
   if (geo?.answer) {
     lines.push("", "--- CONTEXTO GEOPOLÍTICO Y REGULATORIO ---");
     lines.push(geo.answer);
     if (geo.results?.length > 0) {
       for (const s of geo.results) lines.push(`  - ${s.title}: ${s.content?.slice(0, 250) ?? ""}`);
+    }
+  }
+
+  // Quarterly financial history
+  if (quarterlyHistory.length > 0) {
+    lines.push("", "--- HISTORIAL FINANCIERO TRIMESTRAL (FINNHUB, ÚLTIMOS 6 TRIMESTRES) ---");
+    lines.push("Periodo | Revenue | Var.%YoY | Margen Bruto | EBITDA | EBIT | Bfº Neto | Margen Neto | EPS | FCF | Op.CF");
+    for (const q of quarterlyHistory) {
+      lines.push(
+        `${q.period} | ${q.revenue} | ${q.revenueGrowth} | ${q.grossMargin} | ${q.ebitda} | ${q.ebit} | ${q.netIncome} | ${q.netMargin} | ${q.eps} | ${q.freeCashFlow} | ${q.operatingCF}`
+      );
     }
   }
 
@@ -325,13 +428,9 @@ function buildDataContext(
 
 function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
-  return `Eres un analista financiero institucional senior que genera informes Bloomberg Terminal completos y exhaustivos. Fecha actual: ${today}.
+  return `Eres un analista financiero institucional senior especializado en renta variable. Fecha actual: ${today}.
 
-════════════════════════════════════════════════════════════
-REGLA ABSOLUTA: DEBES generar LAS 6 SECCIONES SIGUIENTES SIN EXCEPCIÓN.
-Cada sección empieza EXACTAMENTE con "## " (doble almohadilla + espacio).
-NUNCA omitas una sección. NUNCA fusiones secciones. NUNCA resumas en exceso.
-════════════════════════════════════════════════════════════
+REGLA ABSOLUTA: genera LAS 6 SECCIONES exactas, cada una comenzando con "## " (doble almohadilla + espacio). No omitas ninguna, no las fusiones.
 
 ## Resumen Ejecutivo
 ## Finanzas
@@ -340,20 +439,19 @@ NUNCA omitas una sección. NUNCA fusiones secciones. NUNCA resumas en exceso.
 ## Noticias
 ## Institucional
 
-════════════════════════════════════════════════════════════
-CONTENIDO OBLIGATORIO DE CADA SECCIÓN (mínimo indicado):
-════════════════════════════════════════════════════════════
+══════════════════════════════════════════════
+CONTENIDO OBLIGATORIO POR SECCIÓN:
+══════════════════════════════════════════════
 
 ## Resumen Ejecutivo
-OBLIGATORIO incluir todo lo siguiente:
-- Párrafo 1 (5-7 líneas): Situación actual de la empresa — precio exacto, capitalización, rendimiento YTD vs sector, tendencia reciente.
-- Párrafo 2 (4-5 líneas): Posicionamiento competitivo — cuota de mercado, ventajas diferenciales, amenazas principales.
-- Párrafo 3 (4-5 líneas): Catalizadores y riesgos macro — aranceles, tasas de interés, geopolítica, regulación específica.
-- ### Perfil de la Empresa: sector, país, exchange, fecha IPO, descripción del negocio en 3-4 líneas.
-- ### Consenso de Analistas: número total de analistas, distribución Buy/Hold/Sell, precio objetivo consenso si disponible.
+- Párrafo 1 (5-7 líneas): situación actual — precio exacto, capitalización, rendimiento reciente vs sector.
+- Párrafo 2 (4-5 líneas): posicionamiento competitivo y ventajas diferenciales.
+- Párrafo 3 (4-5 líneas): catalizadores y riesgos macro más relevantes (aranceles, tipos, geopolítica).
+- ### Perfil de la Empresa: sector, país, exchange, fecha IPO, descripción del negocio (3-4 líneas).
+- ### Consenso de Analistas: total analistas, distribución Buy/Hold/Sell, precio objetivo si disponible.
 
 ## Finanzas
-OBLIGATORIO: Tabla Markdown con DOS columnas (Métrica | Valor) incluyendo TODAS estas filas en orden:
+PARTE 1 — Tabla de métricas actuales con DOS columnas (Métrica | Valor). Incluye TODAS estas filas:
 | Métrica | Valor |
 |---|---|
 | Precio Actual | |
@@ -378,47 +476,54 @@ OBLIGATORIO: Tabla Markdown con DOS columnas (Métrica | Valor) incluyendo TODAS
 | 52W Return | |
 | Volumen Promedio 10D | |
 
-Después de la tabla: párrafo de 4-5 líneas analizando los fundamentales más relevantes.
-Si algún dato es N/D en Finnhub, búscalo en "DATOS ADICIONALES PARA COMPLEMENTAR N/D". NUNCA inventes cifras.
+Si un dato aparece como N/D en Finnhub, búscalo en "DATOS ADICIONALES PARA COMPLEMENTAR N/D" o en "RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES". NUNCA inventes cifras.
+
+PARTE 2 — ### Evolución Trimestral
+Usa los datos de "HISTORIAL FINANCIERO TRIMESTRAL". Genera una tabla Markdown con estas columnas exactas:
+| Trimestre | Ingresos | Var.% YoY | M. Bruto | EBITDA | Bfº Neto | M. Neto | EPS | Free Cash Flow |
+Si algún valor es N/D, escríbelo tal cual. Ordena de más reciente a más antiguo.
+Después de la tabla: párrafo de 3-4 líneas analizando la TENDENCIA (aceleración, desaceleración, mejora/deterioro de márgenes, evolución del FCF).
+
+PARTE 3 — Párrafo de 4-5 líneas sobre los fundamentales actuales más relevantes.
 
 ## Valoración
-OBLIGATORIO incluir todo lo siguiente:
-- ### Análisis de Múltiplos: tabla comparando P/E, P/B, EV/EBITDA, P/S de la empresa vs promedio del sector. Párrafo de 4-5 líneas interpretando si está cara, barata o en línea con el sector.
-- ### Análisis del Sector: 5-6 líneas sobre el estado actual del sector, tendencias estructurales, ciclo económico, impacto de tasas/macro, perspectivas a 12 meses.
-- ### Factores de Riesgo: lista de 6-8 viñetas con riesgos específicos y cuantificados cuando sea posible.
-- ### Catalizadores Positivos: lista de 4-5 viñetas con catalizadores concretos a corto y medio plazo.
+- ### Análisis de Múltiplos: tabla P/E / P/B / EV/EBITDA / P/S de la empresa vs media sectorial. Párrafo de 4-5 líneas: ¿cara, barata o en línea?
+- ### Análisis del Sector: 5-6 líneas sobre estado del sector, tendencias estructurales, macro, perspectivas a 12 meses.
+- ### Factores de Riesgo (8-10 viñetas):
+  * Cada riesgo debe ser ESPECÍFICO y CUANTIFICADO cuando sea posible.
+  * Usa los datos de "RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES" y "CONTEXTO GEOPOLÍTICO" para citar noticias concretas.
+  * Formato: "**Tipo de riesgo:** descripción detallada con cifras o eventos concretos. Fuente: [nombre del medio si disponible]."
+  * Cubre: riesgo regulatorio, competitivo, macro (tipos, aranceles, divisa), operativo, de concentración de ingresos, geopolítico.
+- ### Catalizadores Positivos (6-8 viñetas):
+  * Divide en: **Corto plazo (0-3 meses)**, **Medio plazo (3-12 meses)**, **Largo plazo (+12 meses)**.
+  * Usa noticias recientes para fundamentar cada catalizador.
+  * Formato: "**[Plazo] — Catalizador:** descripción concreta con fechas o cifras estimadas si disponibles."
 
 ## Competidores
-OBLIGATORIO incluir todo lo siguiente:
-- ### Tabla Comparativa: tabla Markdown con columnas: Empresa | Ticker | Precio | Market Cap | P/E TTM | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta
-  Incluye la empresa analizada en la PRIMERA fila (marcada con asterisco *) y todos los competidores identificados.
-  Usa los datos de "DATOS FINANCIEROS DE COMPETIDORES". Si hay N/D, intenta completar con datos de búsqueda web.
-- ### Análisis Competitivo: 5-6 líneas describiendo la posición relativa de la empresa vs competidores — quién lidera en márgenes, crecimiento, valoración y retorno.
-- ### Cuota de Mercado y Posicionamiento: 3-4 líneas sobre participación de mercado y diferenciación competitiva.
+- ### Tabla Comparativa: columnas Empresa | Ticker | Precio | Market Cap | P/E TTM | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta. Empresa analizada en primera fila marcada con *.
+- ### Análisis Competitivo: 5-6 líneas sobre posición relativa en márgenes, crecimiento y valoración.
+- ### Cuota de Mercado y Posicionamiento: 3-4 líneas sobre participación de mercado y diferenciación.
 
 ## Noticias
-OBLIGATORIO incluir todo lo siguiente:
-- ### Noticias Corporativas Recientes: 5-7 noticias del ticker. Formato EXACTO por noticia:
-  "- **TITULAR EN MAYÚSCULAS:** Explicación del impacto o contexto en 2-3 líneas."
-  NO uses URLs. NO uses fechas. Solo hechos e impacto.
-- ### Noticias del Sector: 3-4 noticias del sector que afectan a la empresa. Mismo formato.
-- ### Contexto Macro Relevante: 3-4 líneas sobre el entorno macroeconómico y geopolítico que afecta directamente a esta empresa.
+- ### Noticias Corporativas Recientes: 5-7 noticias del ticker. Formato por noticia:
+  "- **Titular descriptivo:** impacto o contexto en 2-3 líneas. (Fuente: nombre del medio)"
+- ### Noticias del Sector: 3-4 noticias relevantes del sector. Mismo formato.
+- ### Contexto Macro Relevante: 3-4 líneas sobre entorno macro/geopolítico con impacto directo en esta empresa.
 
 ## Institucional
-OBLIGATORIO incluir todo lo siguiente:
-- ### Tenencias Institucionales: lista de los principales inversores institucionales con % de propiedad si disponible (Vanguard, BlackRock, Fidelity, State Street, etc.).
-- ### Consenso de Analistas — Detalle: tabla con distribución Strong Buy / Buy / Hold / Sell / Strong Sell y totales. Párrafo de 3-4 líneas interpretando el consenso.
-- ### Cambios Recientes en Posiciones: upgrades/downgrades recientes de bancos de inversión, cambios en precio objetivo.
-- ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales recientes y sentimiento general del mercado hacia el valor.
+- ### Tenencias Institucionales: principales inversores con % si disponible (Vanguard, BlackRock, Fidelity, etc.).
+- ### Consenso de Analistas — Detalle: tabla Strong Buy / Buy / Hold / Sell / Strong Sell con totales. Párrafo de 3-4 líneas interpretando el consenso.
+- ### Cambios Recientes en Posiciones: upgrades/downgrades de bancos de inversión, cambios en precio objetivo.
+- ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales y sentimiento general.
 
-════════════════════════════════════════════════════════════
+══════════════════════════════════════════════
 REGLAS DE FORMATO:
-- Markdown estricto. Sin emojis en ningún encabezado.
-- Todos los números con unidades claras ($, %, x, B, M).
-- Nunca cortes una oración a medias.
-- Estilo directo, numérico, profesional — como un analista de Goldman Sachs o Morgan Stanley.
-- Si un dato no existe en ninguna fuente, escribe "N/D" — NUNCA inventes cifras.
-════════════════════════════════════════════════════════════`;
+- Markdown estricto. Sin emojis en encabezados.
+- Números con unidades claras ($, %, x, B, M).
+- Nunca cortes una frase a medias.
+- Tono profesional y directo, propio de un informe de research institucional.
+- Si un dato no existe en ninguna fuente: escribe "N/D". NUNCA inventes cifras.
+══════════════════════════════════════════════`;
 }
 
 // ── Main handler ───────────────────────────────────────────────────────
@@ -454,8 +559,9 @@ Deno.serve(async (req) => {
     const sector = finnhubData?.profile?.finnhubIndustry ?? "";
     const peers = finnhubData?.peers ?? [];
 
-    // Step 2: Fetch peer financial data + 8 Tavily searches in parallel
+    // Step 2: Fetch quarterly history + peer data + 10 Tavily searches in parallel
     const [
+      quarterlyHistory,
       peerData,
       geoContext,
       tickerNews,
@@ -465,7 +571,9 @@ Deno.serve(async (req) => {
       competitiveSearch,
       institutionalSearch,
       missingDataSearch,
+      risksCatalystsSearch,
     ] = await Promise.all([
+      FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, FINNHUB_KEY) : Promise.resolve([]),
       FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
       TAVILY_KEY
         ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitico regulatorio riesgo aranceles 2025 2026`, TAVILY_KEY, 3)
@@ -480,7 +588,7 @@ Deno.serve(async (req) => {
         ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating 2025`, TAVILY_KEY, 3)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} earnings results revenue 2025`, TAVILY_KEY, 3)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} earnings results revenue quarterly 2024 2025`, TAVILY_KEY, 4)
         : Promise.resolve(null),
       TAVILY_KEY && peers.length > 0
         ? fetchTavilySearch(
@@ -493,13 +601,20 @@ Deno.serve(async (req) => {
         ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership vanguard blackrock 2025`, TAVILY_KEY, 3)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} P/E ratio market cap EBITDA 2025`, TAVILY_KEY, 3)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} free cash flow debt equity EV EBITDA 2024 2025`, TAVILY_KEY, 3)
+        : Promise.resolve(null),
+      TAVILY_KEY
+        ? fetchTavilySearch(
+            `${companyName} ${cleanTicker} risks threats catalysts growth opportunities 2025 2026 site:reuters.com OR site:ft.com OR site:wsj.com OR site:bloomberg.com OR site:cnbc.com`,
+            TAVILY_KEY, 5, 30, "news",
+          )
         : Promise.resolve(null),
     ]);
 
     const dataContext = buildDataContext(
       finnhubData,
       peerData,
+      quarterlyHistory,
       geoContext,
       sectorNews,
       tickerNews,
@@ -508,6 +623,7 @@ Deno.serve(async (req) => {
       competitiveSearch,
       institutionalSearch,
       missingDataSearch,
+      risksCatalystsSearch,
     );
 
     console.log("Data sources loaded:", {
@@ -515,7 +631,8 @@ Deno.serve(async (req) => {
       finnhub_profile: !!finnhubData?.profile?.name,
       finnhub_metrics: !!finnhubData?.metrics,
       finnhub_news: finnhubData?.news?.length ?? 0,
-      peer_data: peerData.length,
+      quarterly_history: (quarterlyHistory as any[]).length,
+      peer_data: (peerData as any[]).length,
       tavily_geo: !!(geoContext?.answer),
       tavily_ticker_news: tickerNews?.results?.length ?? 0,
       tavily_sector_news: sectorNews?.results?.length ?? 0,
@@ -524,6 +641,7 @@ Deno.serve(async (req) => {
       tavily_competitive: competitiveSearch?.results?.length ?? 0,
       tavily_institutional: institutionalSearch?.results?.length ?? 0,
       tavily_missing_data: missingDataSearch?.results?.length ?? 0,
+      tavily_risks_catalysts: risksCatalystsSearch?.results?.length ?? 0,
     });
 
     console.log("Calling Groq API...");
@@ -535,20 +653,19 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        max_tokens: 5000,
+        max_tokens: 6000,
         messages: [
           { role: "system", content: buildSystemPrompt() },
           {
             role: "user",
             content: `${dataContext}
 
-INSTRUCCIÓN FINAL — MUY IMPORTANTE:
-Genera el informe financiero institucional COMPLETO sobre ${cleanTicker} (${companyName}).
-DEBES generar las 6 secciones completas: ## Resumen Ejecutivo, ## Finanzas, ## Valoración, ## Competidores, ## Noticias, ## Institucional.
-NO omitas ninguna sección. NO resumas. Cada sección debe tener el contenido mínimo especificado en el system prompt.
-Usa EXCLUSIVAMENTE los datos numéricos de las fuentes proporcionadas (Finnhub + Tavily). Si un dato es N/D en Finnhub, búscalo en "DATOS ADICIONALES PARA COMPLEMENTAR N/D". Si no existe en ninguna fuente, escribe N/D — NUNCA inventes cifras.
-Para la tabla de competidores: usa "DATOS FINANCIEROS DE COMPETIDORES" e incluye el P/E de cada uno. Completa N/D con datos de búsqueda web si los hay.
-Si el ticker no corresponde a una empresa real conocida, indícalo en el ## Resumen Ejecutivo.`,
+INSTRUCCIÓN FINAL:
+Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 6 secciones obligatorias.
+- En ## Finanzas: incluye la tabla de métricas actuales Y la tabla de Evolución Trimestral con los datos de "HISTORIAL FINANCIERO TRIMESTRAL".
+- En ## Valoración: desarrolla los Factores de Riesgo y Catalizadores con noticias concretas de "RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES". Cita la fuente (Reuters, FT, WSJ, CNBC, etc.) cuando esté disponible.
+- Usa los datos numéricos de Finnhub. Si un dato es N/D, búscalo en "DATOS ADICIONALES PARA COMPLEMENTAR N/D". Si no existe en ninguna fuente: escribe N/D.
+- Si el ticker no corresponde a una empresa real, indícalo en el Resumen Ejecutivo.`,
           },
         ],
         stream: true,
