@@ -35,7 +35,7 @@ async function fetchFinnhubData(ticker: string, key: string) {
     recommendations: Array.isArray(recs) && recs.length > 0 ? recs[0] : null,
     allRecommendations: Array.isArray(recs) ? recs.slice(0, 6) : [],
     news: Array.isArray(news)
-      ? news.slice(0, 5).map((n: any) => ({
+      ? news.slice(0, 3).map((n: any) => ({
           headline: n.headline,
           source: n.source,
         }))
@@ -114,7 +114,7 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
   // Build a map period → CF data for quick lookup
   const cfByPeriod = new Map<string, any>(cfList.map((q: any) => [q.period, q]));
 
-  return icList.slice(0, 6).map((q: any) => {
+  return icList.slice(0, 4).map((q: any) => {
     const cf = cfByPeriod.get(q.period) ?? {};
     const rev = q.revenue ?? null;
     const revGrowth = q.revenueGrowth ?? null; // decimal e.g. 0.056
@@ -170,10 +170,10 @@ async function fetchTavilySearch(
     if (!res.ok) return { answer: "", results: [] };
     const data = await res.json();
     return {
-      answer: data.answer ?? "",
+      answer: (data.answer ?? "").slice(0, 180),
       results: (data.results ?? []).map((r: any) => ({
         title: r.title,
-        content: (r.content ?? "").slice(0, 250),
+        content: (r.content ?? "").slice(0, 120),
         published_date: r.published_date ?? "",
       })),
     };
@@ -576,37 +576,37 @@ Deno.serve(async (req) => {
       FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, FINNHUB_KEY) : Promise.resolve([]),
       FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitico regulatorio riesgo aranceles 2025 2026`, TAVILY_KEY, 3)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitico regulatorio riesgo aranceles 2025`, TAVILY_KEY, 2)
         : Promise.resolve(null),
       TAVILY_KEY
         ? fetchTavilySearch(`${companyName} ${cleanTicker} noticias ultimos dias`, TAVILY_KEY, 3, 7, "news")
         : Promise.resolve(null),
       TAVILY_KEY && sector
-        ? fetchTavilySearch(`${sector} sector noticias tendencias`, TAVILY_KEY, 3, 7, "news")
+        ? fetchTavilySearch(`${sector} sector noticias tendencias`, TAVILY_KEY, 2, 7, "news")
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating 2025`, TAVILY_KEY, 3)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating 2025`, TAVILY_KEY, 2)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} earnings results revenue quarterly 2024 2025`, TAVILY_KEY, 4)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} earnings results revenue 2024 2025`, TAVILY_KEY, 3)
         : Promise.resolve(null),
       TAVILY_KEY && peers.length > 0
         ? fetchTavilySearch(
             `${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive position`,
             TAVILY_KEY,
-            3,
+            2,
           )
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership vanguard blackrock 2025`, TAVILY_KEY, 3)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership vanguard blackrock 2025`, TAVILY_KEY, 2)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} free cash flow debt equity EV EBITDA 2024 2025`, TAVILY_KEY, 3)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} free cash flow debt equity EBITDA 2024 2025`, TAVILY_KEY, 2)
         : Promise.resolve(null),
       TAVILY_KEY
         ? fetchTavilySearch(
-            `${companyName} ${cleanTicker} risks threats catalysts growth opportunities 2025 2026 site:reuters.com OR site:ft.com OR site:wsj.com OR site:bloomberg.com OR site:cnbc.com`,
-            TAVILY_KEY, 5, 30, "news",
+            `${companyName} ${cleanTicker} risks catalysts opportunities 2025 2026`,
+            TAVILY_KEY, 4, 30, "news",
           )
         : Promise.resolve(null),
     ]);
