@@ -35,7 +35,7 @@ async function fetchFinnhubData(ticker: string, key: string) {
     recommendations: Array.isArray(recs) && recs.length > 0 ? recs[0] : null,
     allRecommendations: Array.isArray(recs) ? recs.slice(0, 6) : [],
     news: Array.isArray(news)
-      ? news.slice(0, 3).map((n: any) => ({
+      ? news.slice(0, 6).map((n: any) => ({
           headline: n.headline,
           source: n.source,
         }))
@@ -114,7 +114,7 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
   // Build a map period → CF data for quick lookup
   const cfByPeriod = new Map<string, any>(cfList.map((q: any) => [q.period, q]));
 
-  return icList.slice(0, 4).map((q: any) => {
+  return icList.slice(0, 6).map((q: any) => {
     const cf = cfByPeriod.get(q.period) ?? {};
     const rev = q.revenue ?? null;
     const revGrowth = q.revenueGrowth ?? null; // decimal e.g. 0.056
@@ -150,6 +150,7 @@ async function fetchTavilySearch(
   maxResults = 5,
   days?: number,
   topic?: string,
+  contentLen = 120,
 ) {
   try {
     const body: Record<string, unknown> = {
@@ -170,10 +171,10 @@ async function fetchTavilySearch(
     if (!res.ok) return { answer: "", results: [] };
     const data = await res.json();
     return {
-      answer: (data.answer ?? "").slice(0, 180),
+      answer: (data.answer ?? "").slice(0, 220),
       results: (data.results ?? []).map((r: any) => ({
         title: r.title,
-        content: (r.content ?? "").slice(0, 120),
+        content: (r.content ?? "").slice(0, contentLen),
         published_date: r.published_date ?? "",
       })),
     };
@@ -428,10 +429,9 @@ function buildDataContext(
 
 function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
-  return `Eres un analista financiero institucional senior especializado en renta variable. Fecha actual: ${today}.
+  return `Eres un analista financiero institucional senior. Fecha: ${today}.
 
-REGLA ABSOLUTA: genera LAS 6 SECCIONES exactas, cada una comenzando con "## " (doble almohadilla + espacio). No omitas ninguna, no las fusiones.
-
+Genera EXACTAMENTE las 6 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
 ## Resumen Ejecutivo
 ## Finanzas
 ## Valoración
@@ -439,19 +439,17 @@ REGLA ABSOLUTA: genera LAS 6 SECCIONES exactas, cada una comenzando con "## " (d
 ## Noticias
 ## Institucional
 
-══════════════════════════════════════════════
-CONTENIDO OBLIGATORIO POR SECCIÓN:
-══════════════════════════════════════════════
+── CONTENIDO POR SECCIÓN ──
 
 ## Resumen Ejecutivo
-- Párrafo 1 (5-7 líneas): situación actual — precio exacto, capitalización, rendimiento reciente vs sector.
+- Párrafo 1 (5-7 líneas): situación actual — precio, capitalización, rendimiento reciente vs sector.
 - Párrafo 2 (4-5 líneas): posicionamiento competitivo y ventajas diferenciales.
-- Párrafo 3 (4-5 líneas): catalizadores y riesgos macro más relevantes (aranceles, tipos, geopolítica).
-- ### Perfil de la Empresa: sector, país, exchange, fecha IPO, descripción del negocio (3-4 líneas).
-- ### Consenso de Analistas: total analistas, distribución Buy/Hold/Sell, precio objetivo si disponible.
+- Párrafo 3 (4-5 líneas): catalizadores y riesgos macro (aranceles, tipos, geopolítica).
+- ### Perfil de la Empresa: sector, país, exchange, IPO, descripción del negocio (3-4 líneas).
+- ### Consenso de Analistas: total analistas, distribución Buy/Hold/Sell, precio objetivo.
 
 ## Finanzas
-PARTE 1 — Tabla de métricas actuales con DOS columnas (Métrica | Valor). Incluye TODAS estas filas:
+PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
 | Métrica | Valor |
 |---|---|
 | Precio Actual | |
@@ -476,54 +474,42 @@ PARTE 1 — Tabla de métricas actuales con DOS columnas (Métrica | Valor). Inc
 | 52W Return | |
 | Volumen Promedio 10D | |
 
-Si un dato aparece como N/D en Finnhub, búscalo en "DATOS ADICIONALES PARA COMPLEMENTAR N/D" o en "RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES". NUNCA inventes cifras.
+Si un dato es N/D en Finnhub, búscalo en DATOS ADICIONALES o HISTORIAL TRIMESTRAL. Nunca inventes.
 
 PARTE 2 — ### Evolución Trimestral
-Usa los datos de "HISTORIAL FINANCIERO TRIMESTRAL". Genera una tabla Markdown con estas columnas exactas:
-| Trimestre | Ingresos | Var.% YoY | M. Bruto | EBITDA | Bfº Neto | M. Neto | EPS | Free Cash Flow |
-Si algún valor es N/D, escríbelo tal cual. Ordena de más reciente a más antiguo.
-Después de la tabla: párrafo de 3-4 líneas analizando la TENDENCIA (aceleración, desaceleración, mejora/deterioro de márgenes, evolución del FCF).
+Tabla con columnas: | Trimestre | Ingresos | Var.% YoY | M. Bruto | EBITDA | Bfº Neto | M. Neto | EPS | Free Cash Flow |
+Usa HISTORIAL FINANCIERO TRIMESTRAL (6 trimestres, más reciente primero). Después: párrafo 3-4 líneas analizando la TENDENCIA (aceleración/desaceleración, márgenes, FCF).
 
-PARTE 3 — Párrafo de 4-5 líneas sobre los fundamentales actuales más relevantes.
+PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 
 ## Valoración
-- ### Análisis de Múltiplos: tabla P/E / P/B / EV/EBITDA / P/S de la empresa vs media sectorial. Párrafo de 4-5 líneas: ¿cara, barata o en línea?
-- ### Análisis del Sector: 5-6 líneas sobre estado del sector, tendencias estructurales, macro, perspectivas a 12 meses.
+- ### Análisis de Múltiplos: tabla P/E, P/B, EV/EBITDA, P/S empresa vs media sectorial. Párrafo 4-5 líneas.
+- ### Análisis del Sector: 5-6 líneas sobre estado, tendencias estructurales, macro, perspectivas 12M.
 - ### Factores de Riesgo (8-10 viñetas):
-  * Cada riesgo debe ser ESPECÍFICO y CUANTIFICADO cuando sea posible.
-  * Usa los datos de "RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES" y "CONTEXTO GEOPOLÍTICO" para citar noticias concretas.
-  * Formato: "**Tipo de riesgo:** descripción detallada con cifras o eventos concretos. Fuente: [nombre del medio si disponible]."
-  * Cubre: riesgo regulatorio, competitivo, macro (tipos, aranceles, divisa), operativo, de concentración de ingresos, geopolítico.
+  Formato: "- **Tipo:** descripción con cifras/eventos. (Fuente: medio)"
+  Usa RIESGOS Y CATALIZADORES NOTICIAS + CONTEXTO GEOPOLÍTICO para citar.
+  Cubre: regulatorio, competitivo, macro (tipos/aranceles/divisa), operativo, concentración, geopolítico.
 - ### Catalizadores Positivos (6-8 viñetas):
-  * Divide en: **Corto plazo (0-3 meses)**, **Medio plazo (3-12 meses)**, **Largo plazo (+12 meses)**.
-  * Usa noticias recientes para fundamentar cada catalizador.
-  * Formato: "**[Plazo] — Catalizador:** descripción concreta con fechas o cifras estimadas si disponibles."
+  Divide en **Corto plazo (0-3m)**, **Medio plazo (3-12m)**, **Largo plazo (+12m)**.
+  Cita noticias concretas de las fuentes proporcionadas.
 
 ## Competidores
-- ### Tabla Comparativa: columnas Empresa | Ticker | Precio | Market Cap | P/E TTM | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta. Empresa analizada en primera fila marcada con *.
-- ### Análisis Competitivo: 5-6 líneas sobre posición relativa en márgenes, crecimiento y valoración.
-- ### Cuota de Mercado y Posicionamiento: 3-4 líneas sobre participación de mercado y diferenciación.
+- ### Tabla Comparativa: Empresa | Ticker | Precio | Market Cap | P/E TTM | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta. Empresa analizada primera fila con *.
+- ### Análisis Competitivo: 5-6 líneas sobre posición relativa.
+- ### Cuota de Mercado y Posicionamiento: 3-4 líneas.
 
 ## Noticias
-- ### Noticias Corporativas Recientes: 5-7 noticias del ticker. Formato por noticia:
-  "- **Titular descriptivo:** impacto o contexto en 2-3 líneas. (Fuente: nombre del medio)"
-- ### Noticias del Sector: 3-4 noticias relevantes del sector. Mismo formato.
-- ### Contexto Macro Relevante: 3-4 líneas sobre entorno macro/geopolítico con impacto directo en esta empresa.
+- ### Noticias Corporativas Recientes: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. (Fuente)"
+- ### Noticias del Sector: 3-4 noticias. Mismo formato.
+- ### Contexto Macro Relevante: 4-5 líneas sobre entorno macro/geopolítico con impacto directo. Usa CONTEXTO GEOPOLÍTICO para detallar aranceles, regulación específica, tensiones geopolíticas.
 
 ## Institucional
-- ### Tenencias Institucionales: principales inversores con % si disponible (Vanguard, BlackRock, Fidelity, etc.).
-- ### Consenso de Analistas — Detalle: tabla Strong Buy / Buy / Hold / Sell / Strong Sell con totales. Párrafo de 3-4 líneas interpretando el consenso.
-- ### Cambios Recientes en Posiciones: upgrades/downgrades de bancos de inversión, cambios en precio objetivo.
-- ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales y sentimiento general.
+- ### Tenencias Institucionales: Vanguard, BlackRock, Fidelity, etc. con % si disponible.
+- ### Consenso de Analistas — Detalle: tabla Strong Buy/Buy/Hold/Sell/Strong Sell + párrafo 3-4 líneas.
+- ### Cambios Recientes en Posiciones: upgrades/downgrades, cambios precio objetivo.
+- ### Flujos y Sentimiento: 3-4 líneas.
 
-══════════════════════════════════════════════
-REGLAS DE FORMATO:
-- Markdown estricto. Sin emojis en encabezados.
-- Números con unidades claras ($, %, x, B, M).
-- Nunca cortes una frase a medias.
-- Tono profesional y directo, propio de un informe de research institucional.
-- Si un dato no existe en ninguna fuente: escribe "N/D". NUNCA inventes cifras.
-══════════════════════════════════════════════`;
+REGLAS: Markdown estricto. Sin emojis. Números con unidades ($, %, x, B, M). No cortes frases. Si un dato no existe: N/D. Nunca inventes.`;
 }
 
 // ── Main handler ───────────────────────────────────────────────────────
@@ -575,38 +561,42 @@ Deno.serve(async (req) => {
     ] = await Promise.all([
       FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, FINNHUB_KEY) : Promise.resolve([]),
       FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
+      // Geopolitical + regulatory — more results, longer content
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitico regulatorio riesgo aranceles 2025`, TAVILY_KEY, 2)
+        ? fetchTavilySearch(
+            `${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions China EU USA 2025 2026`,
+            TAVILY_KEY, 4, 60, undefined, 220,
+          )
         : Promise.resolve(null),
+      // Ticker news
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} noticias ultimos dias`, TAVILY_KEY, 3, 7, "news")
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} noticias ultimos dias`, TAVILY_KEY, 4, 7, "news", 150)
         : Promise.resolve(null),
       TAVILY_KEY && sector
-        ? fetchTavilySearch(`${sector} sector noticias tendencias`, TAVILY_KEY, 2, 7, "news")
+        ? fetchTavilySearch(`${sector} sector tendencias outlook`, TAVILY_KEY, 3, 14, "news", 140)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating 2025`, TAVILY_KEY, 2)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating 2025`, TAVILY_KEY, 2, undefined, undefined, 120)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} earnings results revenue 2024 2025`, TAVILY_KEY, 3)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS 2024 2025`, TAVILY_KEY, 3, undefined, undefined, 140)
         : Promise.resolve(null),
       TAVILY_KEY && peers.length > 0
         ? fetchTavilySearch(
             `${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive position`,
-            TAVILY_KEY,
-            2,
+            TAVILY_KEY, 2, undefined, undefined, 120,
           )
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership vanguard blackrock 2025`, TAVILY_KEY, 2)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership Vanguard BlackRock 2025`, TAVILY_KEY, 2, undefined, undefined, 110)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} free cash flow debt equity EBITDA 2024 2025`, TAVILY_KEY, 2)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} free cash flow debt equity EBITDA 2024`, TAVILY_KEY, 2, undefined, undefined, 110)
         : Promise.resolve(null),
       TAVILY_KEY
         ? fetchTavilySearch(
-            `${companyName} ${cleanTicker} risks catalysts opportunities 2025 2026`,
-            TAVILY_KEY, 4, 30, "news",
+            `${companyName} ${cleanTicker} risks catalysts opportunities growth headwinds 2025 2026`,
+            TAVILY_KEY, 5, 30, "news", 180,
           )
         : Promise.resolve(null),
     ]);
@@ -653,7 +643,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        max_tokens: 6000,
+        max_tokens: 5200,
         messages: [
           { role: "system", content: buildSystemPrompt() },
           {
