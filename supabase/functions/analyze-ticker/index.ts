@@ -4,14 +4,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ── Finnhub helpers ───────────────────────────────────────────────────
+// -- Finnhub helpers --
 
 async function finnhubGet(path: string, key: string) {
   try {
     const res = await fetch(`https://finnhub.io/api/v1${path}&token=${key}`);
     if (!res.ok) return null;
     return res.json();
-  } catch { return null; }
+  } catch (_) { return null; }
 }
 
 async function fetchFinnhubData(ticker: string, key: string) {
@@ -87,7 +87,7 @@ async function fetchPeerData(peers: string[], key: string) {
   return results;
 }
 
-// ── Quarterly financials ──────────────────────────────────────────────
+// -- Quarterly financials --
 
 function fmt(val: number | null | undefined, unit: "M" | "B" | "pct" | "x" | "raw" = "M"): string {
   if (val == null || isNaN(val)) return "N/D";
@@ -160,7 +160,7 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
   });
 }
 
-// ── Tavily helpers ────────────────────────────────────────────────────
+// -- Tavily helpers --
 
 async function fetchTavilySearch(
   query: string,
@@ -196,10 +196,10 @@ async function fetchTavilySearch(
         published_date: r.published_date ?? "",
       })),
     };
-  } catch { return { answer: "", results: [] }; }
+  } catch (_) { return { answer: "", results: [] }; }
 }
 
-// ── Number helpers ────────────────────────────────────────────────────
+// -- Number helpers --
 
 /** Round any number to exactly 2 decimal places; return "N/D" if null/undefined */
 function n2(v: number | null | undefined): string {
@@ -207,7 +207,7 @@ function n2(v: number | null | undefined): string {
   return Number(v).toFixed(2);
 }
 
-// ── Context builder ───────────────────────────────────────────────────
+// -- Context builder --
 
 function buildDataContext(
   data: any,
@@ -461,7 +461,7 @@ function buildDataContext(
   return lines.join("\n");
 }
 
-// ── System prompt ──────────────────────────────────────────────────────
+// -- System prompt --
 
 function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -475,7 +475,7 @@ Genera EXACTAMENTE las 6 secciones siguientes, cada una iniciada con "## " (no l
 ## Noticias
 ## Institucional
 
-── CONTENIDO POR SECCIÓN ──
+== CONTENIDO POR SECCION ==
 
 ## Resumen Ejecutivo
 - Párrafo 1 (5-7 líneas): situación actual — precio, capitalización, rendimiento reciente vs sector.
@@ -554,7 +554,7 @@ REGLAS DE FORMATO:
 - No cortes frases a medias.`;
 }
 
-// ── Main handler ───────────────────────────────────────────────────────
+// -- Main handler --
 
 Deno.serve(async (req) => {
   console.log("analyze-ticker v5-GROQ started");
