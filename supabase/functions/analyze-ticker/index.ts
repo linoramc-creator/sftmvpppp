@@ -100,44 +100,62 @@ function fmt(val: number | null | undefined, unit: "M" | "B" | "pct" | "x" | "ra
 
 async function fetchQuarterlyFinancials(ticker: string, key: string) {
   const t = encodeURIComponent(ticker);
-  const [icRaw, cfRaw] = await Promise.all([
+  const [icRaw, cfRaw, bsRaw] = await Promise.all([
     finnhubGet(`/stock/financials?symbol=${t}&statement=ic&freq=quarterly`, key),
     finnhubGet(`/stock/financials?symbol=${t}&statement=cf&freq=quarterly`, key),
+    finnhubGet(`/stock/financials?symbol=${t}&statement=bs&freq=quarterly`, key),
   ]);
 
-  // Finnhub may nest data differently depending on version
   const icList: any[] = icRaw?.data?.financials ?? icRaw?.financials ?? [];
   const cfList: any[] = cfRaw?.data?.financials ?? cfRaw?.financials ?? [];
+  const bsList: any[] = bsRaw?.data?.financials ?? bsRaw?.financials ?? [];
 
   if (!icList.length) return [];
 
-  // Build a map period → CF data for quick lookup
   const cfByPeriod = new Map<string, any>(cfList.map((q: any) => [q.period, q]));
+  const bsByPeriod = new Map<string, any>(bsList.map((q: any) => [q.period, q]));
 
   return icList.slice(0, 6).map((q: any) => {
     const cf = cfByPeriod.get(q.period) ?? {};
-    const rev = q.revenue ?? null;
-    const revGrowth = q.revenueGrowth ?? null; // decimal e.g. 0.056
+    const bs = bsByPeriod.get(q.period) ?? {};
+
+    const rev      = q.revenue ?? null;
+    const revGrowth = q.revenueGrowth ?? null;
     const grossProfit = q.grossProfit ?? null;
-    const ebit = q.ebit ?? q.operatingIncome ?? null;
-    const ebitda = q.ebitda ?? null;
+    const ebitda   = q.ebitda ?? null;
     const netIncome = q.netIncome ?? null;
-    const eps = q.eps ?? null;
-    const opCF = cf.operatingCashFlow ?? null;
-    const fcf = cf.freeCashFlow ?? null;
+    const eps      = q.eps ?? null;
+    const opCF     = cf.operatingCashFlow ?? null;
+    const fcf      = cf.freeCashFlow ?? null;
+    const capex    = cf.capitalExpenditures ?? cf.capex ?? null;
+
+    // Balance sheet fields — try multiple Finnhub naming variants
+    const cash     = bs.cashAndEquivalents ?? bs.cash ?? bs.cashEquivalents ?? null;
+    const totalDebt = bs.totalDebt ?? bs.longTermDebt ?? null;
+    const netDebt  = (totalDebt != null && cash != null) ? totalDebt - cash : null;
+    const equity   = bs.totalEquity ?? bs.stockholdersEquity ?? bs.totalStockholdersEquity ?? null;
+    const totalAssets = bs.totalAssets ?? null;
 
     return {
       period: q.period ?? "",
+      // P&L
       revenue: fmt(rev, "B"),
       revenueGrowth: revGrowth != null ? `${revGrowth >= 0 ? "+" : ""}${(revGrowth * 100).toFixed(1)}%` : "N/D",
       grossMargin: rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
       ebitda: fmt(ebitda, "B"),
-      ebit: fmt(ebit, "B"),
       netIncome: fmt(netIncome, "B"),
       netMargin: rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
       eps: eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
+      // Cash flow
       operatingCF: fmt(opCF, "B"),
       freeCashFlow: fmt(fcf, "B"),
+      capex: capex != null ? fmt(capex, "B") : "N/D",
+      // Balance sheet
+      cash: fmt(cash, "B"),
+      totalDebt: fmt(totalDebt, "B"),
+      netDebt: fmt(netDebt, "B"),
+      equity: fmt(equity, "B"),
+      totalAssets: fmt(totalAssets, "B"),
     };
   });
 }
@@ -410,14 +428,24 @@ function buildDataContext(
     }
   }
 
-  // Quarterly financial history
+  // Quarterly financial history — three separate tables for clarity
   if (quarterlyHistory.length > 0) {
-    lines.push("", "--- HISTORIAL FINANCIERO TRIMESTRAL (FINNHUB, ÚLTIMOS 6 TRIMESTRES) ---");
-    lines.push("Periodo | Revenue | Var.%YoY | Margen Bruto | EBITDA | EBIT | Bfº Neto | Margen Neto | EPS | FCF | Op.CF");
+    lines.push("", "--- HISTORIAL TRIMESTRAL: P&L (ÚLTIMOS 6 TRIMESTRES) ---");
+    lines.push("Periodo | Revenue | Var.%YoY | M.Bruto | EBITDA | Bfº Neto | M.Neto | EPS");
     for (const q of quarterlyHistory) {
-      lines.push(
-        `${q.period} | ${q.revenue} | ${q.revenueGrowth} | ${q.grossMargin} | ${q.ebitda} | ${q.ebit} | ${q.netIncome} | ${q.netMargin} | ${q.eps} | ${q.freeCashFlow} | ${q.operatingCF}`
-      );
+      lines.push(`${q.period} | ${q.revenue} | ${q.revenueGrowth} | ${q.grossMargin} | ${q.ebitda} | ${q.netIncome} | ${q.netMargin} | ${q.eps}`);
+    }
+
+    lines.push("", "--- HISTORIAL TRIMESTRAL: CASH FLOW (ÚLTIMOS 6 TRIMESTRES) ---");
+    lines.push("Periodo | Op.CF | Free Cash Flow | Capex");
+    for (const q of quarterlyHistory) {
+      lines.push(`${q.period} | ${q.operatingCF} | ${q.freeCashFlow} | ${q.capex}`);
+    }
+
+    lines.push("", "--- HISTORIAL TRIMESTRAL: BALANCE (ÚLTIMOS 6 TRIMESTRES) ---");
+    lines.push("Periodo | Caja | Deuda Total | Deuda Neta | Equity | Total Activos");
+    for (const q of quarterlyHistory) {
+      lines.push(`${q.period} | ${q.cash} | ${q.totalDebt} | ${q.netDebt} | ${q.equity} | ${q.totalAssets}`);
     }
   }
 
@@ -477,8 +505,18 @@ PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
 Si un dato es N/D en Finnhub, búscalo en DATOS ADICIONALES o HISTORIAL TRIMESTRAL. Nunca inventes.
 
 PARTE 2 — ### Evolución Trimestral
-Tabla con columnas: | Trimestre | Ingresos | Var.% YoY | M. Bruto | EBITDA | Bfº Neto | M. Neto | EPS | Free Cash Flow |
-Usa HISTORIAL FINANCIERO TRIMESTRAL (6 trimestres, más reciente primero). Después: párrafo 3-4 líneas analizando la TENDENCIA (aceleración/desaceleración, márgenes, FCF).
+Genera TRES tablas usando los datos de HISTORIAL TRIMESTRAL (más reciente primero):
+
+**Cuenta de Resultados:**
+| Trimestre | Ingresos | Var.% YoY | M. Bruto | EBITDA | Bfº Neto | M. Neto | EPS |
+
+**Cash Flow:**
+| Trimestre | Cash Flow Operativo | Free Cash Flow | Capex |
+
+**Balance / Solvencia:**
+| Trimestre | Caja | Deuda Total | Deuda Neta | Equity | Total Activos |
+
+Si un valor es N/D, escríbelo tal cual. Después de las tres tablas: párrafo 4-5 líneas analizando la TENDENCIA conjunta — crecimiento de ingresos, evolución de márgenes, generación de caja, nivel de deuda y solidez del balance.
 
 PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 
