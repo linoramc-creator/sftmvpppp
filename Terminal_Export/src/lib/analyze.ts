@@ -1,16 +1,40 @@
 const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
 
+export interface QuarterlyPeriod {
+  period: string;
+  // P&L
+  revenue: string;
+  revenueGrowth: string;
+  grossMargin: string;
+  ebitda: string;
+  netIncome: string;
+  netMargin: string;
+  eps: string;
+  // Cash flow
+  operatingCF: string;
+  freeCashFlow: string;
+  capex: string;
+  // Balance
+  cash: string;
+  totalDebt: string;
+  netDebt: string;
+  equity: string;
+  totalAssets: string;
+}
+
 export async function streamAnalysis({
   ticker,
   onDelta,
   onDone,
   onError,
+  onQuarterlyData,
   signal,
 }: {
   ticker: string;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
+  onQuarterlyData?: (data: QuarterlyPeriod[]) => void;
   signal?: AbortSignal;
 }) {
   const resp = await fetch(ANALYZE_URL, {
@@ -39,6 +63,26 @@ export async function streamAnalysis({
   let textBuffer = "";
   let streamDone = false;
 
+  const parseLine = (line: string) => {
+    if (!line.startsWith("data: ")) return;
+    const jsonStr = line.slice(6).trim();
+    if (jsonStr === "[DONE]") { streamDone = true; return; }
+
+    try {
+      const parsed = JSON.parse(jsonStr);
+
+      // Our custom quarterly data event
+      if (parsed.__quarterly && onQuarterlyData) {
+        onQuarterlyData(parsed.__quarterly as QuarterlyPeriod[]);
+        return;
+      }
+
+      // Groq streaming delta
+      const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+      if (content) onDelta(content);
+    } catch { /* ignore partial chunks */ }
+  };
+
   while (!streamDone) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -48,42 +92,18 @@ export async function streamAnalysis({
     while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
       let line = textBuffer.slice(0, newlineIndex);
       textBuffer = textBuffer.slice(newlineIndex + 1);
-
       if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (line.startsWith(":") || line.trim() === "") continue;
-      if (!line.startsWith("data: ")) continue;
-
-      const jsonStr = line.slice(6).trim();
-      if (jsonStr === "[DONE]") {
-        streamDone = true;
-        break;
-      }
-
-      try {
-        const parsed = JSON.parse(jsonStr);
-        const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-        if (content) onDelta(content);
-      } catch {
-        textBuffer = line + "\n" + textBuffer;
-        break;
-      }
+      if (line.trim() === "" || line.startsWith(":")) continue;
+      parseLine(line);
+      if (streamDone) break;
     }
   }
 
-  if (textBuffer.trim()) {
-    for (let raw of textBuffer.split("\n")) {
-      if (!raw) continue;
-      if (raw.endsWith("\r")) raw = raw.slice(0, -1);
-      if (raw.startsWith(":") || raw.trim() === "") continue;
-      if (!raw.startsWith("data: ")) continue;
-      const jsonStr = raw.slice(6).trim();
-      if (jsonStr === "[DONE]") continue;
-      try {
-        const parsed = JSON.parse(jsonStr);
-        const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-        if (content) onDelta(content);
-      } catch { /* ignore */ }
-    }
+  // Flush remaining buffer
+  for (let raw of textBuffer.split("\n")) {
+    if (!raw || raw.startsWith(":")) continue;
+    if (raw.endsWith("\r")) raw = raw.slice(0, -1);
+    parseLine(raw);
   }
 
   onDone();

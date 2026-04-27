@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { TrendingUp, AlertCircle, Loader2, Download, BarChart2 } from "lucide-react";
-import { streamAnalysis } from "@/lib/analyze";
+import { streamAnalysis, type QuarterlyPeriod } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 import { downloadAnalysisPdf } from "@/lib/reportPdf";
 
@@ -13,6 +13,29 @@ const EXPECTED_TABS = [
   "Institucional",
 ];
 
+// ── Helpers ───────────────────────────────────────────────────────────
+
+/** "2024-09-30" → "Sep '24" */
+function fmtPeriod(p: string): string {
+  const d = new Date(p + "T00:00:00Z");
+  if (isNaN(d.getTime())) return p;
+  return d.toLocaleDateString("es-ES", { month: "short", year: "2-digit", timeZone: "UTC" });
+}
+
+function isPositive(v: string) { return v.startsWith("+"); }
+function isNegative(v: string) { return v.startsWith("-") && v !== "N/D"; }
+function isND(v: string) { return v === "N/D"; }
+
+function cellClass(v: string, colorize = false) {
+  if (isND(v)) return "text-muted-foreground/40";
+  if (!colorize) return "text-foreground/85 font-mono";
+  if (isPositive(v)) return "text-emerald-400 font-mono font-medium";
+  if (isNegative(v)) return "text-red-400 font-mono font-medium";
+  return "text-foreground/85 font-mono";
+}
+
+// ── Index component ───────────────────────────────────────────────────
+
 const Index = () => {
   const [ticker, setTicker] = useState("");
   const [analysis, setAnalysis] = useState("");
@@ -20,6 +43,7 @@ const Index = () => {
   const [currentTicker, setCurrentTicker] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("Resumen Ejecutivo");
+  const [quarterlyData, setQuarterlyData] = useState<QuarterlyPeriod[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
@@ -37,6 +61,7 @@ const Index = () => {
     setError("");
     setCurrentTicker(clean);
     setActiveTab("Resumen Ejecutivo");
+    setQuarterlyData([]);
 
     let accumulated = "";
 
@@ -54,6 +79,7 @@ const Index = () => {
           setIsLoading(false);
           toast({ title: "Error", description: err, variant: "destructive" });
         },
+        onQuarterlyData: (data) => setQuarterlyData(data),
       });
     } catch (e: unknown) {
       if (e instanceof Error && e.name === "AbortError") return;
@@ -151,11 +177,12 @@ const Index = () => {
               </div>
             </div>
             
-            <AnalysisTabsRenderer 
-              content={analysis} 
-              isLoading={isLoading} 
-              activeTab={activeTab} 
-              setActiveTab={setActiveTab} 
+            <AnalysisTabsRenderer
+              content={analysis}
+              isLoading={isLoading}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              quarterlyData={quarterlyData}
             />
           </div>
         )}
@@ -180,7 +207,15 @@ const Index = () => {
 
 // ── Improved Tabbed Markdown Renderer ──────────────────────────────────────────
 
-function AnalysisTabsRenderer({ content, isLoading, activeTab, setActiveTab }: { content: string; isLoading: boolean, activeTab: string, setActiveTab: (t: string) => void }) {
+function AnalysisTabsRenderer({
+  content, isLoading, activeTab, setActiveTab, quarterlyData,
+}: {
+  content: string;
+  isLoading: boolean;
+  activeTab: string;
+  setActiveTab: (t: string) => void;
+  quarterlyData: QuarterlyPeriod[];
+}) {
   const sections = parseSections(content);
   const computedTabs = Object.keys(sections);
 
@@ -201,9 +236,8 @@ function AnalysisTabsRenderer({ content, isLoading, activeTab, setActiveTab }: {
       {/* Tab Navigation */}
       <div className="flex border-b border-border/40 bg-secondary/10 overflow-x-auto overflow-y-hidden shrink-0">
         {EXPECTED_TABS.map((expectedTab) => {
-          const hasContent = !!sections[expectedTab];
+          const hasContent = !!sections[expectedTab] || (expectedTab === "Finanzas" && quarterlyData.length > 0);
           const isActive = displayTab === expectedTab;
-
           return (
             <button
               key={expectedTab}
@@ -226,9 +260,104 @@ function AnalysisTabsRenderer({ content, isLoading, activeTab, setActiveTab }: {
 
       {/* Content Area */}
       <div className="flex-1 p-6 analysis-content text-sm text-foreground/90 leading-relaxed overflow-y-auto">
+        {/* Quarterly component injected at top of Finanzas tab */}
+        {displayTab === "Finanzas" && quarterlyData.length > 0 && (
+          <QuarterlyHistorySection data={quarterlyData} />
+        )}
         {renderElements(currentTabContent)}
         {isLoading && displayTab === computedTabs[computedTabs.length - 1] && <span className="terminal-cursor text-primary ml-1" />}
       </div>
+    </div>
+  );
+}
+
+// ── Quarterly History Component ────────────────────────────────────────
+
+function QTable({ title, rows }: { title: string; rows: { label: string; values: string[]; colorize?: boolean }[] }) {
+  return (
+    <div className="mb-6">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{title}</p>
+      <div className="overflow-x-auto rounded-lg border border-border/30 bg-secondary/10">
+        <table className="w-full text-xs min-w-max">
+          <tbody className="divide-y divide-border/20">
+            {rows.map((row) => (
+              <tr key={row.label} className="hover:bg-primary/5 transition-colors">
+                <td className="px-4 py-2 text-muted-foreground font-medium whitespace-nowrap w-40 border-r border-border/20">
+                  {row.label}
+                </td>
+                {row.values.map((v, i) => (
+                  <td key={i} className={`px-4 py-2 text-center whitespace-nowrap ${cellClass(v, row.colorize)}`}>
+                    {v}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
+  if (!data.length) return null;
+
+  // Header row: formatted period labels
+  const periods = data.map((q) => fmtPeriod(q.period));
+
+  // Helper to extract column values for a given field
+  const col = (field: keyof QuarterlyPeriod) => data.map((q) => q[field] as string);
+
+  return (
+    <div className="mb-8">
+      <h3 className="text-sm font-semibold text-primary border-b border-primary/15 pb-1.5 mb-5 tracking-wide">
+        Evolución Trimestral
+      </h3>
+
+      {/* Period header strip */}
+      <div className="overflow-x-auto mb-4">
+        <div className="flex min-w-max">
+          <div className="w-40 shrink-0" />
+          {periods.map((p, i) => (
+            <div key={i} className="w-24 shrink-0 text-center text-[11px] font-semibold text-primary/70 uppercase tracking-wide px-2">
+              {p}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <QTable
+        title="Cuenta de Resultados"
+        rows={[
+          { label: "Ingresos",      values: col("revenue") },
+          { label: "Var. YoY",      values: col("revenueGrowth"), colorize: true },
+          { label: "Margen Bruto",  values: col("grossMargin"),   colorize: true },
+          { label: "EBITDA",        values: col("ebitda") },
+          { label: "Bfº Neto",      values: col("netIncome") },
+          { label: "Margen Neto",   values: col("netMargin"),     colorize: true },
+          { label: "EPS",           values: col("eps") },
+        ]}
+      />
+
+      <QTable
+        title="Cash Flow"
+        rows={[
+          { label: "CF Operativo",  values: col("operatingCF") },
+          { label: "Free Cash Flow",values: col("freeCashFlow") },
+          { label: "Capex",         values: col("capex") },
+        ]}
+      />
+
+      <QTable
+        title="Balance / Solvencia"
+        rows={[
+          { label: "Caja",          values: col("cash") },
+          { label: "Deuda Total",   values: col("totalDebt") },
+          { label: "Deuda Neta",    values: col("netDebt") },
+          { label: "Equity",        values: col("equity") },
+          { label: "Total Activos", values: col("totalAssets") },
+        ]}
+      />
     </div>
   );
 }

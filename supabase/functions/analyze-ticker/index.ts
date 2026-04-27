@@ -505,18 +505,9 @@ PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
 Si un dato es N/D en Finnhub, búscalo en DATOS ADICIONALES o HISTORIAL TRIMESTRAL. Nunca inventes.
 
 PARTE 2 — ### Evolución Trimestral
-Genera TRES tablas usando los datos de HISTORIAL TRIMESTRAL (más reciente primero):
-
-**Cuenta de Resultados:**
-| Trimestre | Ingresos | Var.% YoY | M. Bruto | EBITDA | Bfº Neto | M. Neto | EPS |
-
-**Cash Flow:**
-| Trimestre | Cash Flow Operativo | Free Cash Flow | Capex |
-
-**Balance / Solvencia:**
-| Trimestre | Caja | Deuda Total | Deuda Neta | Equity | Total Activos |
-
-Si un valor es N/D, escríbelo tal cual. Después de las tres tablas: párrafo 4-5 líneas analizando la TENDENCIA conjunta — crecimiento de ingresos, evolución de márgenes, generación de caja, nivel de deuda y solidez del balance.
+Las tablas de datos históricos se renderizan automáticamente en el informe.
+Escribe ÚNICAMENTE un párrafo de análisis (5-6 líneas) sobre las tendencias observadas en los últimos 6 trimestres:
+crecimiento o desaceleración de ingresos, evolución de márgenes, generación de Free Cash Flow, cambios en deuda y solidez del balance.
 
 PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 
@@ -690,10 +681,10 @@ Deno.serve(async (req) => {
 
 INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 6 secciones obligatorias.
-- En ## Finanzas: incluye la tabla de métricas actuales Y la tabla de Evolución Trimestral con los datos de "HISTORIAL FINANCIERO TRIMESTRAL".
-- En ## Valoración: desarrolla los Factores de Riesgo y Catalizadores con noticias concretas de "RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES". Cita la fuente (Reuters, FT, WSJ, CNBC, etc.) cuando esté disponible.
-- Usa los datos numéricos de Finnhub. Si un dato es N/D, búscalo en "DATOS ADICIONALES PARA COMPLEMENTAR N/D". Si no existe en ninguna fuente: escribe N/D.
-- Si el ticker no corresponde a una empresa real, indícalo en el Resumen Ejecutivo.`,
+- En ## Finanzas: incluye la tabla de métricas actuales. En ### Evolución Trimestral escribe SOLO el párrafo de análisis de tendencias (las tablas de datos trimestrales se renderizan automáticamente — NO las generes tú).
+- En ## Valoración: desarrolla Factores de Riesgo y Catalizadores con noticias concretas. Cita la fuente cuando esté disponible.
+- Usa datos de Finnhub. Si un dato es N/D, búscalo en las fuentes adicionales. Si no existe: N/D.
+- Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
           },
         ],
         stream: true,
@@ -731,7 +722,31 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 6 secci
     }
 
     console.log("Streaming response to client...");
-    return new Response(orResponse.body, {
+
+    // Build a combined stream: quarterly JSON event first, then Groq SSE
+    const encoder = new TextEncoder();
+    const quarterlyEvent = encoder.encode(
+      `data: ${JSON.stringify({ __quarterly: quarterlyHistory })}\n\n`
+    );
+    const groqReader = orResponse.body!.getReader();
+
+    const combined = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(quarterlyEvent);
+        try {
+          while (true) {
+            const { done, value } = await groqReader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+        } finally {
+          controller.close();
+        }
+      },
+      cancel() { groqReader.cancel(); },
+    });
+
+    return new Response(combined, {
       headers: {
         ...corsHeaders,
         "Content-Type": "text/event-stream",
