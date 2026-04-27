@@ -199,6 +199,14 @@ async function fetchTavilySearch(
   } catch { return { answer: "", results: [] }; }
 }
 
+// ── Number helpers ────────────────────────────────────────────────────
+
+/** Round any number to exactly 2 decimal places; return "N/D" if null/undefined */
+function n2(v: number | null | undefined): string {
+  if (v == null || isNaN(Number(v))) return "N/D";
+  return Number(v).toFixed(2);
+}
+
 // ── Context builder ───────────────────────────────────────────────────
 
 function buildDataContext(
@@ -282,24 +290,24 @@ function buildDataContext(
     "--- FUNDAMENTALES ---",
     `Market Cap: $${p?.marketCapitalization ? Number(p.marketCapitalization).toFixed(0) + "M" : "N/D"}`,
     `Shares Outstanding: ${p?.shareOutstanding ? Number(p.shareOutstanding).toFixed(2) + "M" : "N/D"}`,
-    `P/E (TTM): ${m?.peBasicExclExtraTTM ?? m?.peTTM ?? "N/D"}`,
-    `P/E NTM (Forward): ${m?.peNTM ?? m?.forwardPE ?? "N/D"}`,
-    `P/B: ${m?.pbAnnual ?? m?.pbQuarterly ?? "N/D"}`,
-    `P/S (TTM): ${m?.psTTM ?? m?.priceToSalesTTM ?? "N/D"}`,
+    `P/E (TTM): ${n2(m?.peBasicExclExtraTTM ?? m?.peTTM)}`,
+    `P/E NTM (Forward): ${n2(m?.peNTM ?? m?.forwardPE)}`,
+    `P/B: ${n2(m?.pbAnnual ?? m?.pbQuarterly)}`,
+    `P/S (TTM): ${n2(m?.psTTM ?? m?.priceToSalesTTM)}`,
     `EV/EBITDA: ${evEbitda}`,
-    `Deuda/Equity: ${debtEquity != null ? Number(debtEquity).toFixed(2) : "N/D"}`,
-    `ROE (TTM): ${m?.roeTTM ?? "N/D"}%`,
-    `ROA (TTM): ${m?.roaTTM ?? "N/D"}%`,
-    `ROI (TTM): ${m?.roiTTM ?? "N/D"}%`,
-    `Revenue Growth YoY: ${m?.revenueGrowthTTMYoy ?? "N/D"}%`,
-    `EPS Growth YoY: ${m?.epsGrowthTTMYoy ?? "N/D"}%`,
-    `EPS (TTM): ${m?.epsTTM ?? "N/D"}`,
-    `Dividend Yield: ${m?.dividendYieldIndicatedAnnual ?? "N/D"}%`,
-    `Current Ratio: ${m?.currentRatioAnnual ?? m?.currentRatioQuarterly ?? "N/D"}`,
-    `Quick Ratio: ${m?.quickRatioAnnual ?? m?.quickRatioQuarterly ?? "N/D"}`,
-    `Gross Margin (TTM): ${m?.grossMarginTTM ?? "N/D"}%`,
-    `Operating Margin (TTM): ${m?.operatingMarginTTM ?? "N/D"}%`,
-    `Net Margin (TTM): ${m?.netProfitMarginTTM ?? "N/D"}%`,
+    `Deuda/Equity: ${n2(debtEquity)}`,
+    `ROE (TTM): ${n2(m?.roeTTM)}%`,
+    `ROA (TTM): ${n2(m?.roaTTM)}%`,
+    `ROI (TTM): ${n2(m?.roiTTM)}%`,
+    `Revenue Growth YoY: ${n2(m?.revenueGrowthTTMYoy)}%`,
+    `EPS Growth YoY: ${n2(m?.epsGrowthTTMYoy)}%`,
+    `EPS (TTM): ${n2(m?.epsTTM)}`,
+    `Dividend Yield: ${n2(m?.dividendYieldIndicatedAnnual)}%`,
+    `Current Ratio: ${n2(m?.currentRatioAnnual ?? m?.currentRatioQuarterly)}`,
+    `Quick Ratio: ${n2(m?.quickRatioAnnual ?? m?.quickRatioQuarterly)}`,
+    `Gross Margin (TTM): ${n2(m?.grossMarginTTM)}%`,
+    `Operating Margin (TTM): ${n2(m?.operatingMarginTTM)}%`,
+    `Net Margin (TTM): ${n2(m?.netProfitMarginTTM)}%`,
     `Free Cash Flow/Share (TTM): ${fcfPerShareStr}`,
     `Beta: ${m?.beta ?? "N/D"}`,
     `52W High: $${m?.["52WeekHigh"] ?? "N/D"} | 52W Low: $${m?.["52WeekLow"] ?? "N/D"}`,
@@ -538,7 +546,12 @@ PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 - ### Cambios Recientes en Posiciones: upgrades/downgrades, cambios precio objetivo.
 - ### Flujos y Sentimiento: 3-4 líneas.
 
-REGLAS: Markdown estricto. Sin emojis. Números con unidades ($, %, x, B, M). No cortes frases. Si un dato no existe: N/D. Nunca inventes.`;
+REGLAS DE FORMATO:
+- Markdown estricto. Sin emojis.
+- TODOS los números: exactamente 2 decimales (21.28, no 21.2848; 40.84%, no 40.839999%).
+- Unidades siempre presentes: $, %, x, B, M.
+- Si un dato no existe en ninguna fuente: OMITE esa fila o usa el mejor estimado disponible con nota "(est.)". NUNCA escribas "N/D" en el informe final.
+- No cortes frases a medias.`;
 }
 
 // ── Main handler ───────────────────────────────────────────────────────

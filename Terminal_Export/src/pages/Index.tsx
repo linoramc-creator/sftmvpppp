@@ -273,25 +273,60 @@ function AnalysisTabsRenderer({
 
 // ── Quarterly History Component ────────────────────────────────────────
 
-function QTable({ title, rows }: { title: string; rows: { label: string; values: string[]; colorize?: boolean }[] }) {
+const ND_VALUES = new Set(["N/D", "", "N/A", "-"]);
+
+function cleanVal(v: string): string {
+  if (ND_VALUES.has(v)) return "—";
+  // Round floats with 3+ decimal places to 2
+  return v.replace(/(-?\d+\.\d{3,})/g, (m) => {
+    const n = parseFloat(m); return isNaN(n) ? m : n.toFixed(2);
+  });
+}
+
+function allND(values: string[]) {
+  return values.every((v) => ND_VALUES.has(v));
+}
+
+function QTable({ title, rows, periods }: {
+  title: string;
+  periods: string[];
+  rows: { label: string; values: string[]; colorize?: boolean }[];
+}) {
+  // Only keep rows that have at least one real value
+  const visibleRows = rows.filter((r) => !allND(r.values));
+  if (!visibleRows.length) return null;
+
   return (
-    <div className="mb-6">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{title}</p>
+    <div className="mb-5">
+      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 px-1">{title}</p>
       <div className="overflow-x-auto rounded-lg border border-border/30 bg-secondary/10">
         <table className="w-full text-xs min-w-max">
+          <thead>
+            <tr className="border-b border-border/30 bg-secondary/20">
+              <th className="px-4 py-2 text-left text-muted-foreground/60 font-medium w-36 text-[11px]">Métrica</th>
+              {periods.map((p, i) => (
+                <th key={i} className="px-4 py-2 text-center text-primary/80 font-semibold text-[11px] uppercase tracking-wide">
+                  {p}
+                </th>
+              ))}
+            </tr>
+          </thead>
           <tbody className="divide-y divide-border/20">
-            {rows.map((row) => (
-              <tr key={row.label} className="hover:bg-primary/5 transition-colors">
-                <td className="px-4 py-2 text-muted-foreground font-medium whitespace-nowrap w-40 border-r border-border/20">
-                  {row.label}
-                </td>
-                {row.values.map((v, i) => (
-                  <td key={i} className={`px-4 py-2 text-center whitespace-nowrap ${cellClass(v, row.colorize)}`}>
-                    {v}
+            {visibleRows.map((row) => {
+              const cleaned = row.values.map(cleanVal);
+              return (
+                <tr key={row.label} className="hover:bg-primary/5 transition-colors">
+                  <td className="px-4 py-2 text-muted-foreground font-medium whitespace-nowrap border-r border-border/20 text-[11px]">
+                    {row.label}
                   </td>
-                ))}
-              </tr>
-            ))}
+                  {cleaned.map((v, i) => (
+                    <td key={i} className={`px-4 py-2 text-center whitespace-nowrap ${cellClass(v, row.colorize)}`}>
+                      {v}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -302,32 +337,18 @@ function QTable({ title, rows }: { title: string; rows: { label: string; values:
 function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
   if (!data.length) return null;
 
-  // Header row: formatted period labels
   const periods = data.map((q) => fmtPeriod(q.period));
-
-  // Helper to extract column values for a given field
   const col = (field: keyof QuarterlyPeriod) => data.map((q) => q[field] as string);
 
   return (
     <div className="mb-8">
-      <h3 className="text-sm font-semibold text-primary border-b border-primary/15 pb-1.5 mb-5 tracking-wide">
+      <h3 className="text-sm font-semibold text-primary border-b border-primary/15 pb-1.5 mb-4 tracking-wide">
         Evolución Trimestral
       </h3>
 
-      {/* Period header strip */}
-      <div className="overflow-x-auto mb-4">
-        <div className="flex min-w-max">
-          <div className="w-40 shrink-0" />
-          {periods.map((p, i) => (
-            <div key={i} className="w-24 shrink-0 text-center text-[11px] font-semibold text-primary/70 uppercase tracking-wide px-2">
-              {p}
-            </div>
-          ))}
-        </div>
-      </div>
-
       <QTable
         title="Cuenta de Resultados"
+        periods={periods}
         rows={[
           { label: "Ingresos",      values: col("revenue") },
           { label: "Var. YoY",      values: col("revenueGrowth"), colorize: true },
@@ -341,6 +362,7 @@ function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
 
       <QTable
         title="Cash Flow"
+        periods={periods}
         rows={[
           { label: "CF Operativo",  values: col("operatingCF") },
           { label: "Free Cash Flow",values: col("freeCashFlow") },
@@ -350,6 +372,7 @@ function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
 
       <QTable
         title="Balance / Solvencia"
+        periods={periods}
         rows={[
           { label: "Caja",          values: col("cash") },
           { label: "Deuda Total",   values: col("totalDebt") },
@@ -407,6 +430,12 @@ function parseSections(content: string): Record<string, React.ReactNode[]> {
         <h3 key={i} className="text-sm font-semibold mb-2 mt-6 text-primary border-b border-primary/15 pb-1.5 tracking-wide">
           {line.slice(4)}
         </h3>
+      );
+    } else if (line.startsWith("#### ")) {
+      currentElements.push(
+        <h4 key={i} className="text-xs font-semibold mb-1.5 mt-4 text-muted-foreground uppercase tracking-wider">
+          {line.slice(5)}
+        </h4>
       );
     } else if (line.match(/^---+$/)) {
       currentElements.push(<hr key={i} className="my-4 border-border/40" />);
@@ -501,15 +530,21 @@ function renderTable(tableLines: string[], baseKey: number) {
             return (
               <tr key={ri} className="hover:bg-primary/5 transition-colors">
                 {headerCells.map((_, j) => {
-                  const content = cells[j] ?? "N/D";
-                  const isND = content === "N/D";
+                  // Strip surrounding asterisks (*value* → value) and round long decimals
+                  const raw = (cells[j] ?? "").replace(/^\*+|\*+$/g, "").trim() || "—";
+                  // Round numbers with more than 2 decimals: 40.8399999% → 40.84%
+                  const content = raw.replace(/(-?\d+\.\d{3,})/g, (m) => {
+                    const n = parseFloat(m);
+                    return isNaN(n) ? m : n.toFixed(2);
+                  });
+                  const isND = content === "N/D" || content === "—";
                   const isNumeric = /^[-+$]?\d/.test(content) || content.includes("%") || content.includes("x");
-                  const isNegative = /^-/.test(content) && content !== "N/D";
+                  const isNegative = /^-/.test(content) && !isND;
                   let colorClass = j === 0 ? "text-foreground font-medium" : "text-foreground/80";
 
                   if (isNumeric && !isNegative) colorClass = "text-primary font-mono";
                   if (isNegative) colorClass = "text-destructive font-mono";
-                  if (isND) colorClass = "text-muted-foreground/50";
+                  if (isND) colorClass = "text-muted-foreground/40";
 
                   return (
                     <td key={j} className={`px-4 py-2 whitespace-nowrap ${colorClass}`}>
