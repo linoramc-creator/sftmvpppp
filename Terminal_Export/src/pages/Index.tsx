@@ -35,7 +35,8 @@ const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Valoración":        { label: "VALORACIÓN",          category: "VALUATION"             },
   "Competidores":      { label: "COMPETIDORES",        category: "PEERS & COMPS"         },
   "Noticias":          { label: "NOTICIAS",            category: "MARKET NEWS"           },
-  "Institucional":     { label: "INSTITUCIONAL",       category: "OWNERSHIP"             },
+  "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"      },
+  "Mercados de Predicción": { label: "MERCADOS DE PREDICCIÓN",  category: "POLYMARKET"     },
 };
 
 const EXPECTED_TABS = Object.keys(SECTION_CONFIG);

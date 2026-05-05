@@ -199,6 +199,46 @@ async function fetchTavilySearch(
   } catch (_) { return { answer: "", results: [] }; }
 }
 
+// -- Polymarket --
+
+async function fetchPolymarketData(ticker: string, companyName: string): Promise<string> {
+  try {
+    const terms = [companyName.split(" ").slice(0, 2).join(" "), ticker].filter(Boolean);
+    let markets: any[] = [];
+
+    for (const q of terms) {
+      const res = await fetch(
+        `https://gamma-api.polymarket.com/markets?q=${encodeURIComponent(q)}&limit=6&active=true&closed=false`,
+        { headers: { "Accept": "application/json" } }
+      ).catch(() => null);
+      if (!res?.ok) continue;
+      const data = await res.json().catch(() => []);
+      if (Array.isArray(data) && data.length > 0) { markets = data; break; }
+    }
+
+    const relevant = markets
+      .filter((m: any) => !m.closed && m.outcomePrices && m.question)
+      .sort((a: any, b: any) => (b.volume ?? 0) - (a.volume ?? 0))
+      .slice(0, 3);
+
+    if (!relevant.length) return "";
+
+    const lines = ["--- MERCADOS DE PREDICCION ACTIVOS (POLYMARKET) ---"];
+    for (const m of relevant) {
+      try {
+        const outcomes: string[] = JSON.parse(m.outcomes || "[]");
+        const prices: string[] = JSON.parse(m.outcomePrices || "[]");
+        const vol = m.volume ? `$${(m.volume / 1000).toFixed(0)}K vol` : "";
+        const priceStr = outcomes.map((o, i) => `${o}: ${(parseFloat(prices[i] ?? "0") * 100).toFixed(0)}%`).join(" / ");
+        lines.push(`- "${m.question}"`);
+        lines.push(`  ${priceStr}${vol ? `  (${vol})` : ""}`);
+      } catch (_) { /* skip malformed market */ }
+    }
+
+    return lines.length > 1 ? lines.join("\n") : "";
+  } catch (_) { return ""; }
+}
+
 // -- Number helpers --
 
 /** Round any number to exactly 2 decimal places; return "N/D" if null/undefined */
@@ -222,6 +262,7 @@ function buildDataContext(
   institutionalSearch: any,
   missingDataSearch: any,
   risksCatalystsSearch: any,
+  polymarketContext: string,
 ): string {
   if (!data || (!data.quote && !data.profile)) {
     return "[Nota: datos en tiempo real no disponibles para este ticker]";
@@ -457,6 +498,11 @@ function buildDataContext(
     }
   }
 
+  // Polymarket prediction markets
+  if (polymarketContext) {
+    lines.push("", polymarketContext);
+  }
+
   lines.push("", "=== FIN DATOS ===");
   return lines.join("\n");
 }
@@ -467,13 +513,14 @@ function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
   return `Eres un analista financiero institucional senior. Fecha: ${today}.
 
-Genera EXACTAMENTE las 6 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
+Genera EXACTAMENTE las 7 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
 ## Resumen Ejecutivo
 ## Finanzas
 ## Valoración
 ## Competidores
 ## Noticias
 ## Institucional
+## Mercados de Predicción
 
 == CONTENIDO POR SECCION ==
 
@@ -546,6 +593,9 @@ PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 - ### Cambios Recientes en Posiciones: upgrades/downgrades, cambios precio objetivo.
 - ### Flujos y Sentimiento: 3-4 líneas.
 
+## Mercados de Predicción
+Solo si existen datos en POLYMARKET: escribe 3-5 líneas mencionando los mercados de predicción activos más relevantes, sus probabilidades actuales y volumen. Incluye qué implican esas probabilidades para el inversor. Si no hay datos de Polymarket, omite esta sección completamente (no la generes vacía).
+
 REGLAS DE FORMATO:
 - Markdown estricto. Sin emojis.
 - TODOS los números: exactamente 2 decimales (21.28, no 21.2848; 40.84%, no 40.839999%).
@@ -587,10 +637,11 @@ Deno.serve(async (req) => {
     const sector = finnhubData?.profile?.finnhubIndustry ?? "";
     const peers = finnhubData?.peers ?? [];
 
-    // Step 2: Fetch quarterly history + peer data + 10 Tavily searches in parallel
+    // Step 2: Fetch all data in parallel
     const [
       quarterlyHistory,
       peerData,
+      polymarketContext,
       geoContext,
       tickerNews,
       sectorNews,
@@ -603,6 +654,8 @@ Deno.serve(async (req) => {
     ] = await Promise.all([
       FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, FINNHUB_KEY) : Promise.resolve([]),
       FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
+      // Polymarket prediction markets (no key needed)
+      fetchPolymarketData(cleanTicker, companyName),
       // Geopolitical + regulatory — more results, longer content
       TAVILY_KEY
         ? fetchTavilySearch(
@@ -656,6 +709,7 @@ Deno.serve(async (req) => {
       institutionalSearch,
       missingDataSearch,
       risksCatalystsSearch,
+      polymarketContext,
     );
 
     console.log("Data sources loaded:", {
@@ -674,6 +728,7 @@ Deno.serve(async (req) => {
       tavily_institutional: institutionalSearch?.results?.length ?? 0,
       tavily_missing_data: missingDataSearch?.results?.length ?? 0,
       tavily_risks_catalysts: risksCatalystsSearch?.results?.length ?? 0,
+      polymarket_markets: polymarketContext ? polymarketContext.split("\n").filter(l => l.startsWith("-")).length : 0,
     });
 
     console.log("Calling Groq API...");
@@ -693,10 +748,11 @@ Deno.serve(async (req) => {
             content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
-Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 6 secciones obligatorias.
+Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secciones obligatorias.
 - En ## Finanzas: incluye la tabla de métricas actuales. En ### Evolución Trimestral escribe SOLO el párrafo de análisis de tendencias (las tablas de datos trimestrales se renderizan automáticamente — NO las generes tú).
 - En ## Valoración: desarrolla Factores de Riesgo y Catalizadores con noticias concretas. Cita la fuente cuando esté disponible.
-- Usa datos de Finnhub. Si un dato es N/D, búscalo en las fuentes adicionales. Si no existe: N/D.
+- En ## Mercados de Predicción: solo si hay datos de POLYMARKET, comenta brevemente los mercados activos y sus probabilidades. Si no hay datos, omite la sección.
+- Usa datos de Finnhub. Si un dato es N/D, búscalo en las fuentes adicionales. Si no existe, omítelo.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
           },
         ],
