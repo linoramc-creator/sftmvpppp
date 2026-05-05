@@ -239,6 +239,159 @@ async function fetchPolymarketData(ticker: string, companyName: string): Promise
   } catch (_) { return ""; }
 }
 
+// -- FRED (Federal Reserve macro data) --
+
+async function fetchFredData(key: string): Promise<string> {
+  if (!key) return "";
+  try {
+    const series = [
+      { id: "FEDFUNDS", label: "Fed Funds Rate" },
+      { id: "DGS10",    label: "10Y Treasury Yield" },
+      { id: "UNRATE",   label: "Unemployment Rate" },
+    ];
+
+    const results = await Promise.all(
+      series.map(async (s) => {
+        const res = await fetch(
+          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}&apikey=${key}&limit=1&sort_order=desc&file_type=json`
+        ).catch(() => null);
+        if (!res?.ok) return null;
+        const data = await res.json().catch(() => null);
+        const obs = data?.observations?.[0];
+        return obs ? `${s.label}: ${obs.value}% (${obs.date})` : null;
+      })
+    );
+
+    // CPI YoY requires 13 months
+    const cpiRes = await fetch(
+      `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&apikey=${key}&limit=14&sort_order=desc&file_type=json`
+    ).catch(() => null);
+    let cpiLine: string | null = null;
+    if (cpiRes?.ok) {
+      const cpiData = await cpiRes.json().catch(() => null);
+      const obs: any[] = cpiData?.observations ?? [];
+      if (obs.length >= 13) {
+        const cur = parseFloat(obs[0].value);
+        const prev = parseFloat(obs[12].value);
+        if (!isNaN(cur) && !isNaN(prev) && prev > 0) {
+          cpiLine = `CPI Inflation YoY: ${((cur - prev) / prev * 100).toFixed(2)}% (${obs[0].date})`;
+        }
+      }
+    }
+
+    const valid = [...results.filter(Boolean), cpiLine].filter(Boolean);
+    if (!valid.length) return "";
+    return ["--- INDICADORES MACRO USA (FRED / RESERVA FEDERAL) ---", ...valid].join("\n");
+  } catch (_) { return ""; }
+}
+
+// -- FMP (Financial Modeling Prep) --
+
+async function fetchFmpData(ticker: string, key: string): Promise<string> {
+  if (!key) return "";
+  try {
+    const t = encodeURIComponent(ticker);
+    const base = "https://financialmodelingprep.com/api/v3";
+
+    const [targetRaw, institutionalRaw, insiderRaw, analystRaw] = await Promise.all([
+      fetch(`${base}/price-target-consensus/${t}?apikey=${key}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/institutional-holder/${t}?apikey=${key}`).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${base}/insider-trading?symbol=${t}&limit=5&apikey=${key}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/analyst-stock-recommendations/${t}?limit=1&apikey=${key}`).then(r => r.ok ? r.json() : []).catch(() => []),
+    ]);
+
+    const lines: string[] = [];
+
+    // Price target consensus
+    const tgt = Array.isArray(targetRaw) ? targetRaw[0] : targetRaw;
+    if (tgt?.targetConsensus) {
+      lines.push("--- PRECIO OBJETIVO ANALISTAS (FMP) ---");
+      lines.push(`Consenso: $${Number(tgt.targetConsensus).toFixed(2)} | Alto: $${Number(tgt.targetHigh ?? 0).toFixed(2)} | Bajo: $${Number(tgt.targetLow ?? 0).toFixed(2)} | Mediana: $${Number(tgt.targetMedian ?? 0).toFixed(2)}`);
+    }
+
+    // Analyst recommendations
+    const rec = Array.isArray(analystRaw) ? analystRaw[0] : null;
+    if (rec) {
+      lines.push(`Recomendaciones FMP (${rec.date ?? ""}): SB=${rec.analystRatingsStrongBuy ?? 0} | B=${rec.analystRatingsbuy ?? 0} | H=${rec.analystRatingsHold ?? 0} | S=${rec.analystRatingsSell ?? 0} | SS=${rec.analystRatingsStrongSell ?? 0}`);
+    }
+
+    // Institutional holders
+    if (Array.isArray(institutionalRaw) && institutionalRaw.length > 0) {
+      lines.push("", "--- TENENCIAS INSTITUCIONALES (FMP) ---");
+      institutionalRaw.slice(0, 6).forEach((h: any) => {
+        const val = h.value ? `$${(h.value / 1e9).toFixed(2)}B` : "";
+        const chg = h.change != null ? (h.change > 0 ? `+${h.change.toLocaleString()}` : h.change.toLocaleString()) : "N/A";
+        lines.push(`${h.holder}: ${(h.shares ?? 0).toLocaleString()} acciones ${val} (cambio: ${chg})`);
+      });
+    }
+
+    // Insider trading
+    const insiderList: any[] = insiderRaw?.data ?? (Array.isArray(insiderRaw) ? insiderRaw : []);
+    if (insiderList.length > 0) {
+      lines.push("", "--- ACTIVIDAD INSIDER (FMP) ---");
+      insiderList.slice(0, 4).forEach((tx: any) => {
+        const shares = tx.securitiesTransacted ? tx.securitiesTransacted.toLocaleString() : "?";
+        const price = tx.price ? `@$${Number(tx.price).toFixed(2)}` : "";
+        lines.push(`${tx.transactionDate ?? ""} | ${tx.reportingName ?? "?"} (${tx.typeOfOwner ?? ""}) | ${tx.transactionType ?? "?"} ${shares} ${price}`);
+      });
+    }
+
+    return lines.join("\n");
+  } catch (_) { return ""; }
+}
+
+// -- Twelve Data (fill N/D gaps) --
+
+async function fetchTwelveData(ticker: string, key: string): Promise<string> {
+  if (!key) return "";
+  try {
+    const res = await fetch(
+      `https://api.twelvedata.com/statistics?symbol=${encodeURIComponent(ticker)}&apikey=${key}`
+    ).catch(() => null);
+    if (!res?.ok) return "";
+    const d = await res.json().catch(() => null);
+    if (!d?.statistics) return "";
+
+    const v = d.statistics.valuations_metrics ?? {};
+    const f = d.statistics.financials ?? {};
+    const s = d.statistics.stock_statistics ?? {};
+    const div = d.statistics.dividends_and_splits ?? {};
+
+    const pairs: [string, unknown][] = [
+      ["P/E TTM",       v.trailing_pe],
+      ["P/E Forward",   v.forward_pe],
+      ["P/B",           v.price_to_book_mrq],
+      ["P/S TTM",       v.price_to_sales_ttm],
+      ["EV/EBITDA",     v.enterprise_to_ebitda],
+      ["EV/Revenue",    v.enterprise_to_revenue],
+      ["Beta",          s.beta],
+      ["52W High",      s["52_week_high"]],
+      ["52W Low",       s["52_week_low"]],
+      ["52W Change",    s["52_week_change"]],
+      ["ROE TTM",       f.return_on_equity_ttm],
+      ["ROA TTM",       f.return_on_assets_ttm],
+      ["Net Margin",    f.profit_margin],
+      ["Op Margin",     f.operating_margin_ttm],
+      ["Gross Profit",  f.gross_profit_ttm],
+      ["Revenue TTM",   f.revenue_ttm],
+      ["EPS TTM",       f.diluted_eps_ttm],
+      ["FCF TTM",       f.levered_free_cash_flow_ttm],
+      ["Total Cash",    f.total_cash_mrq],
+      ["Total Debt",    f.total_debt_mrq],
+      ["D/E",           f.total_debt_to_equity_mrq],
+      ["Div Yield",     div.forward_annual_dividend_yield],
+      ["Inst. Owned",   s.percent_held_by_institutions],
+    ];
+
+    const line = pairs
+      .filter(([, val]) => val != null && !isNaN(Number(val)))
+      .map(([label, val]) => `${label}=${Number(val).toFixed(2)}`)
+      .join(" | ");
+
+    return line ? `--- DATOS TWELVE DATA (COMPLEMENTO N/D) ---\n${line}` : "";
+  } catch (_) { return ""; }
+}
+
 // -- Number helpers --
 
 /** Round any number to exactly 2 decimal places; return "N/D" if null/undefined */
@@ -256,13 +409,13 @@ function buildDataContext(
   geo: any,
   sectorNews: any,
   tickerNews: any,
-  analystSearch: any,
   earningsSearch: any,
   competitiveSearch: any,
-  institutionalSearch: any,
-  missingDataSearch: any,
   risksCatalystsSearch: any,
   polymarketContext: string,
+  fredContext: string,
+  fmpContext: string,
+  twelveDataContext: string,
 ): string {
   if (!data || (!data.quote && !data.profile)) {
     return "[Nota: datos en tiempo real no disponibles para este ticker]";
@@ -498,10 +651,17 @@ function buildDataContext(
     }
   }
 
+  // FRED macro indicators
+  if (fredContext) lines.push("", fredContext);
+
+  // FMP price targets + institutional + insider
+  if (fmpContext) lines.push("", fmpContext);
+
+  // Twelve Data statistics (N/D gap filler)
+  if (twelveDataContext) lines.push("", twelveDataContext);
+
   // Polymarket prediction markets
-  if (polymarketContext) {
-    lines.push("", polymarketContext);
-  }
+  if (polymarketContext) lines.push("", polymarketContext);
 
   lines.push("", "=== FIN DATOS ===");
   return lines.join("\n");
@@ -557,7 +717,7 @@ PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
 | 52W Return | |
 | Volumen Promedio 10D | |
 
-Si un dato es N/D en Finnhub, búscalo en DATOS ADICIONALES o HISTORIAL TRIMESTRAL. Nunca inventes.
+Si un dato es N/D en Finnhub, búscalo en DATOS TWELVE DATA, FMP, o HISTORIAL TRIMESTRAL. Prioriza siempre datos reales sobre estimaciones. Nunca inventes.
 
 PARTE 2 — ### Evolución Trimestral
 Las tablas de datos históricos se renderizan automáticamente en el informe.
@@ -588,10 +748,11 @@ PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 - ### Contexto Macro Relevante: 4-5 líneas sobre entorno macro/geopolítico con impacto directo. Usa CONTEXTO GEOPOLÍTICO para detallar aranceles, regulación específica, tensiones geopolíticas.
 
 ## Institucional
-- ### Tenencias Institucionales: Vanguard, BlackRock, Fidelity, etc. con % si disponible.
-- ### Consenso de Analistas — Detalle: tabla Strong Buy/Buy/Hold/Sell/Strong Sell + párrafo 3-4 líneas.
-- ### Cambios Recientes en Posiciones: upgrades/downgrades, cambios precio objetivo.
-- ### Flujos y Sentimiento: 3-4 líneas.
+- ### Tenencias Institucionales: usa datos de TENENCIAS INSTITUCIONALES (FMP) para listar los principales holders con acciones y valor. Añade % institucional de Twelve Data si disponible.
+- ### Precio Objetivo: usa PRECIO OBJETIVO ANALISTAS (FMP) — consenso, rango alto/bajo, mediana. Párrafo 2-3 líneas sobre implicaciones.
+- ### Consenso de Analistas — Detalle: tabla Strong Buy/Buy/Hold/Sell/Strong Sell con datos de Finnhub y FMP combinados + párrafo 3-4 líneas.
+- ### Actividad Insider: resume los datos de ACTIVIDAD INSIDER (FMP) — compras/ventas recientes.
+- ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales y sentimiento general.
 
 ## Mercados de Predicción
 Solo si existen datos en POLYMARKET: escribe 3-5 líneas mencionando los mercados de predicción activos más relevantes, sus probabilidades actuales y volumen. Incluye qué implican esas probabilidades para el inversor. Si no hay datos de Polymarket, omite esta sección completamente (no la generes vacía).
@@ -625,8 +786,11 @@ Deno.serve(async (req) => {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || Deno.env.get("Groq");
     if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
 
-    const FINNHUB_KEY = (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "";
-    const TAVILY_KEY = (Deno.env.get("TAVILY_API_KEY") || Deno.env.get("Tavily")) ?? "";
+    const FINNHUB_KEY    = (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "";
+    const TAVILY_KEY     = (Deno.env.get("TAVILY_API_KEY")  || Deno.env.get("Tavily")) ?? "";
+    const FMP_KEY        = Deno.env.get("FMP")          ?? "";
+    const FRED_KEY       = Deno.env.get("Fred")         ?? "";
+    const TWELVE_KEY     = Deno.env.get("Twelve Data")  ?? "";
 
     const cleanTicker = ticker.trim().toUpperCase();
 
@@ -637,61 +801,58 @@ Deno.serve(async (req) => {
     const sector = finnhubData?.profile?.finnhubIndustry ?? "";
     const peers = finnhubData?.peers ?? [];
 
-    // Step 2: Fetch all data in parallel
+    // Step 2: Fetch all data sources in parallel
     const [
       quarterlyHistory,
       peerData,
       polymarketContext,
+      fredContext,
+      fmpContext,
+      twelveDataContext,
       geoContext,
       tickerNews,
       sectorNews,
-      analystSearch,
       earningsSearch,
       competitiveSearch,
-      institutionalSearch,
-      missingDataSearch,
       risksCatalystsSearch,
     ] = await Promise.all([
+      // Finnhub structured data
       FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, FINNHUB_KEY) : Promise.resolve([]),
       FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
-      // Polymarket prediction markets (no key needed)
+      // Free public APIs (no key)
       fetchPolymarketData(cleanTicker, companyName),
-      // Geopolitical + regulatory — more results, longer content
+      // FRED macro indicators
+      fetchFredData(FRED_KEY),
+      // FMP: price targets, institutional holders, insider trading
+      fetchFmpData(cleanTicker, FMP_KEY),
+      // Twelve Data: gap filler for N/D fundamentals
+      fetchTwelveData(cleanTicker, TWELVE_KEY),
+      // Tavily web searches (news & context)
       TAVILY_KEY
         ? fetchTavilySearch(
-            `${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions China EU USA 2025 2026`,
-            TAVILY_KEY, 4, 60, undefined, 220,
+            `${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions 2025 2026`,
+            TAVILY_KEY, 3, 60, undefined, 180,
           )
         : Promise.resolve(null),
-      // Ticker news
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} noticias ultimos dias`, TAVILY_KEY, 4, 7, "news", 150)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} news latest 2025 2026`, TAVILY_KEY, 4, 7, "news", 150)
         : Promise.resolve(null),
       TAVILY_KEY && sector
-        ? fetchTavilySearch(`${sector} sector tendencias outlook`, TAVILY_KEY, 3, 14, "news", 140)
+        ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, TAVILY_KEY, 3, 14, "news", 130)
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} analyst price target rating 2025`, TAVILY_KEY, 2, undefined, undefined, 120)
-        : Promise.resolve(null),
-      TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS 2024 2025`, TAVILY_KEY, 3, undefined, undefined, 140)
+        ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, TAVILY_KEY, 3, undefined, undefined, 140)
         : Promise.resolve(null),
       TAVILY_KEY && peers.length > 0
         ? fetchTavilySearch(
-            `${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive position`,
+            `${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`,
             TAVILY_KEY, 2, undefined, undefined, 120,
           )
         : Promise.resolve(null),
       TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} institutional ownership Vanguard BlackRock 2025`, TAVILY_KEY, 2, undefined, undefined, 110)
-        : Promise.resolve(null),
-      TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} free cash flow debt equity EBITDA 2024`, TAVILY_KEY, 2, undefined, undefined, 110)
-        : Promise.resolve(null),
-      TAVILY_KEY
         ? fetchTavilySearch(
-            `${companyName} ${cleanTicker} risks catalysts opportunities growth headwinds 2025 2026`,
-            TAVILY_KEY, 5, 30, "news", 180,
+            `${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`,
+            TAVILY_KEY, 4, 30, "news", 160,
           )
         : Promise.resolve(null),
     ]);
@@ -703,13 +864,13 @@ Deno.serve(async (req) => {
       geoContext,
       sectorNews,
       tickerNews,
-      analystSearch,
       earningsSearch,
       competitiveSearch,
-      institutionalSearch,
-      missingDataSearch,
       risksCatalystsSearch,
       polymarketContext,
+      fredContext,
+      fmpContext,
+      twelveDataContext,
     );
 
     console.log("Data sources loaded:", {
@@ -728,7 +889,10 @@ Deno.serve(async (req) => {
       tavily_institutional: institutionalSearch?.results?.length ?? 0,
       tavily_missing_data: missingDataSearch?.results?.length ?? 0,
       tavily_risks_catalysts: risksCatalystsSearch?.results?.length ?? 0,
-      polymarket_markets: polymarketContext ? polymarketContext.split("\n").filter(l => l.startsWith("-")).length : 0,
+      polymarket_markets: polymarketContext ? polymarketContext.split("\n").filter((l: string) => l.startsWith("-")).length : 0,
+      fred_ok: !!fredContext,
+      fmp_ok: !!fmpContext,
+      twelve_data_ok: !!twelveDataContext,
     });
 
     console.log("Calling Groq API...");
@@ -751,8 +915,10 @@ INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secciones obligatorias.
 - En ## Finanzas: incluye la tabla de métricas actuales. En ### Evolución Trimestral escribe SOLO el párrafo de análisis de tendencias (las tablas de datos trimestrales se renderizan automáticamente — NO las generes tú).
 - En ## Valoración: desarrolla Factores de Riesgo y Catalizadores con noticias concretas. Cita la fuente cuando esté disponible.
-- En ## Mercados de Predicción: solo si hay datos de POLYMARKET, comenta brevemente los mercados activos y sus probabilidades. Si no hay datos, omite la sección.
-- Usa datos de Finnhub. Si un dato es N/D, búscalo en las fuentes adicionales. Si no existe, omítelo.
+- En ## Finanzas: para cualquier métrica N/D en Finnhub, usa DATOS TWELVE DATA o FMP como fuente alternativa.
+- En ## Institucional: usa los datos estructurados de FMP (tenencias, precio objetivo, insider trading) como fuente principal.
+- En ## Noticias / ## Resumen: integra los indicadores FRED (tipos, inflación, yield bono 10Y) en el contexto macro.
+- En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Si no hay datos, omite la sección.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
           },
         ],
