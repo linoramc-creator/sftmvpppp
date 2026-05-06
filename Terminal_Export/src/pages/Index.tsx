@@ -30,13 +30,14 @@ function persistReports(reports: SavedReport[]) {
 // ── Section config ─────────────────────────────────────────────────────
 
 const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
-  "Resumen Ejecutivo": { label: "RESUMEN EJECUTIVO",  category: "EXECUTIVE SUMMARY"    },
-  "Finanzas":          { label: "FUNDAMENTALES",       category: "VALUATION & FINANCIALS"},
-  "Valoración":        { label: "VALORACIÓN",          category: "VALUATION"             },
-  "Competidores":      { label: "COMPETIDORES",        category: "PEERS & COMPS"         },
-  "Noticias":          { label: "NOTICIAS",            category: "MARKET NEWS"           },
-  "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"      },
-  "Mercados de Predicción": { label: "MERCADOS DE PREDICCIÓN",  category: "POLYMARKET"     },
+  "Resumen Ejecutivo":      { label: "RESUMEN EJECUTIVO",     category: "EXECUTIVE SUMMARY"     },
+  "Finanzas":               { label: "FUNDAMENTALES",          category: "VALUATION & FINANCIALS" },
+  "Valoración":             { label: "VALORACIÓN",             category: "VALUATION"              },
+  "Sector":                 { label: "SECTOR",                 category: "SECTOR & COMPS"         },
+  "Noticias":               { label: "NOTICIAS",               category: "MARKET NEWS"            },
+  "Señales Técnicas":       { label: "SEÑALES TÉCNICAS",       category: "TECHNICAL ANALYSIS"     },
+  "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
+  "Mercados de Predicción": { label: "MERCADOS DE PREDICCIÓN", category: "POLYMARKET"             },
 };
 
 const EXPECTED_TABS = Object.keys(SECTION_CONFIG);
@@ -739,22 +740,48 @@ function renderTable(tableLines: string[], baseKey: number) {
   );
 }
 
+const RISK_RED  = new Set(["ALTO","HIGH","BEARISH","BAJISTA","SOBRECOMPRADO"]);
+const RISK_AMB  = new Set(["MEDIO","MEDIUM","NEUTRO","NEUTRAL","MIXTO"]);
+const RISK_GRN  = new Set(["BAJO","LOW","BULLISH","ALCISTA","SOBREVENTA"]);
+
+function boldClass(inner: string): string {
+  const u = inner.toUpperCase().trim();
+  if (RISK_RED.has(u))  return "font-semibold text-destructive";
+  if (RISK_AMB.has(u))  return "font-semibold text-amber-400";
+  if (RISK_GRN.has(u))  return "font-semibold text-primary";
+  return "font-semibold text-foreground";
+}
+
 function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={i} className="text-foreground font-semibold">{part.slice(2, -2)}</strong>;
+  // Handle markdown links [text](url)
+  const withLinks = text.split(/(\[[^\]]+\]\([^)]+\))/g);
+  return withLinks.map((seg, si) => {
+    const linkMatch = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      return (
+        <a key={si} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+           className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors">
+          {linkMatch[1]}
+        </a>
+      );
     }
-    const codeParts = part.split(/(`[^`]+`)/g);
-    return codeParts.map((cp, j) => {
-      if (cp.startsWith("`") && cp.endsWith("`")) {
-        return (
-          <code key={`${i}-${j}`} className="bg-primary/10 text-primary px-1 py-0.5 text-xs">
-            {cp.slice(1, -1)}
-          </code>
-        );
+    const parts = seg.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        const inner = part.slice(2, -2);
+        return <strong key={`${si}-${i}`} className={boldClass(inner)}>{inner}</strong>;
       }
-      return <span key={`${i}-${j}`}>{cp}</span>;
+      const codeParts = part.split(/(`[^`]+`)/g);
+      return codeParts.map((cp, j) => {
+        if (cp.startsWith("`") && cp.endsWith("`")) {
+          return (
+            <code key={`${si}-${i}-${j}`} className="bg-primary/10 text-primary px-1 py-0.5 text-xs">
+              {cp.slice(1, -1)}
+            </code>
+          );
+        }
+        return <span key={`${si}-${i}-${j}`}>{cp}</span>;
+      });
     });
   });
 }
