@@ -768,7 +768,7 @@ REGLAS DE FORMATO:
 // -- Main handler --
 
 Deno.serve(async (req) => {
-  console.log("analyze-ticker v5-GROQ started");
+  console.log("analyze-ticker v6-GEMINI started");
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -783,8 +783,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || Deno.env.get("Groq");
-    if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini") || Deno.env.get("GOOGLE_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
     const FINNHUB_KEY    = (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "";
     const TAVILY_KEY     = (Deno.env.get("TAVILY_API_KEY")  || Deno.env.get("Tavily")) ?? "";
@@ -883,11 +883,8 @@ Deno.serve(async (req) => {
       tavily_geo: !!(geoContext?.answer),
       tavily_ticker_news: tickerNews?.results?.length ?? 0,
       tavily_sector_news: sectorNews?.results?.length ?? 0,
-      tavily_analyst: analystSearch?.results?.length ?? 0,
       tavily_earnings: earningsSearch?.results?.length ?? 0,
       tavily_competitive: competitiveSearch?.results?.length ?? 0,
-      tavily_institutional: institutionalSearch?.results?.length ?? 0,
-      tavily_missing_data: missingDataSearch?.results?.length ?? 0,
       tavily_risks_catalysts: risksCatalystsSearch?.results?.length ?? 0,
       polymarket_markets: polymarketContext ? polymarketContext.split("\n").filter((l: string) => l.startsWith("-")).length : 0,
       fred_ok: !!fredContext,
@@ -895,21 +892,22 @@ Deno.serve(async (req) => {
       twelve_data_ok: !!twelveDataContext,
     });
 
-    console.log("Calling Groq API...");
-    const orResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        max_tokens: 5200,
-        messages: [
-          { role: "system", content: buildSystemPrompt() },
-          {
-            role: "user",
-            content: `${dataContext}
+    console.log("Calling Gemini API...");
+    const orResponse = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GEMINI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gemini-2.5-pro",
+          messages: [
+            { role: "system", content: buildSystemPrompt() },
+            {
+              role: "user",
+              content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secciones obligatorias.
@@ -920,57 +918,58 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secci
 - En ## Noticias / ## Resumen: integra los indicadores FRED (tipos, inflación, yield bono 10Y) en el contexto macro.
 - En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Si no hay datos, omite la sección.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
-          },
-        ],
-        stream: true,
-      }),
-    });
+            },
+          ],
+          stream: true,
+        }),
+      }
+    );
 
-    console.log("Groq response status:", orResponse.status);
+    console.log("Gemini response status:", orResponse.status);
 
     if (!orResponse.ok) {
       const errBody = await orResponse.text();
-      console.error("Groq API error:", orResponse.status, errBody);
+      console.error("Gemini API error:", orResponse.status, errBody);
       if (orResponse.status === 429) {
         return new Response(
-          JSON.stringify({ error: "Límite de solicitudes excedido. Inténtalo en unos segundos." }),
+          JSON.stringify({ error: "Límite de solicitudes Gemini. Inténtalo en unos segundos." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (orResponse.status === 402) {
+      if (orResponse.status === 403) {
         return new Response(
-          JSON.stringify({ error: `Créditos agotados. Detalle: ${errBody.substring(0, 200)}` }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: "API key de Gemini inválida o sin permisos." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       return new Response(
-        JSON.stringify({ error: `Groq Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
+        JSON.stringify({ error: `Gemini Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     if (!orResponse.body) {
       return new Response(
-        JSON.stringify({ error: "Groq returned empty response body" }),
+        JSON.stringify({ error: "Gemini returned empty response body" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log("Streaming response to client...");
+    console.log("Streaming Gemini response to client...");
 
-    // Build a combined stream: quarterly JSON event first, then Groq SSE
+    // Combined stream: quarterly JSON event first, then Gemini SSE
     const encoder = new TextEncoder();
     const quarterlyEvent = encoder.encode(
       `data: ${JSON.stringify({ __quarterly: quarterlyHistory })}\n\n`
     );
-    const groqReader = orResponse.body!.getReader();
+    const geminiReader = orResponse.body!.getReader();
 
     const combined = new ReadableStream({
       async start(controller) {
         controller.enqueue(quarterlyEvent);
         try {
           while (true) {
-            const { done, value } = await groqReader.read();
+            const { done, value } = await geminiReader.read();
             if (done) break;
             controller.enqueue(value);
           }
@@ -978,7 +977,7 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secci
           controller.close();
         }
       },
-      cancel() { groqReader.cancel(); },
+      cancel() { geminiReader.cancel(); },
     });
 
     return new Response(combined, {
