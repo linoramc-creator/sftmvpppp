@@ -561,16 +561,6 @@ function buildDataContext(
     }
   }
 
-  // Analyst targets
-  if (analystSearch?.results?.length > 0) {
-    lines.push("", "--- OBJETIVOS DE PRECIO Y RATINGS DE ANALISTAS ---");
-    if (analystSearch.answer) lines.push(analystSearch.answer);
-    for (const result of analystSearch.results) {
-      lines.push(`- ${result.title}`);
-      if (result.content) lines.push(`  ${result.content}`);
-    }
-  }
-
   // Recent earnings
   if (earningsSearch?.results?.length > 0) {
     lines.push("", "--- RESULTADOS FINANCIEROS RECIENTES (EARNINGS) ---");
@@ -586,26 +576,6 @@ function buildDataContext(
     lines.push("", "--- POSICIÓN COMPETITIVA Y CUOTA DE MERCADO ---");
     if (competitiveSearch.answer) lines.push(competitiveSearch.answer);
     for (const result of competitiveSearch.results) {
-      lines.push(`- ${result.title}`);
-      if (result.content) lines.push(`  ${result.content}`);
-    }
-  }
-
-  // Institutional positions
-  if (institutionalSearch?.results?.length > 0) {
-    lines.push("", "--- POSICIONES INSTITUCIONALES (TAVILY) ---");
-    if (institutionalSearch.answer) lines.push(institutionalSearch.answer);
-    for (const result of institutionalSearch.results) {
-      lines.push(`- ${result.title}`);
-      if (result.content) lines.push(`  ${result.content}`);
-    }
-  }
-
-  // Missing data resolution
-  if (missingDataSearch?.results?.length > 0) {
-    lines.push("", "--- DATOS ADICIONALES PARA COMPLEMENTAR N/D (TAVILY) ---");
-    if (missingDataSearch.answer) lines.push(missingDataSearch.answer);
-    for (const result of missingDataSearch.results) {
       lines.push(`- ${result.title}`);
       if (result.content) lines.push(`  ${result.content}`);
     }
