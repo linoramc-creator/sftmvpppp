@@ -88,15 +88,17 @@
   color: hsl(var(--muted-foreground));
 }
 .analysis-content p {
-  @apply mb-3 text-xs leading-relaxed;
-  color: hsl(210 8% 58%);
+  @apply mb-3 leading-relaxed;
+  font-size: 13px;
+  color: hsl(210 8% 64%);
   font-family: var(--font-sans);
 }
 .analysis-content ul, .analysis-content ol {
   @apply mb-3;
 }
 .analysis-content li {
-  @apply mb-2 text-xs;
+  @apply mb-2.5;
+  font-size: 13px;
   font-family: var(--font-sans);
 }
 .analysis-content strong {
@@ -104,7 +106,8 @@
   @apply font-semibold;
 }
 .analysis-content table {
-  @apply w-full mb-4 text-xs;
+  @apply w-full mb-4;
+  font-size: 13px;
 }
 .analysis-content th {
   @apply text-left px-3 py-2 text-[10px] uppercase tracking-widest;
@@ -112,7 +115,8 @@
   border-bottom: 1px solid hsl(var(--border));
 }
 .analysis-content td {
-  @apply px-3 py-2 text-xs;
+  @apply px-3 py-2.5;
+  font-size: 13px;
   border-bottom: 1px solid hsl(var(--border) / 0.4);
 }
 .analysis-content blockquote {

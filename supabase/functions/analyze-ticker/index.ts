@@ -230,7 +230,9 @@ async function fetchPolymarketData(ticker: string, companyName: string): Promise
         const prices: string[] = JSON.parse(m.outcomePrices || "[]");
         const vol = m.volume ? `$${(m.volume / 1000).toFixed(0)}K vol` : "";
         const priceStr = outcomes.map((o, i) => `${o}: ${(parseFloat(prices[i] ?? "0") * 100).toFixed(0)}%`).join(" / ");
-        lines.push(`- "${m.question}"`);
+        const slug = m.slug ?? m.conditionId ?? "";
+        const url = slug ? ` — https://polymarket.com/event/${slug}` : "";
+        lines.push(`- "${m.question}"${url}`);
         lines.push(`  ${priceStr}${vol ? `  (${vol})` : ""}`);
       } catch (_) { /* skip malformed market */ }
     }
@@ -392,6 +394,41 @@ async function fetchTwelveData(ticker: string, key: string): Promise<string> {
   } catch (_) { return ""; }
 }
 
+// -- Technical indicators (Twelve Data) --
+
+async function fetchTechnicalIndicators(ticker: string, key: string): Promise<string> {
+  if (!key) return "";
+  const t = encodeURIComponent(ticker);
+  try {
+    const base = "https://api.twelvedata.com";
+    const [rsiData, macdData, sma50Data, sma200Data] = await Promise.all([
+      fetch(`${base}/rsi?symbol=${t}&interval=1day&time_period=14&outputsize=1&apikey=${key}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/macd?symbol=${t}&interval=1day&outputsize=1&apikey=${key}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/sma?symbol=${t}&interval=1day&time_period=50&outputsize=1&apikey=${key}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/sma?symbol=${t}&interval=1day&time_period=200&outputsize=1&apikey=${key}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+
+    const rsi    = rsiData?.values?.[0]?.rsi         ? Number(rsiData.values[0].rsi).toFixed(2)            : null;
+    const macd   = macdData?.values?.[0]?.macd        ? Number(macdData.values[0].macd).toFixed(3)          : null;
+    const signal = macdData?.values?.[0]?.macd_signal ? Number(macdData.values[0].macd_signal).toFixed(3)   : null;
+    const hist   = macdData?.values?.[0]?.macd_hist   ? Number(macdData.values[0].macd_hist).toFixed(3)     : null;
+    const sma50  = sma50Data?.values?.[0]?.sma        ? Number(sma50Data.values[0].sma).toFixed(2)          : null;
+    const sma200 = sma200Data?.values?.[0]?.sma       ? Number(sma200Data.values[0].sma).toFixed(2)         : null;
+
+    const parts: string[] = ["--- INDICADORES TÉCNICOS (TWELVE DATA) ---"];
+    if (rsi)   parts.push(`RSI(14): ${rsi}`);
+    if (macd)  parts.push(`MACD: ${macd}${signal ? ` | Signal: ${signal}` : ""}${hist ? ` | Histograma: ${hist}` : ""}`);
+    if (sma50)  parts.push(`SMA 50: $${sma50}`);
+    if (sma200) parts.push(`SMA 200: $${sma200}`);
+
+    return parts.length > 1 ? parts.join("\n") : "";
+  } catch (_) { return ""; }
+}
+
 // -- Number helpers --
 
 /** Round any number to exactly 2 decimal places; return "N/D" if null/undefined */
@@ -416,6 +453,7 @@ function buildDataContext(
   fredContext: string,
   fmpContext: string,
   twelveDataContext: string,
+  technicalContext: string,
 ): string {
   if (!data || (!data.quote && !data.profile)) {
     return "[Nota: datos en tiempo real no disponibles para este ticker]";
@@ -630,6 +668,9 @@ function buildDataContext(
   // Twelve Data statistics (N/D gap filler)
   if (twelveDataContext) lines.push("", twelveDataContext);
 
+  // Technical indicators (RSI, MACD, SMA)
+  if (technicalContext) lines.push("", technicalContext);
+
   // Polymarket prediction markets
   if (polymarketContext) lines.push("", polymarketContext);
 
@@ -643,12 +684,13 @@ function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
   return `Eres un analista financiero institucional senior. Fecha: ${today}.
 
-Genera EXACTAMENTE las 7 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
+Genera EXACTAMENTE las 8 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
 ## Resumen Ejecutivo
 ## Finanzas
 ## Valoración
-## Competidores
+## Sector
 ## Noticias
+## Señales Técnicas
 ## Institucional
 ## Mercados de Predicción
 
@@ -687,12 +729,9 @@ PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
 | 52W Return | |
 | Volumen Promedio 10D | |
 
-Si un dato es N/D en Finnhub, búscalo en DATOS TWELVE DATA, FMP, o HISTORIAL TRIMESTRAL. Prioriza siempre datos reales sobre estimaciones. Nunca inventes.
+Si un dato es N/D en Finnhub, búscalo en DATOS TWELVE DATA, FMP, o HISTORIAL TRIMESTRAL. Prioriza datos reales. Nunca inventes.
 
-PARTE 2 — ### Evolución Trimestral
-Las tablas de datos históricos se renderizan automáticamente en el informe.
-Escribe ÚNICAMENTE un párrafo de análisis (5-6 líneas) sobre las tendencias observadas en los últimos 6 trimestres:
-crecimiento o desaceleración de ingresos, evolución de márgenes, generación de Free Cash Flow, cambios en deuda y solidez del balance.
+PARTE 2 — Las tablas de evolución trimestral (P&L, Cash Flow, Balance) se renderizan automáticamente en el informe. NO generes ningún texto ni tabla para este bloque.
 
 PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 
@@ -700,22 +739,37 @@ PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 - ### Análisis de Múltiplos: tabla P/E, P/B, EV/EBITDA, P/S empresa vs media sectorial. Párrafo 4-5 líneas.
 - ### Análisis del Sector: 5-6 líneas sobre estado, tendencias estructurales, macro, perspectivas 12M.
 - ### Factores de Riesgo (8-10 viñetas):
-  Formato: "- **Tipo:** descripción con cifras/eventos. (Fuente: medio)"
-  Usa RIESGOS Y CATALIZADORES NOTICIAS + CONTEXTO GEOPOLÍTICO para citar.
+  Formato: "- **Tipo:** descripción con cifras/eventos. Nivel: **ALTO** / **MEDIO** / **BAJO**"
   Cubre: regulatorio, competitivo, macro (tipos/aranceles/divisa), operativo, concentración, geopolítico.
 - ### Catalizadores Positivos (6-8 viñetas):
   Divide en **Corto plazo (0-3m)**, **Medio plazo (3-12m)**, **Largo plazo (+12m)**.
-  Cita noticias concretas de las fuentes proporcionadas.
 
-## Competidores
-- ### Tabla Comparativa: Empresa | Ticker | Precio | Market Cap | P/E TTM | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta. Empresa analizada primera fila con *.
-- ### Análisis Competitivo: 5-6 líneas sobre posición relativa.
-- ### Cuota de Mercado y Posicionamiento: 3-4 líneas.
+## Sector
+- ### Tabla Comparativa del Sector: tabla Empresa | Ticker | Precio | Market Cap | P/E TTM | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta. Empresa analizada en primera fila con *.
+- ### Análisis del Sector: 5-6 líneas sobre estado del sector, posición relativa, tendencias estructurales, macro, perspectivas 12M.
+- ### Posicionamiento Competitivo: 3-4 líneas sobre cuota de mercado y ventajas diferenciales.
 
 ## Noticias
 - ### Noticias Corporativas Recientes: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. (Fuente)"
 - ### Noticias del Sector: 3-4 noticias. Mismo formato.
-- ### Contexto Macro Relevante: 4-5 líneas sobre entorno macro/geopolítico con impacto directo. Usa CONTEXTO GEOPOLÍTICO para detallar aranceles, regulación específica, tensiones geopolíticas.
+- ### Contexto Macro Relevante: 4-5 líneas sobre entorno macro/geopolítico con impacto directo. Integra indicadores FRED (tipos, inflación, yield 10Y).
+
+## Señales Técnicas
+Usa los INDICADORES TÉCNICOS (TWELVE DATA) y el precio actual / rango 52W de Finnhub.
+
+### Indicadores
+| Indicador | Valor | Señal |
+|---|---|---|
+| Tendencia | [descripción: ej. Precio > SMA50 > SMA200] | **BULLISH** / **BEARISH** / **NEUTRO** |
+| RSI (14) | [valor] | **SOBRECOMPRADO** (>70) / **SOBREVENTA** (<30) / **NEUTRO** (30-70) |
+| MACD | [valor] (Signal: [señal]) | **ALCISTA** si MACD>Signal / **BAJISTA** si MACD<Signal |
+| SMA 50 | $[valor] | [% precio vs SMA50] |
+| SMA 200 | $[valor] | [% precio vs SMA200] |
+| Soporte Clave | $[nivel] | [fuente: SMA200 / 52W Low] |
+| Resistencia Clave | $[nivel] | [fuente: 52W High / nivel técnico] |
+
+### Análisis Técnico
+2-3 líneas sobre la visión técnica: tendencia dominante, confluencias de señales, niveles críticos a vigilar.
 
 ## Institucional
 - ### Tenencias Institucionales: usa datos de TENENCIAS INSTITUCIONALES (FMP) para listar los principales holders con acciones y valor. Añade % institucional de Twelve Data si disponible.
@@ -725,13 +779,15 @@ PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 - ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales y sentimiento general.
 
 ## Mercados de Predicción
-Solo si existen datos en POLYMARKET: escribe 3-5 líneas mencionando los mercados de predicción activos más relevantes, sus probabilidades actuales y volumen. Incluye qué implican esas probabilidades para el inversor. Si no hay datos de Polymarket, omite esta sección completamente (no la generes vacía).
+Solo si existen datos en POLYMARKET: escribe 3-5 líneas mencionando los mercados de predicción activos más relevantes, sus probabilidades actuales y volumen. Para cada mercado, incluye el enlace del contexto en formato [ver en Polymarket](url). Explica qué implican esas probabilidades para el inversor. Si no hay datos de Polymarket, omite esta sección completamente.
 
 REGLAS DE FORMATO:
 - Markdown estricto. Sin emojis.
 - TODOS los números: exactamente 2 decimales (21.28, no 21.2848; 40.84%, no 40.839999%).
 - Unidades siempre presentes: $, %, x, B, M.
-- Si un dato no existe en ninguna fuente: OMITE esa fila o usa el mejor estimado disponible con nota "(est.)". NUNCA escribas "N/D" en el informe final.
+- Señales técnicas en **NEGRITAS**: **BULLISH**, **BEARISH**, **NEUTRO**, **ALCISTA**, **BAJISTA**, **SOBRECOMPRADO**, **SOBREVENTA**.
+- Niveles de riesgo en **NEGRITAS**: **ALTO**, **MEDIO**, **BAJO**.
+- Si un dato no existe en ninguna fuente: OMITE esa fila o usa el mejor estimado con nota "(est.)". NUNCA escribas "N/D" en el informe final.
 - No cortes frases a medias.`;
 }
 
@@ -779,6 +835,7 @@ Deno.serve(async (req) => {
       fredContext,
       fmpContext,
       twelveDataContext,
+      technicalContext,
       geoContext,
       tickerNews,
       sectorNews,
@@ -797,6 +854,7 @@ Deno.serve(async (req) => {
       fetchFmpData(cleanTicker, FMP_KEY),
       // Twelve Data: gap filler for N/D fundamentals
       fetchTwelveData(cleanTicker, TWELVE_KEY),
+      fetchTechnicalIndicators(cleanTicker, TWELVE_KEY),
       // Tavily web searches (news & context)
       TAVILY_KEY
         ? fetchTavilySearch(
@@ -841,6 +899,7 @@ Deno.serve(async (req) => {
       fredContext,
       fmpContext,
       twelveDataContext,
+      technicalContext,
     );
 
     console.log("Data sources loaded:", {
@@ -880,13 +939,15 @@ Deno.serve(async (req) => {
               content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
-Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secciones obligatorias.
-- En ## Finanzas: incluye la tabla de métricas actuales. En ### Evolución Trimestral escribe SOLO el párrafo de análisis de tendencias (las tablas de datos trimestrales se renderizan automáticamente — NO las generes tú).
-- En ## Valoración: desarrolla Factores de Riesgo y Catalizadores con noticias concretas. Cita la fuente cuando esté disponible.
-- En ## Finanzas: para cualquier métrica N/D en Finnhub, usa DATOS TWELVE DATA o FMP como fuente alternativa.
-- En ## Institucional: usa los datos estructurados de FMP (tenencias, precio objetivo, insider trading) como fuente principal.
-- En ## Noticias / ## Resumen: integra los indicadores FRED (tipos, inflación, yield bono 10Y) en el contexto macro.
-- En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Si no hay datos, omite la sección.
+Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
+- En ## Finanzas: incluye la tabla de métricas actuales (PARTE 1). Las tablas trimestrales se renderizan automáticamente — NO las generes.
+- En ## Valoración: desarrolla Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
+- En ## Finanzas: para cualquier métrica N/D en Finnhub, usa DATOS TWELVE DATA o FMP.
+- En ## Sector: usa los datos de peers de Finnhub para la tabla comparativa.
+- En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
+- En ## Institucional: usa los datos estructurados de FMP como fuente principal.
+- En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
+- En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Incluye el enlace. Si no hay datos, omite la sección.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
             },
           ],
