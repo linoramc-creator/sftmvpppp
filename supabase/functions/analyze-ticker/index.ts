@@ -921,22 +921,15 @@ Deno.serve(async (req) => {
       twelve_data_ok: !!twelveDataContext,
     });
 
-    console.log("Calling Gemini API...");
-    const orResponse = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash",
-          messages: [
-            { role: "system", content: buildSystemPrompt() },
-            {
-              role: "user",
-              content: `${dataContext}
+    console.log("Calling Gemini API (with fallback)...");
+    const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+    const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
+    const geminiBody = {
+      messages: [
+        { role: "system", content: buildSystemPrompt() },
+        {
+          role: "user",
+          content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
@@ -949,35 +942,52 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
 - En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Incluye el enlace. Si no hay datos, omite la sección.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
-            },
-          ],
-          stream: true,
-        }),
-      }
-    );
+        },
+      ],
+      stream: true,
+    };
 
-    console.log("Gemini response status:", orResponse.status);
-
-    if (!orResponse.ok) {
-      const errBody = await orResponse.text();
-      console.error("Gemini API error:", orResponse.status, errBody);
-      if (orResponse.status === 429) {
+    let orResponse: Response | null = null;
+    let usedModel = "";
+    for (const model of GEMINI_MODELS) {
+      const res = await fetch(GEMINI_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...geminiBody, model }),
+      });
+      console.log(`Gemini [${model}] status:`, res.status);
+      if (res.ok) { orResponse = res; usedModel = model; break; }
+      if (res.status !== 503 && res.status !== 529) {
+        // Non-transient error — handle normally
+        const errBody = await res.text();
+        console.error("Gemini API error:", res.status, errBody);
+        if (res.status === 429) {
+          return new Response(
+            JSON.stringify({ error: "Límite de solicitudes Gemini. Inténtalo en unos segundos." }),
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        if (res.status === 403) {
+          return new Response(
+            JSON.stringify({ error: "API key de Gemini inválida o sin permisos." }),
+            { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
         return new Response(
-          JSON.stringify({ error: "Límite de solicitudes Gemini. Inténtalo en unos segundos." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: `Gemini Error (${res.status}): ${errBody.substring(0, 300)}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (orResponse.status === 403) {
-        return new Response(
-          JSON.stringify({ error: "API key de Gemini inválida o sin permisos." }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+      console.warn(`Model ${model} overloaded (503), trying next fallback...`);
+    }
+
+    if (!orResponse) {
       return new Response(
-        JSON.stringify({ error: `Gemini Error (${orResponse.status}): ${errBody.substring(0, 300)}` }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Todos los modelos Gemini están saturados. Inténtalo en unos segundos." }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    console.log(`Streaming with model: ${usedModel}`);
 
     if (!orResponse.body) {
       return new Response(
