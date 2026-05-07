@@ -89,7 +89,7 @@
 }
 .analysis-content p {
   @apply mb-3 leading-relaxed;
-  font-size: 13px;
+  font-size: 14px;
   color: hsl(210 8% 64%);
   font-family: var(--font-sans);
 }
@@ -98,7 +98,7 @@
 }
 .analysis-content li {
   @apply mb-2.5;
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-sans);
 }
 .analysis-content strong {
@@ -110,7 +110,7 @@
   font-size: 13px;
 }
 .analysis-content th {
-  @apply text-left px-3 py-2 text-[10px] uppercase tracking-widest;
+  @apply text-left px-3 py-2.5 text-[11px] uppercase tracking-widest;
   color: hsl(var(--muted-foreground));
   border-bottom: 1px solid hsl(var(--border));
 }

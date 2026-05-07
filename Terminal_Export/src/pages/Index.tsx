@@ -489,13 +489,13 @@ function QTable({ title, rows, periods, rightLabel }: {
         <table className="w-full text-xs min-w-max">
           <thead>
             <tr className="border-b border-border bg-secondary/30">
-              <th className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/50 font-medium w-32">
+              <th className="px-3 py-2.5 text-left text-[11px] tracking-widest text-muted-foreground/50 font-medium w-36">
                 MÉTRICA
               </th>
               {periods.map((p, i) => (
                 <th
                   key={i}
-                  className={`px-3 py-2 text-center text-[10px] tracking-widest font-semibold ${
+                  className={`px-3 py-2.5 text-center text-[11px] tracking-widest font-semibold ${
                     i === 0 ? "text-primary" : "text-muted-foreground/50"
                   }`}
                 >
@@ -509,13 +509,13 @@ function QTable({ title, rows, periods, rightLabel }: {
               const cleaned = row.values.map(cleanVal);
               return (
                 <tr key={row.label} className="hover:bg-primary/3 transition-colors">
-                  <td className="px-3 py-2 text-[10px] tracking-wider text-muted-foreground/60 whitespace-nowrap border-r border-border/30">
+                  <td className="px-3 py-2.5 text-[11px] tracking-wider text-muted-foreground/60 whitespace-nowrap border-r border-border/30">
                     {row.label}
                   </td>
                   {cleaned.map((v, i) => (
                     <td
                       key={i}
-                      className={`px-3 py-2 text-center text-xs whitespace-nowrap ${numClass(v, row.colorize)}`}
+                      className={`px-3 py-2.5 text-center text-[13px] whitespace-nowrap ${numClass(v, row.colorize)}`}
                     >
                       {v}
                     </td>
@@ -689,17 +689,29 @@ function renderTable(tableLines: string[], baseKey: number) {
   const headerCells = parseRow(tableLines[0]);
   const isSep = (line: string) => /^\|?[\s\-:|]+\|?$/.test(line);
   const startData = isSep(tableLines[1]) ? 2 : 1;
-  const dataRows = tableLines.slice(startData).filter((l) => !isSep(l));
+  const ND_VALS = new Set(["N/D", "N/A", "—", "-", ""]);
+
+  // Filter out rows where every data cell (non-label) is N/D
+  const dataRows = tableLines.slice(startData).filter((l) => {
+    if (isSep(l)) return false;
+    const cells = parseRow(l);
+    return cells.slice(1).some((c) => {
+      const v = c.replace(/^\*+|\*+$/g, "").trim();
+      return v && !ND_VALS.has(v);
+    });
+  });
+
+  if (!dataRows.length) return null;
 
   return (
     <div key={`tbl-${baseKey}`} className="my-4 overflow-x-auto border border-border">
-      <table className="w-full text-xs font-mono min-w-max">
+      <table className="w-full font-mono min-w-max" style={{ fontSize: "13px" }}>
         <thead>
           <tr className="border-b border-border bg-secondary/50">
             {headerCells.map((cell, j) => (
               <th
                 key={j}
-                className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/60 font-medium uppercase"
+                className="px-3 py-2.5 text-left text-[11px] tracking-widest text-muted-foreground/60 font-medium uppercase"
               >
                 {cell}
               </th>
@@ -716,17 +728,17 @@ function renderTable(tableLines: string[], baseKey: number) {
                   const val = raw.replace(/(-?\d+\.\d{3,})/g, (m) => {
                     const n = parseFloat(m); return isNaN(n) ? m : n.toFixed(2);
                   });
-                  const isNDVal = val === "N/D" || val === "—";
+                  const isNDVal = ND_VALS.has(val);
                   const isNum   = /^[-+$]?\d/.test(val) || val.includes("%") || val.includes("x");
                   const isNeg   = /^-/.test(val) && !isNDVal;
 
                   let cls = j === 0 ? "text-foreground/80 font-medium" : "text-foreground/65";
                   if (isNum && !isNeg) cls = "text-primary font-mono";
                   if (isNeg)          cls = "text-destructive font-mono";
-                  if (isNDVal)        cls = "text-muted-foreground/25";
+                  if (isNDVal)        cls = "text-muted-foreground/20";
 
                   return (
-                    <td key={j} className={`px-3 py-2 whitespace-nowrap text-xs ${cls}`}>
+                    <td key={j} className={`px-3 py-2.5 whitespace-nowrap ${cls}`}>
                       {renderInline(val)}
                     </td>
                   );
