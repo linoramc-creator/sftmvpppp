@@ -923,7 +923,16 @@ Deno.serve(async (req) => {
 
     console.log("Calling Gemini API (with fallback)...");
     const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-    const GEMINI_MODELS = ["gemini-3.1-pro", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
+    // Try newest model variants first, fall back to known-working 2.5-pro
+    const GEMINI_MODELS = [
+      "gemini-3-pro-latest",
+      "gemini-3.0-pro",
+      "gemini-3-pro",
+      "gemini-2.5-pro-latest",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+    ];
     const geminiBody = {
       messages: [
         { role: "system", content: buildSystemPrompt() },
@@ -957,28 +966,24 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
       });
       console.log(`Gemini [${model}] status:`, res.status);
       if (res.ok) { orResponse = res; usedModel = model; break; }
-      if (res.status !== 503 && res.status !== 529) {
-        // Non-transient error — handle normally
-        const errBody = await res.text();
-        console.error("Gemini API error:", res.status, errBody);
-        if (res.status === 429) {
-          return new Response(
-            JSON.stringify({ error: "Límite de solicitudes Gemini. Inténtalo en unos segundos." }),
-            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-        if (res.status === 403) {
-          return new Response(
-            JSON.stringify({ error: "API key de Gemini inválida o sin permisos." }),
-            { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
+
+      // Auth errors → don't retry, fail immediately
+      if (res.status === 401 || res.status === 403) {
         return new Response(
-          JSON.stringify({ error: `Gemini Error (${res.status}): ${errBody.substring(0, 300)}` }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: "API key de Gemini inválida o sin permisos." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      console.warn(`Model ${model} overloaded (503), trying next fallback...`);
+      // Rate limit → don't retry
+      if (res.status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Límite de solicitudes Gemini. Inténtalo en unos segundos." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      // 404 (model not found), 503/529 (overloaded), 400 (bad model) → try next
+      const errBody = await res.text();
+      console.warn(`Model ${model} unavailable (${res.status}): ${errBody.substring(0, 150)}. Trying next fallback...`);
     }
 
     if (!orResponse) {
