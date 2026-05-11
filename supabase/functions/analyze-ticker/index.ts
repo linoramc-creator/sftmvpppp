@@ -923,7 +923,7 @@ Deno.serve(async (req) => {
 
     console.log("Calling Gemini API (with fallback)...");
     const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-    const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
+    const GEMINI_MODELS = ["gemini-3.1-pro", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
     const geminiBody = {
       messages: [
         { role: "system", content: buildSystemPrompt() },

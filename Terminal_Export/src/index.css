@@ -79,17 +79,19 @@
 
 /* Analysis content — terminal */
 .analysis-content h3 {
-  @apply text-xs font-semibold mb-3 mt-5 pb-1.5 tracking-widest uppercase;
+  @apply font-semibold mb-3 mt-5 pb-2 tracking-widest uppercase;
+  font-size: 11px;
   color: hsl(var(--primary));
   border-bottom: 1px solid hsl(var(--border));
 }
 .analysis-content h4 {
-  @apply text-[10px] font-semibold mb-2 mt-4 tracking-widest uppercase;
+  @apply font-semibold mb-2 mt-4 tracking-widest uppercase;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
 .analysis-content p {
   @apply mb-3 leading-relaxed;
-  font-size: 14px;
+  font-size: 15px;
   color: hsl(210 8% 64%);
   font-family: var(--font-sans);
 }
@@ -97,8 +99,8 @@
   @apply mb-3;
 }
 .analysis-content li {
-  @apply mb-2.5;
-  font-size: 14px;
+  @apply mb-3;
+  font-size: 15px;
   font-family: var(--font-sans);
 }
 .analysis-content strong {
@@ -107,16 +109,16 @@
 }
 .analysis-content table {
   @apply w-full mb-4;
-  font-size: 13px;
+  font-size: 14px;
 }
 .analysis-content th {
-  @apply text-left px-3 py-2.5 text-[11px] uppercase tracking-widest;
+  @apply text-left px-4 py-3 text-[11px] uppercase tracking-widest;
   color: hsl(var(--muted-foreground));
   border-bottom: 1px solid hsl(var(--border));
 }
 .analysis-content td {
-  @apply px-3 py-2.5;
-  font-size: 13px;
+  @apply px-4 py-3;
+  font-size: 14px;
   border-bottom: 1px solid hsl(var(--border) / 0.4);
 }
 .analysis-content blockquote {
