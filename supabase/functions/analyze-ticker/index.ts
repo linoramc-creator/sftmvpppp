@@ -787,7 +787,7 @@ REGLAS DE FORMATO:
 - Unidades siempre presentes: $, %, x, B, M.
 - Señales técnicas en **NEGRITAS**: **BULLISH**, **BEARISH**, **NEUTRO**, **ALCISTA**, **BAJISTA**, **SOBRECOMPRADO**, **SOBREVENTA**.
 - Niveles de riesgo en **NEGRITAS**: **ALTO**, **MEDIO**, **BAJO**.
-- Si un dato no existe en ninguna fuente: OMITE esa fila o usa el mejor estimado con nota "(est.)". NUNCA escribas "N/D" en el informe final.
+- CERO N/D EN EL INFORME: Está PROHIBIDO escribir N/D, N/A, -, — o cualquier equivalente en el informe. Si un dato no está en Finnhub, búscalo en DATOS TWELVE DATA (enterprise_to_ebitda, forward_pe, total_debt_to_equity_mrq, etc.), luego en FMP, luego en HISTORIAL TRIMESTRAL. Si tras buscar en TODAS las fuentes no existe el dato, OMITE esa fila de la tabla completamente — no la incluyas. Un informe sin una fila es mejor que un informe con N/D.
 - No cortes frases a medias.`;
 }
 
@@ -923,7 +923,7 @@ Deno.serve(async (req) => {
 
     console.log("Calling Gemini API (with fallback)...");
     const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-    const GEMINI_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
+    const GEMINI_MODELS = ["gemini-3.1-pro", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
     const geminiBody = {
       messages: [
         { role: "system", content: buildSystemPrompt() },
@@ -935,8 +935,8 @@ INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
 - En ## Finanzas: incluye la tabla de métricas actuales (PARTE 1). Las tablas trimestrales se renderizan automáticamente — NO las generes.
 - En ## Valoración: desarrolla Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
-- En ## Finanzas: para cualquier métrica N/D en Finnhub, usa DATOS TWELVE DATA o FMP.
-- En ## Sector: usa los datos de peers de Finnhub para la tabla comparativa.
+- En ## Finanzas: para cualquier métrica no disponible en Finnhub, usa DATOS TWELVE DATA o FMP. Si no hay dato en ninguna fuente, OMITE esa fila. CERO N/D permitidos.
+- En ## Sector: usa los datos de peers de Finnhub para la tabla comparativa. Omite columnas sin dato.
 - En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
 - En ## Institucional: usa los datos estructurados de FMP como fuente principal.
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.

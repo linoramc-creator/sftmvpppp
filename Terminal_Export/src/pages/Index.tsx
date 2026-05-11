@@ -468,116 +468,99 @@ function SavedReportCard({
   );
 }
 
-// ── Quarterly tables ───────────────────────────────────────────────────
+// ── Quarterly history (5 key metrics, Alpha-style) ─────────────────────
 
-function QTable({ title, rows, periods, rightLabel }: {
-  title: string;
-  periods: string[];
-  rightLabel: string;
-  rows: { label: string; values: string[]; colorize?: boolean }[];
-}) {
-  const visible = rows.filter((r) => !allND(r.values));
-  if (!visible.length) return null;
+function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
+  if (!data.length) return null;
+
+  // Oldest → newest left to right (matches Alpha Market Tools style)
+  const sorted = [...data].reverse();
+  const periods = sorted.map((q) => fmtPeriod(q.period));
+  const latest  = sorted.length - 1;
+  const col     = (f: keyof QuarterlyPeriod) => sorted.map((q) => q[f] as string);
+
+  const ROWS: { label: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean }[] = [
+    { label: "Revenue",        values: col("revenue"),       bold: true  },
+    { label: "Rev. Growth YoY",values: col("revenueGrowth"), colorize: true },
+    { label: "Gross Margin",   values: col("grossMargin"),   colorize: true, separator: true },
+    { label: "EBITDA",         values: col("ebitda"),        bold: true  },
+    { label: "Net Income",     values: col("netIncome"),     bold: true  },
+    { label: "Net Margin",     values: col("netMargin"),     colorize: true, separator: true },
+    { label: "Free Cash Flow", values: col("freeCashFlow"),  bold: true  },
+    { label: "EPS",            values: col("eps") },
+  ].filter(r => !allND(r.values));
 
   return (
-    <div className="mb-4">
-      <div className="flex items-center justify-between px-3 py-2 bg-secondary/60 border-b border-border">
-        <span className="text-[10px] tracking-widest text-foreground font-semibold">{title}</span>
-        <span className="text-[9px] tracking-widest text-muted-foreground/40">{rightLabel}</span>
+    <div className="mb-6 border border-border overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
+        <div className="flex items-center gap-3">
+          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FINANCIAL STATEMENTS</span>
+          <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
+        </div>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">{sorted.length}Q · FINNHUB</span>
       </div>
+
       <div className="overflow-x-auto">
-        <table className="w-full text-xs min-w-max">
+        <table className="w-full min-w-max">
           <thead>
-            <tr className="border-b border-border bg-secondary/30">
-              <th className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/50 font-medium w-32">
-                MÉTRICA
+            <tr className="border-b border-border bg-secondary/20">
+              <th className="px-5 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium"
+                  style={{ minWidth: 160 }}>
+                LINE ITEM
               </th>
               {periods.map((p, i) => (
-                <th
-                  key={i}
-                  className={`px-3 py-2 text-center text-[10px] tracking-widest font-semibold ${
-                    i === 0 ? "text-primary" : "text-muted-foreground/50"
-                  }`}
-                >
+                <th key={i}
+                    className={`px-4 py-3 text-right text-[11px] tracking-widest font-semibold whitespace-nowrap ${
+                      i === latest ? "text-primary" : "text-muted-foreground/40"
+                    }`}
+                    style={{ minWidth: 88 }}>
                   {p}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border/30">
-            {visible.map((row) => {
+          <tbody>
+            {ROWS.map((row, ri) => {
               const cleaned = row.values.map(cleanVal);
               return (
-                <tr key={row.label} className="hover:bg-primary/3 transition-colors">
-                  <td className="px-3 py-2 text-[10px] tracking-wider text-muted-foreground/60 whitespace-nowrap border-r border-border/30">
+                <tr key={row.label}
+                    className={`border-b transition-colors hover:bg-primary/3 ${
+                      row.separator ? "border-border/60" : "border-border/20"
+                    }`}>
+                  <td className={`px-5 py-3.5 whitespace-nowrap border-r border-border/20 ${
+                    row.bold
+                      ? "text-[13px] text-foreground font-semibold"
+                      : "text-[12px] text-muted-foreground/60 font-normal"
+                  }`}>
                     {row.label}
                   </td>
-                  {cleaned.map((v, i) => (
-                    <td
-                      key={i}
-                      className={`px-3 py-2 text-center text-xs whitespace-nowrap ${numClass(v, row.colorize)}`}
-                    >
-                      {v}
-                    </td>
-                  ))}
+                  {cleaned.map((v, i) => {
+                    const nd  = v === "—";
+                    const neg = !nd && (v.startsWith("-") || (row.colorize && v.startsWith("-")));
+                    const pos = !nd && row.colorize && v.startsWith("+");
+                    const isLatest = i === latest;
+
+                    let cls = isLatest
+                      ? (row.bold ? "text-foreground font-semibold" : "text-foreground/80")
+                      : "text-foreground/50";
+                    if (nd)  cls = "text-muted-foreground/20";
+                    if (neg) cls = isLatest ? "text-destructive font-semibold" : "text-destructive/60";
+                    if (pos) cls = isLatest ? "text-primary font-semibold"     : "text-primary/60";
+
+                    return (
+                      <td key={i}
+                          className={`px-4 py-3.5 text-right tabular-nums whitespace-nowrap text-[14px] ${cls}`}>
+                        {nd ? <span className="text-muted-foreground/20">—</span> : v}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}
           </tbody>
         </table>
-      </div>
-    </div>
-  );
-}
-
-function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
-  if (!data.length) return null;
-  const periods = data.map((q) => fmtPeriod(q.period));
-  const col = (f: keyof QuarterlyPeriod) => data.map((q) => q[f] as string);
-
-  return (
-    <div className="mb-5 border border-border">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
-        <span className="text-[10px] tracking-widest text-foreground font-semibold">HISTÓRICO TRIMESTRAL</span>
-        <span className="text-[9px] tracking-widest text-muted-foreground/40">QUARTERLY RESULTS</span>
-      </div>
-      <div className="p-3 space-y-px">
-        <QTable
-          title="CUENTA DE RESULTADOS"
-          rightLabel="P&L"
-          periods={periods}
-          rows={[
-            { label: "Revenue",      values: col("revenue") },
-            { label: "Var. YoY",     values: col("revenueGrowth"), colorize: true },
-            { label: "M. Bruto",     values: col("grossMargin"),   colorize: true },
-            { label: "EBITDA",       values: col("ebitda") },
-            { label: "Bfº Neto",     values: col("netIncome") },
-            { label: "M. Neto",      values: col("netMargin"),     colorize: true },
-            { label: "EPS",          values: col("eps") },
-          ]}
-        />
-        <QTable
-          title="CASH FLOW"
-          rightLabel="CASH FLOW STATEMENT"
-          periods={periods}
-          rows={[
-            { label: "CF Operativo", values: col("operatingCF") },
-            { label: "Free CF",      values: col("freeCashFlow") },
-            { label: "Capex",        values: col("capex") },
-          ]}
-        />
-        <QTable
-          title="BALANCE / SOLVENCIA"
-          rightLabel="BALANCE SHEET"
-          periods={periods}
-          rows={[
-            { label: "Caja",         values: col("cash") },
-            { label: "Deuda Total",  values: col("totalDebt") },
-            { label: "Deuda Neta",   values: col("netDebt") },
-            { label: "Equity",       values: col("equity") },
-            { label: "Total Activos",values: col("totalAssets") },
-          ]}
-        />
       </div>
     </div>
   );
@@ -633,9 +616,9 @@ function parseSections(content: string): Record<string, React.ReactNode[]> {
       currentElements.push(<hr key={i} />);
     } else if (line.match(/^[-*] /)) {
       currentElements.push(
-        <li key={i} className="ml-1 mb-2 list-none flex items-start gap-2">
-          <span className="text-primary/50 mt-0.5 text-[10px] select-none shrink-0">▸</span>
-          <span className="flex-1 text-foreground/75 text-xs leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>
+        <li key={i} className="ml-1 mb-3 list-none flex items-start gap-2.5">
+          <span className="text-primary/50 mt-1 text-[10px] select-none shrink-0">▸</span>
+          <span className="flex-1 text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)", fontSize: "15px" }}>
             {renderInline(line.slice(2))}
           </span>
         </li>
@@ -689,17 +672,29 @@ function renderTable(tableLines: string[], baseKey: number) {
   const headerCells = parseRow(tableLines[0]);
   const isSep = (line: string) => /^\|?[\s\-:|]+\|?$/.test(line);
   const startData = isSep(tableLines[1]) ? 2 : 1;
-  const dataRows = tableLines.slice(startData).filter((l) => !isSep(l));
+  const ND_VALS = new Set(["N/D", "N/A", "—", "-", ""]);
+
+  // Filter out rows where every data cell (non-label) is N/D
+  const dataRows = tableLines.slice(startData).filter((l) => {
+    if (isSep(l)) return false;
+    const cells = parseRow(l);
+    return cells.slice(1).some((c) => {
+      const v = c.replace(/^\*+|\*+$/g, "").trim();
+      return v && !ND_VALS.has(v);
+    });
+  });
+
+  if (!dataRows.length) return null;
 
   return (
     <div key={`tbl-${baseKey}`} className="my-4 overflow-x-auto border border-border">
-      <table className="w-full text-xs font-mono min-w-max">
+      <table className="w-full font-mono min-w-max" style={{ fontSize: "13px" }}>
         <thead>
           <tr className="border-b border-border bg-secondary/50">
             {headerCells.map((cell, j) => (
               <th
                 key={j}
-                className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/60 font-medium uppercase"
+                className="px-3 py-2.5 text-left text-[11px] tracking-widest text-muted-foreground/60 font-medium uppercase"
               >
                 {cell}
               </th>
@@ -716,17 +711,17 @@ function renderTable(tableLines: string[], baseKey: number) {
                   const val = raw.replace(/(-?\d+\.\d{3,})/g, (m) => {
                     const n = parseFloat(m); return isNaN(n) ? m : n.toFixed(2);
                   });
-                  const isNDVal = val === "N/D" || val === "—";
+                  const isNDVal = ND_VALS.has(val);
                   const isNum   = /^[-+$]?\d/.test(val) || val.includes("%") || val.includes("x");
                   const isNeg   = /^-/.test(val) && !isNDVal;
 
                   let cls = j === 0 ? "text-foreground/80 font-medium" : "text-foreground/65";
                   if (isNum && !isNeg) cls = "text-primary font-mono";
                   if (isNeg)          cls = "text-destructive font-mono";
-                  if (isNDVal)        cls = "text-muted-foreground/25";
+                  if (isNDVal)        cls = "text-muted-foreground/20";
 
                   return (
-                    <td key={j} className={`px-3 py-2 whitespace-nowrap text-xs ${cls}`}>
+                    <td key={j} className={`px-3 py-2.5 whitespace-nowrap ${cls}`}>
                       {renderInline(val)}
                     </td>
                   );
