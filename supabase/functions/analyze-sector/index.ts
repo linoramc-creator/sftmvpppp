@@ -299,6 +299,8 @@ Deno.serve(async (req) => {
 
     const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
     const GEMINI_MODELS = [
+      "gemini-3.1-pro-preview",
+      "gemini-3-pro-preview",
       "gemini-3-pro-latest",
       "gemini-3.0-pro",
       "gemini-3-pro",

@@ -1032,8 +1032,10 @@ Deno.serve(async (req) => {
 
     console.log("Calling Gemini API (with fallback)...");
     const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-    // Try newest model variants first, fall back to known-working 2.5-pro
+    // Gemini 3.1 Pro Preview (latest SOTA, released Feb 2026) first, with fallbacks
     const GEMINI_MODELS = [
+      "gemini-3.1-pro-preview",
+      "gemini-3-pro-preview",
       "gemini-3-pro-latest",
       "gemini-3.0-pro",
       "gemini-3-pro",
