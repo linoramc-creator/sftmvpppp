@@ -394,6 +394,105 @@ async function fetchTwelveData(ticker: string, key: string): Promise<string> {
   } catch (_) { return ""; }
 }
 
+// -- FMP quarterly financials (supplements Finnhub) --
+
+async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise<any[]> {
+  if (!key) return [];
+  const t = encodeURIComponent(ticker);
+  const base = "https://financialmodelingprep.com/api/v3";
+  try {
+    const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
+      fetch(`${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+        .then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+        .then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+        .then(r => r.ok ? r.json() : []).catch(() => []),
+    ]);
+
+    const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
+    if (!incomeList.length) return [];
+
+    const cashByDate = new Map<string, any>(Array.isArray(cashRaw) ? (cashRaw as any[]).map((q: any) => [q.date, q]) : []);
+    const balByDate  = new Map<string, any>(Array.isArray(balanceRaw) ? (balanceRaw as any[]).map((q: any) => [q.date, q]) : []);
+
+    return incomeList.map((q: any, idx: number) => {
+      const cf = cashByDate.get(q.date) ?? {};
+      const bs = balByDate.get(q.date) ?? {};
+
+      const rev         = q.revenue ?? null;
+      const grossProfit = q.grossProfit ?? null;
+      const ebitda      = q.ebitda ?? null;
+      const netIncome   = q.netIncome ?? null;
+      const eps         = q.epsdiluted ?? q.eps ?? null;
+      const opCF        = cf.operatingCashFlow ?? null;
+      const fcf         = cf.freeCashFlow ?? null;
+      const capex       = cf.capitalExpenditure ?? null;
+      const cash        = bs.cashAndCashEquivalents ?? null;
+      const totalDebt   = bs.totalDebt ?? null;
+      const netDebt     = (totalDebt != null && cash != null) ? totalDebt - cash : null;
+      const equity      = bs.totalStockholdersEquity ?? null;
+      const totalAssets = bs.totalAssets ?? null;
+
+      // YoY revenue growth: same quarter ~1 year ago (index + 4)
+      const prevQ = incomeList[idx + 4] as any;
+      const revGrowth = (rev && prevQ?.revenue && Math.abs(prevQ.revenue) > 0)
+        ? `${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100) >= 0 ? "+" : ""}${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100).toFixed(1)}%`
+        : "N/D";
+
+      return {
+        period:       q.date ?? "",
+        revenue:      fmt(rev, "B"),
+        revenueGrowth: revGrowth,
+        grossMargin:  rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+        ebitda:       fmt(ebitda, "B"),
+        netIncome:    fmt(netIncome, "B"),
+        netMargin:    rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+        eps:          eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
+        operatingCF:  fmt(opCF, "B"),
+        freeCashFlow: fmt(fcf, "B"),
+        capex:        capex != null ? fmt(capex, "B") : "N/D",
+        cash:         fmt(cash, "B"),
+        totalDebt:    fmt(totalDebt, "B"),
+        netDebt:      fmt(netDebt, "B"),
+        equity:       fmt(equity, "B"),
+        totalAssets:  fmt(totalAssets, "B"),
+      };
+    }).slice(0, 8);
+  } catch (_) { return []; }
+}
+
+/** Merge Finnhub + FMP quarterly data. FMP is primary; Finnhub fills gaps. Returns up to 8 quarters newest-first. */
+function mergeQuarterlyData(finnhub: any[], fmp: any[]): any[] {
+  const merged = new Map<string, any>();
+
+  // FMP first (higher data quality)
+  for (const q of fmp) {
+    const key = q.period.slice(0, 7); // YYYY-MM
+    merged.set(key, q);
+  }
+
+  // Finnhub fills missing quarters and individual N/D values
+  for (const q of finnhub) {
+    const key = q.period.slice(0, 7);
+    if (!merged.has(key)) {
+      merged.set(key, q);
+    } else {
+      // Fill individual N/D fields from Finnhub
+      const existing = merged.get(key)!;
+      const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
+                      "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets"];
+      for (const f of fields) {
+        if (existing[f] === "N/D" && q[f] !== "N/D") existing[f] = q[f];
+      }
+    }
+  }
+
+  return Array.from(merged.values())
+    .sort((a: any, b: any) => b.period.localeCompare(a.period))
+    .slice(0, 8);
+}
+
 // -- Technical indicators (Twelve Data) --
 
 async function fetchTechnicalIndicators(ticker: string, key: string): Promise<string> {
@@ -829,7 +928,8 @@ Deno.serve(async (req) => {
 
     // Step 2: Fetch all data sources in parallel
     const [
-      quarterlyHistory,
+      finnhubQuarterly,
+      fmpQuarterly,
       peerData,
       polymarketContext,
       fredContext,
@@ -845,6 +945,8 @@ Deno.serve(async (req) => {
     ] = await Promise.all([
       // Finnhub structured data
       FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, FINNHUB_KEY) : Promise.resolve([]),
+      // FMP quarterly (additional quarters, higher quality)
+      FMP_KEY ? fetchFmpQuarterlyFinancials(cleanTicker, FMP_KEY) : Promise.resolve([]),
       FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
       // Free public APIs (no key)
       fetchPolymarketData(cleanTicker, companyName),
@@ -885,6 +987,11 @@ Deno.serve(async (req) => {
         : Promise.resolve(null),
     ]);
 
+    const quarterlyHistory = mergeQuarterlyData(
+      finnhubQuarterly as any[],
+      fmpQuarterly as any[],
+    );
+
     const dataContext = buildDataContext(
       finnhubData,
       peerData,
@@ -907,7 +1014,9 @@ Deno.serve(async (req) => {
       finnhub_profile: !!finnhubData?.profile?.name,
       finnhub_metrics: !!finnhubData?.metrics,
       finnhub_news: finnhubData?.news?.length ?? 0,
-      quarterly_history: (quarterlyHistory as any[]).length,
+      quarterly_history: quarterlyHistory.length,
+      quarterly_finnhub: (finnhubQuarterly as any[]).length,
+      quarterly_fmp: (fmpQuarterly as any[]).length,
       peer_data: (peerData as any[]).length,
       tavily_geo: !!(geoContext?.answer),
       tavily_ticker_news: tickerNews?.results?.length ?? 0,
@@ -923,8 +1032,10 @@ Deno.serve(async (req) => {
 
     console.log("Calling Gemini API (with fallback)...");
     const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-    // Try newest model variants first, fall back to known-working 2.5-pro
+    // Gemini 3.1 Pro Preview (latest SOTA, released Feb 2026) first, with fallbacks
     const GEMINI_MODELS = [
+      "gemini-3.1-pro-preview",
+      "gemini-3-pro-preview",
       "gemini-3-pro-latest",
       "gemini-3.0-pro",
       "gemini-3-pro",
