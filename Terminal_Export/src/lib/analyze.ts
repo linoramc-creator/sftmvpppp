@@ -1,4 +1,5 @@
 const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
+const SECTOR_URL  = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-sector`;
 
 export interface QuarterlyPeriod {
   period: string;
@@ -22,6 +23,82 @@ export interface QuarterlyPeriod {
   totalAssets: string;
 }
 
+async function streamSSE({
+  url,
+  body,
+  onDelta,
+  onDone,
+  onError,
+  onEvent,
+  signal,
+}: {
+  url: string;
+  body: object;
+  onDelta: (text: string) => void;
+  onDone: () => void;
+  onError: (error: string) => void;
+  onEvent?: (parsed: any) => void;
+  signal?: AbortSignal;
+}) {
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({ error: "Error de conexión" }));
+    onError(data.error || `Error ${resp.status}`);
+    return;
+  }
+
+  if (!resp.body) { onError("Sin respuesta del servidor"); return; }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let textBuffer = "";
+  let streamDone = false;
+
+  const parseLine = (line: string) => {
+    if (!line.startsWith("data: ")) return;
+    const jsonStr = line.slice(6).trim();
+    if (jsonStr === "[DONE]") { streamDone = true; return; }
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (onEvent) onEvent(parsed);
+      const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+      if (content) onDelta(content);
+    } catch { /* ignore partial chunks */ }
+  };
+
+  while (!streamDone) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    textBuffer += decoder.decode(value, { stream: true });
+    let newlineIndex: number;
+    while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+      let line = textBuffer.slice(0, newlineIndex);
+      textBuffer = textBuffer.slice(newlineIndex + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (line.trim() === "" || line.startsWith(":")) continue;
+      parseLine(line);
+      if (streamDone) break;
+    }
+  }
+
+  for (let raw of textBuffer.split("\n")) {
+    if (!raw || raw.startsWith(":")) continue;
+    if (raw.endsWith("\r")) raw = raw.slice(0, -1);
+    parseLine(raw);
+  }
+
+  onDone();
+}
+
 export async function streamAnalysis({
   ticker,
   onDelta,
@@ -37,74 +114,40 @@ export async function streamAnalysis({
   onQuarterlyData?: (data: QuarterlyPeriod[]) => void;
   signal?: AbortSignal;
 }) {
-  const resp = await fetch(ANALYZE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-    },
-    body: JSON.stringify({ ticker }),
+  await streamSSE({
+    url: ANALYZE_URL,
+    body: { ticker },
+    onDelta,
+    onDone,
+    onError,
     signal,
-  });
-
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({ error: "Error de conexión" }));
-    onError(data.error || `Error ${resp.status}`);
-    return;
-  }
-
-  if (!resp.body) {
-    onError("Sin respuesta del servidor");
-    return;
-  }
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let textBuffer = "";
-  let streamDone = false;
-
-  const parseLine = (line: string) => {
-    if (!line.startsWith("data: ")) return;
-    const jsonStr = line.slice(6).trim();
-    if (jsonStr === "[DONE]") { streamDone = true; return; }
-
-    try {
-      const parsed = JSON.parse(jsonStr);
-
-      // Our custom quarterly data event
+    onEvent: (parsed) => {
       if (parsed.__quarterly && onQuarterlyData) {
         onQuarterlyData(parsed.__quarterly as QuarterlyPeriod[]);
-        return;
       }
+    },
+  });
+}
 
-      // Groq streaming delta
-      const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-      if (content) onDelta(content);
-    } catch { /* ignore partial chunks */ }
-  };
-
-  while (!streamDone) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    textBuffer += decoder.decode(value, { stream: true });
-
-    let newlineIndex: number;
-    while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-      let line = textBuffer.slice(0, newlineIndex);
-      textBuffer = textBuffer.slice(newlineIndex + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (line.trim() === "" || line.startsWith(":")) continue;
-      parseLine(line);
-      if (streamDone) break;
-    }
-  }
-
-  // Flush remaining buffer
-  for (let raw of textBuffer.split("\n")) {
-    if (!raw || raw.startsWith(":")) continue;
-    if (raw.endsWith("\r")) raw = raw.slice(0, -1);
-    parseLine(raw);
-  }
-
-  onDone();
+export async function streamSectorAnalysis({
+  sector,
+  onDelta,
+  onDone,
+  onError,
+  signal,
+}: {
+  sector: string;
+  onDelta: (text: string) => void;
+  onDone: () => void;
+  onError: (error: string) => void;
+  signal?: AbortSignal;
+}) {
+  await streamSSE({
+    url: SECTOR_URL,
+    body: { sector },
+    onDelta,
+    onDone,
+    onError,
+    signal,
+  });
 }
