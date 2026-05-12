@@ -58,8 +58,9 @@ const SECTOR_TABS      = Object.keys(SECTOR_SECTION_CONFIG);
 function fmtPeriod(p: string): string {
   const d = new Date(p + "T00:00:00Z");
   if (isNaN(d.getTime())) return p;
-  const s = d.toLocaleDateString("es-ES", { month: "short", year: "2-digit", timeZone: "UTC" });
-  return s.replace(".", "").toUpperCase();
+  const quarter = Math.floor(d.getUTCMonth() / 3) + 1;
+  const year = d.getUTCFullYear().toString().slice(2);
+  return `Q${quarter}'${year}`;
 }
 
 const ND_VALUES = new Set(["N/D", "", "N/A", "-"]);
@@ -717,7 +718,7 @@ function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
       </div>
 
       {/* Scrollable table */}
-      <div className="overflow-x-scroll" style={{ scrollbarWidth: "thin", scrollbarColor: "hsl(var(--border)) transparent" }}>
+      <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
         <table className="w-full" style={{ minWidth: Math.max(500, 160 + sorted.length * 90) }}>
           <thead>
             <tr className="border-b border-border bg-secondary/20">
@@ -829,7 +830,7 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
       const text = line.slice(2);
       const { icon, cls } = getBulletIcon(text);
       currentElements.push(
-        <li key={i} className="ml-1 mb-4 list-none flex items-start gap-2.5">
+        <li key={i} className="ml-1 mb-6 list-none flex items-start gap-2.5">
           <span className={`select-none shrink-0 leading-none ${cls}`} style={{ marginTop: "3px" }}>{icon}</span>
           <span className="flex-1 text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)", fontSize: "15px" }}>
             {renderInline(text)}
