@@ -1,10 +1,168 @@
+// ============================================================
+// UNIFIED ANALYZE FUNCTION
+// Handles both TICKER analysis (body: { ticker: "AAPL" })
+// and    SECTOR analysis  (body: { sector: "Semiconductores" })
+// ============================================================
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// -- Finnhub helpers --
+// =====================================================
+// SHARED HELPERS
+// =====================================================
+
+async function fetchTavilySearch(
+  query: string,
+  key: string,
+  maxResults = 5,
+  days?: number,
+  topic?: string,
+  contentLen = 150,
+) {
+  try {
+    const body: Record<string, unknown> = {
+      api_key: key,
+      query,
+      search_depth: "advanced",
+      max_results: maxResults,
+      include_answer: true,
+    };
+    if (days) body.days = days;
+    if (topic) body.topic = topic;
+
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { answer: "", results: [] };
+    const data = await res.json();
+    return {
+      answer: (data.answer ?? "").slice(0, 300),
+      results: (data.results ?? []).map((r: any) => ({
+        title: r.title,
+        content: (r.content ?? "").slice(0, contentLen),
+        published_date: r.published_date ?? "",
+        url: r.url ?? "",
+      })),
+    };
+  } catch (_) { return { answer: "", results: [] }; }
+}
+
+async function fetchFredData(key: string): Promise<string> {
+  if (!key) return "";
+  try {
+    const series = [
+      { id: "FEDFUNDS", label: "Fed Funds Rate" },
+      { id: "DGS10",    label: "10Y Treasury Yield" },
+      { id: "UNRATE",   label: "Unemployment Rate" },
+    ];
+
+    const results = await Promise.all(
+      series.map(async (s) => {
+        const res = await fetch(
+          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}&apikey=${key}&limit=1&sort_order=desc&file_type=json`
+        ).catch(() => null);
+        if (!res?.ok) return null;
+        const data = await res.json().catch(() => null);
+        const obs = data?.observations?.[0];
+        return obs ? `${s.label}: ${obs.value}% (${obs.date})` : null;
+      })
+    );
+
+    const cpiRes = await fetch(
+      `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&apikey=${key}&limit=14&sort_order=desc&file_type=json`
+    ).catch(() => null);
+    let cpiLine: string | null = null;
+    if (cpiRes?.ok) {
+      const cpiData = await cpiRes.json().catch(() => null);
+      const obs: any[] = cpiData?.observations ?? [];
+      if (obs.length >= 13) {
+        const cur = parseFloat(obs[0].value);
+        const prev = parseFloat(obs[12].value);
+        if (!isNaN(cur) && !isNaN(prev) && prev > 0) {
+          cpiLine = `CPI Inflation YoY: ${((cur - prev) / prev * 100).toFixed(2)}% (${obs[0].date})`;
+        }
+      }
+    }
+
+    const valid = [...results.filter(Boolean), cpiLine].filter(Boolean);
+    if (!valid.length) return "";
+    return ["--- INDICADORES MACRO USA (FRED / RESERVA FEDERAL) ---", ...valid].join("\n");
+  } catch (_) { return ""; }
+}
+
+function fmt(val: number | null | undefined, unit: "M" | "B" | "pct" | "x" | "raw" = "M"): string {
+  if (val == null || isNaN(val)) return "N/D";
+  if (unit === "pct") return `${val >= 0 ? "+" : ""}${val.toFixed(1)}%`;
+  if (unit === "B") return `$${(val / 1_000_000_000).toFixed(2)}B`;
+  if (unit === "M") return `$${(val / 1_000_000).toFixed(0)}M`;
+  if (unit === "x") return `${val.toFixed(2)}x`;
+  return val.toFixed(2);
+}
+
+function n2(v: number | null | undefined): string {
+  if (v == null || isNaN(Number(v))) return "N/D";
+  return Number(v).toFixed(2);
+}
+
+// =====================================================
+// GEMINI (shared fallback chain)
+// =====================================================
+
+type GeminiResult =
+  | { ok: true;  response: Response; model: string }
+  | { ok: false; status: number; error: string };
+
+async function callGeminiStream(messages: any[], apiKey: string): Promise<GeminiResult> {
+  const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+  // Gemini 3.1 Pro Preview (SOTA, Feb 2026) first, with fallbacks
+  const GEMINI_MODELS = [
+    "gemini-3.1-pro-preview",
+    "gemini-3-pro-preview",
+    "gemini-3-pro-latest",
+    "gemini-3.0-pro",
+    "gemini-3-pro",
+    "gemini-2.5-pro-latest",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+  ];
+
+  for (const model of GEMINI_MODELS) {
+    const res = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, stream: true, model }),
+    });
+    console.log(`Gemini [${model}] status:`, res.status);
+    if (res.ok) return { ok: true, response: res, model };
+
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, status: 403, error: "API key de Gemini inválida o sin permisos." };
+    }
+    if (res.status === 429) {
+      return { ok: false, status: 429, error: "Límite de solicitudes Gemini. Inténtalo en unos segundos." };
+    }
+    const errBody = await res.text();
+    console.warn(`Model ${model} unavailable (${res.status}): ${errBody.substring(0, 150)}. Trying next...`);
+  }
+
+  return { ok: false, status: 503, error: "Todos los modelos Gemini están saturados. Inténtalo en unos segundos." };
+}
+
+function jsonError(error: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ error }),
+    { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
+// =====================================================
+// TICKER: FINNHUB
+// =====================================================
 
 async function finnhubGet(path: string, key: string) {
   try {
@@ -35,10 +193,7 @@ async function fetchFinnhubData(ticker: string, key: string) {
     recommendations: Array.isArray(recs) && recs.length > 0 ? recs[0] : null,
     allRecommendations: Array.isArray(recs) ? recs.slice(0, 6) : [],
     news: Array.isArray(news)
-      ? news.slice(0, 6).map((n: any) => ({
-          headline: n.headline,
-          source: n.source,
-        }))
+      ? news.slice(0, 6).map((n: any) => ({ headline: n.headline, source: n.source }))
       : [],
     peers: Array.isArray(peers) ? peers.filter((p: string) => p !== ticker).slice(0, 4) : [],
   };
@@ -46,7 +201,6 @@ async function fetchFinnhubData(ticker: string, key: string) {
 
 async function fetchPeerData(peers: string[], key: string) {
   if (!peers.length || !key) return [];
-
   const results = await Promise.all(
     peers.slice(0, 5).map(async (peer) => {
       const t = encodeURIComponent(peer);
@@ -83,20 +237,12 @@ async function fetchPeerData(peers: string[], key: string) {
       };
     })
   );
-
   return results;
 }
 
-// -- Quarterly financials --
-
-function fmt(val: number | null | undefined, unit: "M" | "B" | "pct" | "x" | "raw" = "M"): string {
-  if (val == null || isNaN(val)) return "N/D";
-  if (unit === "pct") return `${val >= 0 ? "+" : ""}${val.toFixed(1)}%`;
-  if (unit === "B") return `$${(val / 1_000_000_000).toFixed(2)}B`;
-  if (unit === "M") return `$${(val / 1_000_000).toFixed(0)}M`;
-  if (unit === "x") return `${val.toFixed(2)}x`;
-  return val.toFixed(2);
-}
+// =====================================================
+// TICKER: QUARTERLY FINANCIALS (Finnhub + FMP)
+// =====================================================
 
 async function fetchQuarterlyFinancials(ticker: string, key: string) {
   const t = encodeURIComponent(ticker);
@@ -129,7 +275,6 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
     const fcf      = cf.freeCashFlow ?? null;
     const capex    = cf.capitalExpenditures ?? cf.capex ?? null;
 
-    // Balance sheet fields — try multiple Finnhub naming variants
     const cash     = bs.cashAndEquivalents ?? bs.cash ?? bs.cashEquivalents ?? null;
     const totalDebt = bs.totalDebt ?? bs.longTermDebt ?? null;
     const netDebt  = (totalDebt != null && cash != null) ? totalDebt - cash : null;
@@ -138,7 +283,6 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
 
     return {
       period: q.period ?? "",
-      // P&L
       revenue: fmt(rev, "B"),
       revenueGrowth: revGrowth != null ? `${revGrowth >= 0 ? "+" : ""}${(revGrowth * 100).toFixed(1)}%` : "N/D",
       grossMargin: rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
@@ -146,11 +290,9 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
       netIncome: fmt(netIncome, "B"),
       netMargin: rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
       eps: eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
-      // Cash flow
       operatingCF: fmt(opCF, "B"),
       freeCashFlow: fmt(fcf, "B"),
       capex: capex != null ? fmt(capex, "B") : "N/D",
-      // Balance sheet
       cash: fmt(cash, "B"),
       totalDebt: fmt(totalDebt, "B"),
       netDebt: fmt(netDebt, "B"),
@@ -160,46 +302,101 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
   });
 }
 
-// -- Tavily helpers --
-
-async function fetchTavilySearch(
-  query: string,
-  key: string,
-  maxResults = 5,
-  days?: number,
-  topic?: string,
-  contentLen = 120,
-) {
+async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise<any[]> {
+  if (!key) return [];
+  const t = encodeURIComponent(ticker);
+  const base = "https://financialmodelingprep.com/api/v3";
   try {
-    const body: Record<string, unknown> = {
-      api_key: key,
-      query,
-      search_depth: "advanced",
-      max_results: maxResults,
-      include_answer: true,
-    };
-    if (days) body.days = days;
-    if (topic) body.topic = topic;
+    const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
+      fetch(`${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+        .then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+        .then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+        .then(r => r.ok ? r.json() : []).catch(() => []),
+    ]);
 
-    const res = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) return { answer: "", results: [] };
-    const data = await res.json();
-    return {
-      answer: (data.answer ?? "").slice(0, 220),
-      results: (data.results ?? []).map((r: any) => ({
-        title: r.title,
-        content: (r.content ?? "").slice(0, contentLen),
-        published_date: r.published_date ?? "",
-      })),
-    };
-  } catch (_) { return { answer: "", results: [] }; }
+    const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
+    if (!incomeList.length) return [];
+
+    const cashByDate = new Map<string, any>(Array.isArray(cashRaw) ? (cashRaw as any[]).map((q: any) => [q.date, q]) : []);
+    const balByDate  = new Map<string, any>(Array.isArray(balanceRaw) ? (balanceRaw as any[]).map((q: any) => [q.date, q]) : []);
+
+    return incomeList.map((q: any, idx: number) => {
+      const cf = cashByDate.get(q.date) ?? {};
+      const bs = balByDate.get(q.date) ?? {};
+
+      const rev         = q.revenue ?? null;
+      const grossProfit = q.grossProfit ?? null;
+      const ebitda      = q.ebitda ?? null;
+      const netIncome   = q.netIncome ?? null;
+      const eps         = q.epsdiluted ?? q.eps ?? null;
+      const opCF        = cf.operatingCashFlow ?? null;
+      const fcf         = cf.freeCashFlow ?? null;
+      const capex       = cf.capitalExpenditure ?? null;
+      const cash        = bs.cashAndCashEquivalents ?? null;
+      const totalDebt   = bs.totalDebt ?? null;
+      const netDebt     = (totalDebt != null && cash != null) ? totalDebt - cash : null;
+      const equity      = bs.totalStockholdersEquity ?? null;
+      const totalAssets = bs.totalAssets ?? null;
+
+      const prevQ = incomeList[idx + 4] as any;
+      const revGrowth = (rev && prevQ?.revenue && Math.abs(prevQ.revenue) > 0)
+        ? `${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100) >= 0 ? "+" : ""}${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100).toFixed(1)}%`
+        : "N/D";
+
+      return {
+        period:       q.date ?? "",
+        revenue:      fmt(rev, "B"),
+        revenueGrowth: revGrowth,
+        grossMargin:  rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+        ebitda:       fmt(ebitda, "B"),
+        netIncome:    fmt(netIncome, "B"),
+        netMargin:    rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+        eps:          eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
+        operatingCF:  fmt(opCF, "B"),
+        freeCashFlow: fmt(fcf, "B"),
+        capex:        capex != null ? fmt(capex, "B") : "N/D",
+        cash:         fmt(cash, "B"),
+        totalDebt:    fmt(totalDebt, "B"),
+        netDebt:      fmt(netDebt, "B"),
+        equity:       fmt(equity, "B"),
+        totalAssets:  fmt(totalAssets, "B"),
+      };
+    }).slice(0, 8);
+  } catch (_) { return []; }
 }
 
-// -- Polymarket --
+function mergeQuarterlyData(finnhub: any[], fmp: any[]): any[] {
+  const merged = new Map<string, any>();
+
+  for (const q of fmp) {
+    const key = q.period.slice(0, 7);
+    merged.set(key, q);
+  }
+
+  for (const q of finnhub) {
+    const key = q.period.slice(0, 7);
+    if (!merged.has(key)) {
+      merged.set(key, q);
+    } else {
+      const existing = merged.get(key)!;
+      const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
+                      "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets"];
+      for (const f of fields) {
+        if (existing[f] === "N/D" && q[f] !== "N/D") existing[f] = q[f];
+      }
+    }
+  }
+
+  return Array.from(merged.values())
+    .sort((a: any, b: any) => b.period.localeCompare(a.period))
+    .slice(0, 8);
+}
+
+// =====================================================
+// TICKER: POLYMARKET / FMP / TWELVE DATA
+// =====================================================
 
 async function fetchPolymarketData(ticker: string, companyName: string): Promise<string> {
   try {
@@ -234,60 +431,11 @@ async function fetchPolymarketData(ticker: string, companyName: string): Promise
         const url = slug ? ` — https://polymarket.com/event/${slug}` : "";
         lines.push(`- "${m.question}"${url}`);
         lines.push(`  ${priceStr}${vol ? `  (${vol})` : ""}`);
-      } catch (_) { /* skip malformed market */ }
+      } catch (_) { /* skip */ }
     }
-
     return lines.length > 1 ? lines.join("\n") : "";
   } catch (_) { return ""; }
 }
-
-// -- FRED (Federal Reserve macro data) --
-
-async function fetchFredData(key: string): Promise<string> {
-  if (!key) return "";
-  try {
-    const series = [
-      { id: "FEDFUNDS", label: "Fed Funds Rate" },
-      { id: "DGS10",    label: "10Y Treasury Yield" },
-      { id: "UNRATE",   label: "Unemployment Rate" },
-    ];
-
-    const results = await Promise.all(
-      series.map(async (s) => {
-        const res = await fetch(
-          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}&apikey=${key}&limit=1&sort_order=desc&file_type=json`
-        ).catch(() => null);
-        if (!res?.ok) return null;
-        const data = await res.json().catch(() => null);
-        const obs = data?.observations?.[0];
-        return obs ? `${s.label}: ${obs.value}% (${obs.date})` : null;
-      })
-    );
-
-    // CPI YoY requires 13 months
-    const cpiRes = await fetch(
-      `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&apikey=${key}&limit=14&sort_order=desc&file_type=json`
-    ).catch(() => null);
-    let cpiLine: string | null = null;
-    if (cpiRes?.ok) {
-      const cpiData = await cpiRes.json().catch(() => null);
-      const obs: any[] = cpiData?.observations ?? [];
-      if (obs.length >= 13) {
-        const cur = parseFloat(obs[0].value);
-        const prev = parseFloat(obs[12].value);
-        if (!isNaN(cur) && !isNaN(prev) && prev > 0) {
-          cpiLine = `CPI Inflation YoY: ${((cur - prev) / prev * 100).toFixed(2)}% (${obs[0].date})`;
-        }
-      }
-    }
-
-    const valid = [...results.filter(Boolean), cpiLine].filter(Boolean);
-    if (!valid.length) return "";
-    return ["--- INDICADORES MACRO USA (FRED / RESERVA FEDERAL) ---", ...valid].join("\n");
-  } catch (_) { return ""; }
-}
-
-// -- FMP (Financial Modeling Prep) --
 
 async function fetchFmpData(ticker: string, key: string): Promise<string> {
   if (!key) return "";
@@ -304,20 +452,17 @@ async function fetchFmpData(ticker: string, key: string): Promise<string> {
 
     const lines: string[] = [];
 
-    // Price target consensus
     const tgt = Array.isArray(targetRaw) ? targetRaw[0] : targetRaw;
     if (tgt?.targetConsensus) {
       lines.push("--- PRECIO OBJETIVO ANALISTAS (FMP) ---");
       lines.push(`Consenso: $${Number(tgt.targetConsensus).toFixed(2)} | Alto: $${Number(tgt.targetHigh ?? 0).toFixed(2)} | Bajo: $${Number(tgt.targetLow ?? 0).toFixed(2)} | Mediana: $${Number(tgt.targetMedian ?? 0).toFixed(2)}`);
     }
 
-    // Analyst recommendations
     const rec = Array.isArray(analystRaw) ? analystRaw[0] : null;
     if (rec) {
       lines.push(`Recomendaciones FMP (${rec.date ?? ""}): SB=${rec.analystRatingsStrongBuy ?? 0} | B=${rec.analystRatingsbuy ?? 0} | H=${rec.analystRatingsHold ?? 0} | S=${rec.analystRatingsSell ?? 0} | SS=${rec.analystRatingsStrongSell ?? 0}`);
     }
 
-    // Institutional holders
     if (Array.isArray(institutionalRaw) && institutionalRaw.length > 0) {
       lines.push("", "--- TENENCIAS INSTITUCIONALES (FMP) ---");
       institutionalRaw.slice(0, 6).forEach((h: any) => {
@@ -327,7 +472,6 @@ async function fetchFmpData(ticker: string, key: string): Promise<string> {
       });
     }
 
-    // Insider trading
     const insiderList: any[] = insiderRaw?.data ?? (Array.isArray(insiderRaw) ? insiderRaw : []);
     if (insiderList.length > 0) {
       lines.push("", "--- ACTIVIDAD INSIDER (FMP) ---");
@@ -341,8 +485,6 @@ async function fetchFmpData(ticker: string, key: string): Promise<string> {
     return lines.join("\n");
   } catch (_) { return ""; }
 }
-
-// -- Twelve Data (fill N/D gaps) --
 
 async function fetchTwelveData(ticker: string, key: string): Promise<string> {
   if (!key) return "";
@@ -394,107 +536,6 @@ async function fetchTwelveData(ticker: string, key: string): Promise<string> {
   } catch (_) { return ""; }
 }
 
-// -- FMP quarterly financials (supplements Finnhub) --
-
-async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise<any[]> {
-  if (!key) return [];
-  const t = encodeURIComponent(ticker);
-  const base = "https://financialmodelingprep.com/api/v3";
-  try {
-    const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
-      fetch(`${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`)
-        .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`)
-        .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`)
-        .then(r => r.ok ? r.json() : []).catch(() => []),
-    ]);
-
-    const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
-    if (!incomeList.length) return [];
-
-    const cashByDate = new Map<string, any>(Array.isArray(cashRaw) ? (cashRaw as any[]).map((q: any) => [q.date, q]) : []);
-    const balByDate  = new Map<string, any>(Array.isArray(balanceRaw) ? (balanceRaw as any[]).map((q: any) => [q.date, q]) : []);
-
-    return incomeList.map((q: any, idx: number) => {
-      const cf = cashByDate.get(q.date) ?? {};
-      const bs = balByDate.get(q.date) ?? {};
-
-      const rev         = q.revenue ?? null;
-      const grossProfit = q.grossProfit ?? null;
-      const ebitda      = q.ebitda ?? null;
-      const netIncome   = q.netIncome ?? null;
-      const eps         = q.epsdiluted ?? q.eps ?? null;
-      const opCF        = cf.operatingCashFlow ?? null;
-      const fcf         = cf.freeCashFlow ?? null;
-      const capex       = cf.capitalExpenditure ?? null;
-      const cash        = bs.cashAndCashEquivalents ?? null;
-      const totalDebt   = bs.totalDebt ?? null;
-      const netDebt     = (totalDebt != null && cash != null) ? totalDebt - cash : null;
-      const equity      = bs.totalStockholdersEquity ?? null;
-      const totalAssets = bs.totalAssets ?? null;
-
-      // YoY revenue growth: same quarter ~1 year ago (index + 4)
-      const prevQ = incomeList[idx + 4] as any;
-      const revGrowth = (rev && prevQ?.revenue && Math.abs(prevQ.revenue) > 0)
-        ? `${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100) >= 0 ? "+" : ""}${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100).toFixed(1)}%`
-        : "N/D";
-
-      return {
-        period:       q.date ?? "",
-        revenue:      fmt(rev, "B"),
-        revenueGrowth: revGrowth,
-        grossMargin:  rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
-        ebitda:       fmt(ebitda, "B"),
-        netIncome:    fmt(netIncome, "B"),
-        netMargin:    rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
-        eps:          eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
-        operatingCF:  fmt(opCF, "B"),
-        freeCashFlow: fmt(fcf, "B"),
-        capex:        capex != null ? fmt(capex, "B") : "N/D",
-        cash:         fmt(cash, "B"),
-        totalDebt:    fmt(totalDebt, "B"),
-        netDebt:      fmt(netDebt, "B"),
-        equity:       fmt(equity, "B"),
-        totalAssets:  fmt(totalAssets, "B"),
-      };
-    }).slice(0, 8);
-  } catch (_) { return []; }
-}
-
-/** Merge Finnhub + FMP quarterly data. FMP is primary; Finnhub fills gaps. Returns up to 8 quarters newest-first. */
-function mergeQuarterlyData(finnhub: any[], fmp: any[]): any[] {
-  const merged = new Map<string, any>();
-
-  // FMP first (higher data quality)
-  for (const q of fmp) {
-    const key = q.period.slice(0, 7); // YYYY-MM
-    merged.set(key, q);
-  }
-
-  // Finnhub fills missing quarters and individual N/D values
-  for (const q of finnhub) {
-    const key = q.period.slice(0, 7);
-    if (!merged.has(key)) {
-      merged.set(key, q);
-    } else {
-      // Fill individual N/D fields from Finnhub
-      const existing = merged.get(key)!;
-      const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
-                      "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets"];
-      for (const f of fields) {
-        if (existing[f] === "N/D" && q[f] !== "N/D") existing[f] = q[f];
-      }
-    }
-  }
-
-  return Array.from(merged.values())
-    .sort((a: any, b: any) => b.period.localeCompare(a.period))
-    .slice(0, 8);
-}
-
-// -- Technical indicators (Twelve Data) --
-
 async function fetchTechnicalIndicators(ticker: string, key: string): Promise<string> {
   if (!key) return "";
   const t = encodeURIComponent(ticker);
@@ -523,22 +564,15 @@ async function fetchTechnicalIndicators(ticker: string, key: string): Promise<st
     if (macd)  parts.push(`MACD: ${macd}${signal ? ` | Signal: ${signal}` : ""}${hist ? ` | Histograma: ${hist}` : ""}`);
     if (sma50)  parts.push(`SMA 50: $${sma50}`);
     if (sma200) parts.push(`SMA 200: $${sma200}`);
-
     return parts.length > 1 ? parts.join("\n") : "";
   } catch (_) { return ""; }
 }
 
-// -- Number helpers --
+// =====================================================
+// TICKER: CONTEXT BUILDER + PROMPT
+// =====================================================
 
-/** Round any number to exactly 2 decimal places; return "N/D" if null/undefined */
-function n2(v: number | null | undefined): string {
-  if (v == null || isNaN(Number(v))) return "N/D";
-  return Number(v).toFixed(2);
-}
-
-// -- Context builder --
-
-function buildDataContext(
+function buildTickerDataContext(
   data: any,
   peerData: any[],
   quarterlyHistory: any[],
@@ -568,7 +602,6 @@ function buildDataContext(
     ? (r.strongBuy ?? 0) + (r.buy ?? 0) + (r.hold ?? 0) + (r.sell ?? 0) + (r.strongSell ?? 0)
     : 0;
 
-  // Calculate EV/EBITDA — try multiple Finnhub field combinations
   const currentEv = m?.currentEv ?? m?.enterpriseValue ?? null;
   const ebitdPerShare = m?.ebitdPerShareTTM ?? m?.ebitdaPerShareTTM ?? null;
   const sharesOut = p?.shareOutstanding ?? null;
@@ -577,16 +610,13 @@ function buildDataContext(
     const ebitda = ebitdPerShare * sharesOut;
     if (ebitda > 0) evEbitda = (currentEv / ebitda).toFixed(1);
   }
-  // Fallback: direct EV/EBITDA field
   if (evEbitda === "N/D" && m?.evToEbitda != null) evEbitda = Number(m.evToEbitda).toFixed(1);
 
-  // FCF/Share — try all known Finnhub field names
   const fcfPerShare =
     m?.fcfPerShareTTM ??
     m?.freeCashFlowPerShareTTM ??
     m?.cashFlowPerShareTTM ??
     null;
-  // Derive FCF/Share from quarterly data if still missing
   let fcfPerShareStr = fcfPerShare != null ? String(Number(fcfPerShare).toFixed(2)) : "N/D";
   if (fcfPerShareStr === "N/D" && quarterlyHistory.length > 0) {
     const latestQ = quarterlyHistory[0];
@@ -595,7 +625,6 @@ function buildDataContext(
     }
   }
 
-  // Debt/Equity — try all variants
   const debtEquity =
     m?.totalDebtToEquityAnnual ??
     m?.totalDebtToEquityQuarterly ??
@@ -661,7 +690,6 @@ function buildDataContext(
     lines.push("", `Peers/Competidores identificados: ${peers.join(", ")}`);
   }
 
-  // Peer financial data (real data from Finnhub)
   if (peerData.length > 0) {
     lines.push("", "--- DATOS FINANCIEROS DE COMPETIDORES (FINNHUB) ---");
     lines.push("Ticker | Empresa | Precio | Market Cap | P/E | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta");
@@ -670,7 +698,6 @@ function buildDataContext(
     }
   }
 
-  // Finnhub company news (last 30 days)
   if (news.length > 0) {
     lines.push("", "--- NOTICIAS RECIENTES DEL TICKER (ÚLTIMAS 4 SEMANAS, FINNHUB) ---");
     for (const n of news) {
@@ -678,7 +705,6 @@ function buildDataContext(
     }
   }
 
-  // Tavily ticker news
   if (tickerNews?.results?.length > 0) {
     lines.push("", "--- NOTICIAS ADICIONALES DEL TICKER (BÚSQUEDA WEB) ---");
     if (tickerNews.answer) lines.push(`Resumen: ${tickerNews.answer}`);
@@ -688,7 +714,6 @@ function buildDataContext(
     }
   }
 
-  // Tavily sector news
   if (sectorNews?.results?.length > 0) {
     lines.push("", "--- NOTICIAS DEL SECTOR (BÚSQUEDA WEB) ---");
     if (sectorNews.answer) lines.push(`Resumen del sector: ${sectorNews.answer}`);
@@ -698,7 +723,6 @@ function buildDataContext(
     }
   }
 
-  // Recent earnings
   if (earningsSearch?.results?.length > 0) {
     lines.push("", "--- RESULTADOS FINANCIEROS RECIENTES (EARNINGS) ---");
     if (earningsSearch.answer) lines.push(earningsSearch.answer);
@@ -708,7 +732,6 @@ function buildDataContext(
     }
   }
 
-  // Competitive landscape
   if (competitiveSearch?.results?.length > 0) {
     lines.push("", "--- POSICIÓN COMPETITIVA Y CUOTA DE MERCADO ---");
     if (competitiveSearch.answer) lines.push(competitiveSearch.answer);
@@ -718,7 +741,6 @@ function buildDataContext(
     }
   }
 
-  // Risks & catalysts news
   if (risksCatalystsSearch?.results?.length > 0) {
     lines.push("", "--- RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES ---");
     if (risksCatalystsSearch.answer) lines.push(risksCatalystsSearch.answer);
@@ -728,7 +750,6 @@ function buildDataContext(
     }
   }
 
-  // Geo/regulatory context
   if (geo?.answer) {
     lines.push("", "--- CONTEXTO GEOPOLÍTICO Y REGULATORIO ---");
     lines.push(geo.answer);
@@ -737,49 +758,37 @@ function buildDataContext(
     }
   }
 
-  // Quarterly financial history — three separate tables for clarity
   if (quarterlyHistory.length > 0) {
-    lines.push("", "--- HISTORIAL TRIMESTRAL: P&L (ÚLTIMOS 6 TRIMESTRES) ---");
+    lines.push("", "--- HISTORIAL TRIMESTRAL: P&L (ÚLTIMOS TRIMESTRES) ---");
     lines.push("Periodo | Revenue | Var.%YoY | M.Bruto | EBITDA | Bfº Neto | M.Neto | EPS");
     for (const q of quarterlyHistory) {
       lines.push(`${q.period} | ${q.revenue} | ${q.revenueGrowth} | ${q.grossMargin} | ${q.ebitda} | ${q.netIncome} | ${q.netMargin} | ${q.eps}`);
     }
 
-    lines.push("", "--- HISTORIAL TRIMESTRAL: CASH FLOW (ÚLTIMOS 6 TRIMESTRES) ---");
+    lines.push("", "--- HISTORIAL TRIMESTRAL: CASH FLOW ---");
     lines.push("Periodo | Op.CF | Free Cash Flow | Capex");
     for (const q of quarterlyHistory) {
       lines.push(`${q.period} | ${q.operatingCF} | ${q.freeCashFlow} | ${q.capex}`);
     }
 
-    lines.push("", "--- HISTORIAL TRIMESTRAL: BALANCE (ÚLTIMOS 6 TRIMESTRES) ---");
+    lines.push("", "--- HISTORIAL TRIMESTRAL: BALANCE ---");
     lines.push("Periodo | Caja | Deuda Total | Deuda Neta | Equity | Total Activos");
     for (const q of quarterlyHistory) {
       lines.push(`${q.period} | ${q.cash} | ${q.totalDebt} | ${q.netDebt} | ${q.equity} | ${q.totalAssets}`);
     }
   }
 
-  // FRED macro indicators
   if (fredContext) lines.push("", fredContext);
-
-  // FMP price targets + institutional + insider
   if (fmpContext) lines.push("", fmpContext);
-
-  // Twelve Data statistics (N/D gap filler)
   if (twelveDataContext) lines.push("", twelveDataContext);
-
-  // Technical indicators (RSI, MACD, SMA)
   if (technicalContext) lines.push("", technicalContext);
-
-  // Polymarket prediction markets
   if (polymarketContext) lines.push("", polymarketContext);
 
   lines.push("", "=== FIN DATOS ===");
   return lines.join("\n");
 }
 
-// -- System prompt --
-
-function buildSystemPrompt(): string {
+function buildTickerSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
   return `Eres un analista financiero institucional senior. Fecha: ${today}.
 
@@ -890,166 +899,254 @@ REGLAS DE FORMATO:
 - No cortes frases a medias.`;
 }
 
-// -- Main handler --
+// =====================================================
+// SECTOR: CONTEXT BUILDER + PROMPT
+// =====================================================
 
-Deno.serve(async (req) => {
-  console.log("analyze-ticker v6-GEMINI started");
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+function buildSectorDataContext(
+  sector: string,
+  sectorNews: any,
+  sectorTrends: any,
+  topCompanies: any,
+  sectorETFs: any,
+  macroNews: any,
+  regulatoryContext: any,
+  fredContext: string,
+): string {
+  const lines = [`=== INVESTIGACIÓN SECTORIAL: ${sector.toUpperCase()} ===`, ""];
+
+  if (sectorNews?.results?.length > 0) {
+    lines.push("--- NOTICIAS RECIENTES DEL SECTOR (ÚLTIMOS 30 DÍAS) ---");
+    if (sectorNews.answer) lines.push(`Resumen: ${sectorNews.answer}`);
+    for (const r of sectorNews.results) {
+      lines.push(`- [${r.published_date ?? ""}] ${r.title}`);
+      if (r.content) lines.push(`  ${r.content}`);
+    }
+    lines.push("");
   }
 
-  try {
-    const { ticker } = await req.json();
-
-    if (!ticker || typeof ticker !== "string" || ticker.trim().length === 0 || ticker.trim().length > 10) {
-      return new Response(
-        JSON.stringify({ error: "Ticker inválido." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+  if (sectorTrends?.results?.length > 0) {
+    lines.push("--- TENDENCIAS Y PERSPECTIVAS DEL SECTOR ---");
+    if (sectorTrends.answer) lines.push(sectorTrends.answer);
+    for (const r of sectorTrends.results) {
+      lines.push(`- ${r.title}`);
+      if (r.content) lines.push(`  ${r.content}`);
     }
+    lines.push("");
+  }
 
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini") || Deno.env.get("GOOGLE_API_KEY");
-    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+  if (topCompanies?.results?.length > 0) {
+    lines.push("--- PRINCIPALES EMPRESAS DEL SECTOR ---");
+    if (topCompanies.answer) lines.push(topCompanies.answer);
+    for (const r of topCompanies.results) {
+      lines.push(`- ${r.title}`);
+      if (r.content) lines.push(`  ${r.content}`);
+    }
+    lines.push("");
+  }
 
-    const FINNHUB_KEY    = (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "";
-    const TAVILY_KEY     = (Deno.env.get("TAVILY_API_KEY")  || Deno.env.get("Tavily")) ?? "";
-    const FMP_KEY        = Deno.env.get("FMP")          ?? "";
-    const FRED_KEY       = Deno.env.get("Fred")         ?? "";
-    const TWELVE_KEY     = Deno.env.get("Twelve Data")  ?? "";
+  if (sectorETFs?.results?.length > 0) {
+    lines.push("--- ETFs DISPONIBLES PARA EL SECTOR ---");
+    if (sectorETFs.answer) lines.push(sectorETFs.answer);
+    for (const r of sectorETFs.results) {
+      lines.push(`- ${r.title}`);
+      if (r.content) lines.push(`  ${r.content}`);
+    }
+    lines.push("");
+  }
 
-    const cleanTicker = ticker.trim().toUpperCase();
+  if (macroNews?.results?.length > 0) {
+    lines.push("--- CONTEXTO MACRO QUE AFECTA AL SECTOR ---");
+    if (macroNews.answer) lines.push(macroNews.answer);
+    for (const r of macroNews.results) {
+      lines.push(`- ${r.title}`);
+      if (r.content) lines.push(`  ${r.content}`);
+    }
+    lines.push("");
+  }
 
-    // Step 1: Fetch Finnhub base data
-    const finnhubData = FINNHUB_KEY ? await fetchFinnhubData(cleanTicker, FINNHUB_KEY) : null;
+  if (regulatoryContext?.results?.length > 0) {
+    lines.push("--- CONTEXTO REGULATORIO Y GEOPOLÍTICO ---");
+    if (regulatoryContext.answer) lines.push(regulatoryContext.answer);
+    for (const r of regulatoryContext.results) {
+      lines.push(`- ${r.title}`);
+      if (r.content) lines.push(`  ${r.content}`);
+    }
+    lines.push("");
+  }
 
-    const companyName = finnhubData?.profile?.name ?? cleanTicker;
-    const sector = finnhubData?.profile?.finnhubIndustry ?? "";
-    const peers = finnhubData?.peers ?? [];
+  if (fredContext) { lines.push(fredContext); lines.push(""); }
 
-    // Step 2: Fetch all data sources in parallel
-    const [
-      finnhubQuarterly,
-      fmpQuarterly,
-      peerData,
-      polymarketContext,
-      fredContext,
-      fmpContext,
-      twelveDataContext,
-      technicalContext,
-      geoContext,
-      tickerNews,
-      sectorNews,
-      earningsSearch,
-      competitiveSearch,
-      risksCatalystsSearch,
-    ] = await Promise.all([
-      // Finnhub structured data
-      FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, FINNHUB_KEY) : Promise.resolve([]),
-      // FMP quarterly (additional quarters, higher quality)
-      FMP_KEY ? fetchFmpQuarterlyFinancials(cleanTicker, FMP_KEY) : Promise.resolve([]),
-      FINNHUB_KEY ? fetchPeerData(peers, FINNHUB_KEY) : Promise.resolve([]),
-      // Free public APIs (no key)
-      fetchPolymarketData(cleanTicker, companyName),
-      // FRED macro indicators
-      fetchFredData(FRED_KEY),
-      // FMP: price targets, institutional holders, insider trading
-      fetchFmpData(cleanTicker, FMP_KEY),
-      // Twelve Data: gap filler for N/D fundamentals
-      fetchTwelveData(cleanTicker, TWELVE_KEY),
-      fetchTechnicalIndicators(cleanTicker, TWELVE_KEY),
-      // Tavily web searches (news & context)
-      TAVILY_KEY
-        ? fetchTavilySearch(
-            `${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions 2025 2026`,
-            TAVILY_KEY, 3, 60, undefined, 180,
-          )
-        : Promise.resolve(null),
-      TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} news latest 2025 2026`, TAVILY_KEY, 4, 7, "news", 150)
-        : Promise.resolve(null),
-      TAVILY_KEY && sector
-        ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, TAVILY_KEY, 3, 14, "news", 130)
-        : Promise.resolve(null),
-      TAVILY_KEY
-        ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, TAVILY_KEY, 3, undefined, undefined, 140)
-        : Promise.resolve(null),
-      TAVILY_KEY && peers.length > 0
-        ? fetchTavilySearch(
-            `${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`,
-            TAVILY_KEY, 2, undefined, undefined, 120,
-          )
-        : Promise.resolve(null),
-      TAVILY_KEY
-        ? fetchTavilySearch(
-            `${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`,
-            TAVILY_KEY, 4, 30, "news", 160,
-          )
-        : Promise.resolve(null),
-    ]);
+  lines.push("=== FIN DATOS ===");
+  return lines.join("\n");
+}
 
-    const quarterlyHistory = mergeQuarterlyData(
-      finnhubQuarterly as any[],
-      fmpQuarterly as any[],
-    );
+function buildSectorSystemPrompt(sector: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `Eres un analista financiero institucional senior especializado en análisis sectorial. Fecha: ${today}.
 
-    const dataContext = buildDataContext(
-      finnhubData,
-      peerData,
-      quarterlyHistory,
-      geoContext,
-      sectorNews,
-      tickerNews,
-      earningsSearch,
-      competitiveSearch,
-      risksCatalystsSearch,
-      polymarketContext,
-      fredContext,
-      fmpContext,
-      twelveDataContext,
-      technicalContext,
-    );
+Genera un informe sectorial completo y detallado sobre el sector "${sector}". Usa EXACTAMENTE estas 7 secciones iniciadas con "## ":
+## Panorama del Sector
+## Empresas Líderes
+## Mejores ETFs
+## Noticias y Tendencias
+## Análisis Macro
+## Perspectivas y Catalizadores
+## Riesgos del Sector
 
-    console.log("Data sources loaded:", {
-      finnhub_quote: !!finnhubData?.quote?.c,
-      finnhub_profile: !!finnhubData?.profile?.name,
-      finnhub_metrics: !!finnhubData?.metrics,
-      finnhub_news: finnhubData?.news?.length ?? 0,
-      quarterly_history: quarterlyHistory.length,
-      quarterly_finnhub: (finnhubQuarterly as any[]).length,
-      quarterly_fmp: (fmpQuarterly as any[]).length,
-      peer_data: (peerData as any[]).length,
-      tavily_geo: !!(geoContext?.answer),
-      tavily_ticker_news: tickerNews?.results?.length ?? 0,
-      tavily_sector_news: sectorNews?.results?.length ?? 0,
-      tavily_earnings: earningsSearch?.results?.length ?? 0,
-      tavily_competitive: competitiveSearch?.results?.length ?? 0,
-      tavily_risks_catalysts: risksCatalystsSearch?.results?.length ?? 0,
-      polymarket_markets: polymarketContext ? polymarketContext.split("\n").filter((l: string) => l.startsWith("-")).length : 0,
-      fred_ok: !!fredContext,
-      fmp_ok: !!fmpContext,
-      twelve_data_ok: !!twelveDataContext,
-    });
+== CONTENIDO POR SECCIÓN ==
 
-    console.log("Calling Gemini API (with fallback)...");
-    const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-    // Gemini 3.1 Pro Preview (latest SOTA, released Feb 2026) first, with fallbacks
-    const GEMINI_MODELS = [
-      "gemini-3.1-pro-preview",
-      "gemini-3-pro-preview",
-      "gemini-3-pro-latest",
-      "gemini-3.0-pro",
-      "gemini-3-pro",
-      "gemini-2.5-pro-latest",
-      "gemini-2.5-pro",
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-    ];
-    const geminiBody = {
-      messages: [
-        { role: "system", content: buildSystemPrompt() },
-        {
-          role: "user",
-          content: `${dataContext}
+## Panorama del Sector
+- Párrafo 5-7 líneas: descripción del sector, tamaño de mercado (TAM), CAGR histórico y proyectado, segmentos clave, geografías dominantes, fase del ciclo.
+- ### Métricas Clave: tabla Métrica | Valor con: Tamaño Mercado Global, CAGR proyectado, Número empresas cotizadas, Principales índices/benchmarks, Volatilidad relativa.
+- ### Estructura del Sector: 4-5 líneas sobre cómo está organizado el sector (cadena de valor, segmentos, concentración).
+
+## Empresas Líderes
+- ### Tabla de Empresas Líderes: tabla Empresa | Ticker | País | Market Cap est. | Especialización
+  Incluye 8-10 empresas. Empresa analizada en primera fila con *.
+- Para cada empresa 2-3 líderes: párrafo 2-3 líneas explicando por qué son líderes, ventajas diferenciales, cuota de mercado.
+
+## Mejores ETFs
+- ### Tabla de ETFs: tabla ETF | Ticker | TER | AUM est. | Índice/Benchmark | Exposición geográfica
+  Incluye 5-7 ETFs.
+- Para cada ETF, 1-2 líneas sobre ventajas, liquidez, para qué tipo de inversor.
+
+## Noticias y Tendencias
+- ### Noticias Recientes: 5-7 noticias importantes (últimas 4 semanas). Formato: "- **Titular:** impacto 2-3 líneas."
+- ### Tendencias Estructurales: 5-7 viñetas sobre megatendencias que definen el sector a largo plazo.
+- ### Disruptores e Innovaciones: 3-4 viñetas sobre tecnologías o modelos que están transformando el sector.
+
+## Análisis Macro
+- ### Factores Macroeconómicos: 5-6 líneas sobre tipos de interés, inflación, ciclo económico, divisa, aranceles.
+- Integra indicadores FRED disponibles (Fed Funds, yield 10Y, desempleo, CPI).
+- ### Impacto Geopolítico: 3-4 líneas sobre geopolítica, regulación y política sectorial relevante.
+
+## Perspectivas y Catalizadores
+- ### Corto Plazo (0-6m): 3-4 catalizadores con impacto esperado y horizonte temporal.
+- ### Medio Plazo (6-18m): 3-4 catalizadores de crecimiento o consolidación.
+- ### Largo Plazo (+18m): 3-4 tendencias estructurales de crecimiento sostenido.
+- ### Tesis de Inversión: 4-5 líneas con la tesis principal para invertir en este sector ahora.
+
+## Riesgos del Sector
+- 7-9 viñetas sobre riesgos principales. Formato: "- **Tipo de Riesgo:** descripción concreta con cifras o eventos. Nivel: **ALTO** / **MEDIO** / **BAJO**"
+  Cubre: regulatorio, competencia, macro (tipos/aranceles/divisa), tecnológico, concentración, geopolítico, ESG.
+
+REGLAS DE FORMATO:
+- Markdown estricto. Sin emojis.
+- Todos los números: exactamente 2 decimales donde aplique.
+- Unidades siempre presentes: $, %, x, B, M.
+- Niveles de riesgo en **NEGRITAS**: **ALTO**, **MEDIO**, **BAJO**.
+- Tendencias/señales en **NEGRITAS**: **BULLISH**, **BEARISH**, **ALCISTA**, **BAJISTA**.
+- Si no tienes un dato específico, omite esa fila — nunca escribas N/D, N/A o similar.
+- No cortes frases a medias.`;
+}
+
+// =====================================================
+// HANDLERS
+// =====================================================
+
+interface EnvKeys {
+  GEMINI_API_KEY: string;
+  FINNHUB_KEY: string;
+  TAVILY_KEY: string;
+  FMP_KEY: string;
+  FRED_KEY: string;
+  TWELVE_KEY: string;
+}
+
+async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Response> {
+  const cleanTicker = ticker.trim().toUpperCase();
+
+  const finnhubData = env.FINNHUB_KEY ? await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY) : null;
+
+  const companyName = finnhubData?.profile?.name ?? cleanTicker;
+  const sector = finnhubData?.profile?.finnhubIndustry ?? "";
+  const peers = finnhubData?.peers ?? [];
+
+  const [
+    finnhubQuarterly,
+    fmpQuarterly,
+    peerData,
+    polymarketContext,
+    fredContext,
+    fmpContext,
+    twelveDataContext,
+    technicalContext,
+    geoContext,
+    tickerNews,
+    sectorNews,
+    earningsSearch,
+    competitiveSearch,
+    risksCatalystsSearch,
+  ] = await Promise.all([
+    env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
+    env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
+    env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
+    fetchPolymarketData(cleanTicker, companyName),
+    fetchFredData(env.FRED_KEY),
+    fetchFmpData(cleanTicker, env.FMP_KEY),
+    fetchTwelveData(cleanTicker, env.TWELVE_KEY),
+    fetchTechnicalIndicators(cleanTicker, env.TWELVE_KEY),
+    env.TAVILY_KEY
+      ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions 2025 2026`, env.TAVILY_KEY, 3, 60, undefined, 180)
+      : Promise.resolve(null),
+    env.TAVILY_KEY
+      ? fetchTavilySearch(`${companyName} ${cleanTicker} news latest 2025 2026`, env.TAVILY_KEY, 4, 7, "news", 150)
+      : Promise.resolve(null),
+    env.TAVILY_KEY && sector
+      ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, env.TAVILY_KEY, 3, 14, "news", 130)
+      : Promise.resolve(null),
+    env.TAVILY_KEY
+      ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, env.TAVILY_KEY, 3, undefined, undefined, 140)
+      : Promise.resolve(null),
+    env.TAVILY_KEY && peers.length > 0
+      ? fetchTavilySearch(`${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`, env.TAVILY_KEY, 2, undefined, undefined, 120)
+      : Promise.resolve(null),
+    env.TAVILY_KEY
+      ? fetchTavilySearch(`${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
+      : Promise.resolve(null),
+  ]);
+
+  const quarterlyHistory = mergeQuarterlyData(finnhubQuarterly as any[], fmpQuarterly as any[]);
+
+  const dataContext = buildTickerDataContext(
+    finnhubData,
+    peerData,
+    quarterlyHistory,
+    geoContext,
+    sectorNews,
+    tickerNews,
+    earningsSearch,
+    competitiveSearch,
+    risksCatalystsSearch,
+    polymarketContext,
+    fredContext,
+    fmpContext,
+    twelveDataContext,
+    technicalContext,
+  );
+
+  console.log("Ticker data loaded:", {
+    ticker: cleanTicker,
+    finnhub_quote: !!finnhubData?.quote?.c,
+    finnhub_metrics: !!finnhubData?.metrics,
+    quarterly_history: quarterlyHistory.length,
+    quarterly_finnhub: (finnhubQuarterly as any[]).length,
+    quarterly_fmp: (fmpQuarterly as any[]).length,
+    peer_data: (peerData as any[]).length,
+    tavily_ticker_news: tickerNews?.results?.length ?? 0,
+    polymarket_ok: !!polymarketContext,
+    fred_ok: !!fredContext,
+    fmp_ok: !!fmpContext,
+    twelve_data_ok: !!twelveDataContext,
+    technical_ok: !!technicalContext,
+  });
+
+  const messages = [
+    { role: "system", content: buildTickerSystemPrompt() },
+    {
+      role: "user",
+      content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
@@ -1062,96 +1159,156 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
 - En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Incluye el enlace. Si no hay datos, omite la sección.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
-        },
-      ],
-      stream: true,
-    };
+    },
+  ];
 
-    let orResponse: Response | null = null;
-    let usedModel = "";
-    for (const model of GEMINI_MODELS) {
-      const res = await fetch(GEMINI_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ ...geminiBody, model }),
-      });
-      console.log(`Gemini [${model}] status:`, res.status);
-      if (res.ok) { orResponse = res; usedModel = model; break; }
+  const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
+  if (!gemini.ok) return jsonError(gemini.error, gemini.status);
+  console.log(`Streaming ticker analysis with model: ${gemini.model}`);
 
-      // Auth errors → don't retry, fail immediately
-      if (res.status === 401 || res.status === 403) {
-        return new Response(
-          JSON.stringify({ error: "API key de Gemini inválida o sin permisos." }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      // Rate limit → don't retry
-      if (res.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Límite de solicitudes Gemini. Inténtalo en unos segundos." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      // 404 (model not found), 503/529 (overloaded), 400 (bad model) → try next
-      const errBody = await res.text();
-      console.warn(`Model ${model} unavailable (${res.status}): ${errBody.substring(0, 150)}. Trying next fallback...`);
-    }
+  if (!gemini.response.body) return jsonError("Gemini returned empty response body", 500);
 
-    if (!orResponse) {
-      return new Response(
-        JSON.stringify({ error: "Todos los modelos Gemini están saturados. Inténtalo en unos segundos." }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    console.log(`Streaming with model: ${usedModel}`);
+  // Combined stream: quarterly JSON event first, then Gemini SSE
+  const encoder = new TextEncoder();
+  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory })}\n\n`);
+  const geminiReader = gemini.response.body.getReader();
 
-    if (!orResponse.body) {
-      return new Response(
-        JSON.stringify({ error: "Gemini returned empty response body" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    console.log("Streaming Gemini response to client...");
-
-    // Combined stream: quarterly JSON event first, then Gemini SSE
-    const encoder = new TextEncoder();
-    const quarterlyEvent = encoder.encode(
-      `data: ${JSON.stringify({ __quarterly: quarterlyHistory })}\n\n`
-    );
-    const geminiReader = orResponse.body!.getReader();
-
-    const combined = new ReadableStream({
-      async start(controller) {
-        controller.enqueue(quarterlyEvent);
-        try {
-          while (true) {
-            const { done, value } = await geminiReader.read();
-            if (done) break;
-            controller.enqueue(value);
-          }
-        } finally {
-          controller.close();
+  const combined = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(quarterlyEvent);
+      try {
+        while (true) {
+          const { done, value } = await geminiReader.read();
+          if (done) break;
+          controller.enqueue(value);
         }
-      },
-      cancel() { geminiReader.cancel(); },
-    });
+      } finally {
+        controller.close();
+      }
+    },
+    cancel() { geminiReader.cancel(); },
+  });
 
-    return new Response(combined, {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-      },
-    });
+  return new Response(combined, {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+async function handleSectorAnalysis(sector: string, env: EnvKeys): Promise<Response> {
+  const cleanSector = sector.trim();
+
+  const [
+    sectorNews,
+    sectorTrends,
+    topCompanies,
+    sectorETFs,
+    macroNews,
+    regulatoryContext,
+    fredContext,
+  ] = await Promise.all([
+    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector news latest 2025 2026`, env.TAVILY_KEY, 6, 30, "news", 180) : Promise.resolve({ answer: "", results: [] }),
+    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector outlook trends growth forecast 2025 2026`, env.TAVILY_KEY, 5, undefined, undefined, 180) : Promise.resolve({ answer: "", results: [] }),
+    env.TAVILY_KEY ? fetchTavilySearch(`top companies ${cleanSector} sector leaders market cap 2025`, env.TAVILY_KEY, 5, undefined, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
+    env.TAVILY_KEY ? fetchTavilySearch(`best ETF ${cleanSector} sector invest 2025`, env.TAVILY_KEY, 4, undefined, undefined, 140) : Promise.resolve({ answer: "", results: [] }),
+    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector interest rates inflation tariffs macro impact 2025`, env.TAVILY_KEY, 4, 60, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
+    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector regulation policy geopolitical risk 2025 2026`, env.TAVILY_KEY, 3, 90, undefined, 150) : Promise.resolve({ answer: "", results: [] }),
+    fetchFredData(env.FRED_KEY),
+  ]);
+
+  const dataContext = buildSectorDataContext(
+    cleanSector,
+    sectorNews,
+    sectorTrends,
+    topCompanies,
+    sectorETFs,
+    macroNews,
+    regulatoryContext,
+    fredContext,
+  );
+
+  console.log("Sector data loaded:", {
+    sector: cleanSector,
+    tavily_news: (sectorNews as any)?.results?.length ?? 0,
+    tavily_trends: (sectorTrends as any)?.results?.length ?? 0,
+    tavily_companies: (topCompanies as any)?.results?.length ?? 0,
+    tavily_etfs: (sectorETFs as any)?.results?.length ?? 0,
+    fred_ok: !!fredContext,
+  });
+
+  const messages = [
+    { role: "system", content: buildSectorSystemPrompt(cleanSector) },
+    {
+      role: "user",
+      content: `${dataContext}
+
+INSTRUCCIÓN FINAL:
+Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones obligatorias.
+- Usa todas las noticias y datos de investigación proporcionados.
+- Sé específico: menciona empresas reales, tickers, cifras concretas.
+- Integra los indicadores FRED en el Análisis Macro.
+- Las tablas de empresas y ETFs deben tener datos reales y completos.
+- Si no existe un dato, omite esa fila — nunca uses N/D.`,
+    },
+  ];
+
+  const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
+  if (!gemini.ok) return jsonError(gemini.error, gemini.status);
+  console.log(`Streaming sector analysis with model: ${gemini.model}`);
+
+  if (!gemini.response.body) return jsonError("Gemini returned empty response body", 500);
+
+  return new Response(gemini.response.body, {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+// =====================================================
+// MAIN DISPATCHER
+// =====================================================
+
+Deno.serve(async (req) => {
+  console.log("analyze v7-UNIFIED started");
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const body = await req.json();
+
+    const env: EnvKeys = {
+      GEMINI_API_KEY: (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini") || Deno.env.get("GOOGLE_API_KEY")) ?? "",
+      FINNHUB_KEY:    (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "",
+      TAVILY_KEY:     (Deno.env.get("TAVILY_API_KEY")  || Deno.env.get("Tavily")) ?? "",
+      FMP_KEY:        Deno.env.get("FMP")         ?? "",
+      FRED_KEY:       Deno.env.get("Fred")        ?? "",
+      TWELVE_KEY:     Deno.env.get("Twelve Data") ?? "",
+    };
+    if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+
+    // Dispatch by body shape
+    if (body.sector && typeof body.sector === "string" && body.sector.trim().length > 0 && body.sector.trim().length <= 80) {
+      return await handleSectorAnalysis(body.sector, env);
+    }
+
+    if (body.ticker && typeof body.ticker === "string" && body.ticker.trim().length > 0 && body.ticker.trim().length <= 10) {
+      return await handleTickerAnalysis(body.ticker, env);
+    }
+
+    return jsonError("Petición inválida: debe incluir 'ticker' (≤10 chars) o 'sector' (≤80 chars).", 400);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : "";
-    console.error("analyze-ticker fatal error:", msg, stack);
-    return new Response(
-      JSON.stringify({ error: msg }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.error("analyze fatal error:", msg, stack);
+    return jsonError(msg, 500);
   }
 });
