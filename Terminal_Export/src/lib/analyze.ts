@@ -1,5 +1,5 @@
+// Single unified Supabase function — dispatches by body shape ({ticker} vs {sector})
 const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
-const SECTOR_URL  = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-sector`;
 
 export interface QuarterlyPeriod {
   period: string;
@@ -143,7 +143,7 @@ export async function streamSectorAnalysis({
   signal?: AbortSignal;
 }) {
   await streamSSE({
-    url: SECTOR_URL,
+    url: ANALYZE_URL,
     body: { sector },
     onDelta,
     onDone,
