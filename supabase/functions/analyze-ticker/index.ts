@@ -895,6 +895,8 @@ REGLAS DE FORMATO:
 - Unidades siempre presentes: $, %, x, B, M.
 - Señales técnicas en **NEGRITAS**: **BULLISH**, **BEARISH**, **NEUTRO**, **ALCISTA**, **BAJISTA**, **SOBRECOMPRADO**, **SOBREVENTA**.
 - Niveles de riesgo en **NEGRITAS**: **ALTO**, **MEDIO**, **BAJO**.
+- Cuando menciones trimestres específicos en el análisis narrativo, usa SIEMPRE formato Q1'24, Q2'24, Q3'24, Q4'24 (nunca "primer trimestre 2024", ni "ENE 24", ni "marzo 2024").
+- Entre cada viñeta deja UNA LÍNEA EN BLANCO (doble salto de línea) para máxima legibilidad. Las viñetas pegadas son ilegibles.
 - CERO N/D EN EL INFORME: Está PROHIBIDO escribir N/D, N/A, -, — o cualquier equivalente en el informe. Si un dato no está en Finnhub, búscalo en DATOS TWELVE DATA (enterprise_to_ebitda, forward_pe, total_debt_to_equity_mrq, etc.), luego en FMP, luego en HISTORIAL TRIMESTRAL. Si tras buscar en TODAS las fuentes no existe el dato, OMITE esa fila de la tabla completamente — no la incluyas. Un informe sin una fila es mejor que un informe con N/D.
 - No cortes frases a medias.`;
 }
@@ -1037,6 +1039,8 @@ REGLAS DE FORMATO:
 - Unidades siempre presentes: $, %, x, B, M.
 - Niveles de riesgo en **NEGRITAS**: **ALTO**, **MEDIO**, **BAJO**.
 - Tendencias/señales en **NEGRITAS**: **BULLISH**, **BEARISH**, **ALCISTA**, **BAJISTA**.
+- Cuando menciones trimestres específicos, usa SIEMPRE formato Q1'24, Q2'24, Q3'24, Q4'24 (nunca "primer trimestre 2024", "ENE 24", ni "marzo 2024").
+- Entre cada viñeta deja UNA LÍNEA EN BLANCO (doble salto de línea) para máxima legibilidad. Las viñetas pegadas son ilegibles.
 - Si no tienes un dato específico, omite esa fila — nunca escribas N/D, N/A o similar.
 - No cortes frases a medias.`;
 }
