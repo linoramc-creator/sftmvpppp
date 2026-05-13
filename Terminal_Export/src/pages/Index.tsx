@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
-import { streamAnalysis, streamSectorAnalysis, type QuarterlyPeriod } from "@/lib/analyze";
+import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -101,6 +101,13 @@ const Index = () => {
 
   const [clock, setClock] = useState("");
 
+  // Market ticker
+  const [marketData,    setMarketData]    = useState<MarketData | null>(null);
+  const [customStocks,  setCustomStocks]  = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("terminal_stocks_v1") || '["AAPL","MSFT","NVDA"]'); }
+    catch (_) { return ["AAPL", "MSFT", "NVDA"]; }
+  });
+
   const abortRef       = useRef<AbortController | null>(null);
   const sectorAbortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
@@ -117,6 +124,19 @@ const Index = () => {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Fetch market data on mount + every 60s
+  useEffect(() => {
+    const load = () => fetchMarketData(customStocks).then(d => { if (d) setMarketData(d); });
+    load();
+    const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
+  }, [customStocks]);
+
+  const saveCustomStocks = (stocks: string[]) => {
+    setCustomStocks(stocks);
+    try { localStorage.setItem("terminal_stocks_v1", JSON.stringify(stocks)); } catch (_) {}
+  };
 
   const openAllSections = () => {
     const all: Record<string, boolean> = {};
@@ -294,6 +314,13 @@ const Index = () => {
           </div>
         </div>
       </header>
+
+      {/* ── Market ticker bar ───────────────────────────────────────── */}
+      <MarketTickerBar
+        data={marketData}
+        customStocks={customStocks}
+        onChangeStocks={saveCustomStocks}
+      />
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "ticker" && (
@@ -504,6 +531,120 @@ const Index = () => {
   );
 };
 
+// ── Market Ticker Bar ─────────────────────────────────────────────────
+
+function MarketTickerBar({
+  data, customStocks, onChangeStocks,
+}: {
+  data: MarketData | null;
+  customStocks: string[];
+  onChangeStocks: (stocks: string[]) => void;
+}) {
+  const [editing, setEditing]   = useState(false);
+  const [draft,   setDraft]     = useState(customStocks.join(", "));
+
+  const fmtChange = (n: number | null, suffix = "%") =>
+    n == null ? null : `${n > 0 ? "+" : ""}${n.toFixed(2)}${suffix}`;
+
+  const cls = (n: number | null) =>
+    n == null ? "text-muted-foreground/40"
+    : n > 0   ? "text-primary"
+    :            "text-destructive";
+
+  const saveEdit = () => {
+    const parsed = draft.split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.^]{1,10}$/.test(s)).slice(0, 6);
+    onChangeStocks(parsed.length ? parsed : customStocks);
+    setEditing(false);
+  };
+
+  return (
+    <div className="border-b border-border/50 bg-card/30">
+      <div className="overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+        <div className="flex items-center h-8 px-4 min-w-max gap-0">
+
+          {/* Fixed indices */}
+          {(data?.indices ?? []).map((idx) => (
+            <div key={idx.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
+              <span className="text-[9px] tracking-widest text-muted-foreground/45 uppercase">{idx.label}</span>
+              <span className="text-[11px] tabular-nums text-foreground/80">
+                {idx.price != null ? `$${idx.price.toFixed(2)}` : "—"}
+              </span>
+              {fmtChange(idx.change1d) && (
+                <span className={`text-[10px] tabular-nums ${cls(idx.change1d)}`}>{fmtChange(idx.change1d)}</span>
+              )}
+              {idx.change1m != null && (
+                <span className={`text-[10px] tabular-nums ${cls(idx.change1m)}`}>
+                  <span className="text-muted-foreground/25">1m </span>{fmtChange(idx.change1m)}
+                </span>
+              )}
+            </div>
+          ))}
+
+          {/* 10Y yield */}
+          {data?.yield10y != null && (
+            <div className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
+              <span className="text-[9px] tracking-widest text-muted-foreground/45">10Y</span>
+              <span className={`text-[11px] tabular-nums ${data.yield10y > 5 ? "text-destructive/80" : "text-foreground/80"}`}>
+                {data.yield10y.toFixed(2)}%
+              </span>
+            </div>
+          )}
+
+          {/* 10Y-2Y spread */}
+          {data?.spread != null && (
+            <div className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
+              <span className="text-[9px] tracking-widest text-muted-foreground/45">10Y-2Y</span>
+              <span className={`text-[11px] tabular-nums ${data.spread < 0 ? "text-destructive/80" : "text-foreground/80"}`}>
+                {data.spread > 0 ? "+" : ""}{data.spread}bps
+              </span>
+            </div>
+          )}
+
+          {/* User stocks */}
+          {(data?.stocks ?? []).map((s) => (
+            <div key={s.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
+              <span className="text-[9px] tracking-widest text-muted-foreground/45">{s.symbol}</span>
+              <span className="text-[11px] tabular-nums text-foreground/80">
+                {s.price != null ? `$${s.price.toFixed(2)}` : "—"}
+              </span>
+              {fmtChange(s.change1d) && (
+                <span className={`text-[10px] tabular-nums ${cls(s.change1d)}`}>{fmtChange(s.change1d)}</span>
+              )}
+            </div>
+          ))}
+
+          {!data && (
+            <span className="text-[9px] text-muted-foreground/25 tracking-widest">CARGANDO...</span>
+          )}
+
+          {/* Edit stocks button */}
+          <button
+            onClick={() => { setDraft(customStocks.join(", ")); setEditing(e => !e); }}
+            className="ml-auto pl-3 text-[9px] tracking-widest text-muted-foreground/30 hover:text-primary transition-colors shrink-0"
+          >
+            {editing ? "✕" : "EDITAR"}
+          </button>
+        </div>
+      </div>
+
+      {/* Edit panel */}
+      {editing && (
+        <div className="flex items-center gap-2 px-4 py-2 border-t border-border/30 bg-card/50">
+          <span className="text-[9px] tracking-widest text-muted-foreground/40">STOCKS:</span>
+          <input
+            value={draft}
+            onChange={e => setDraft(e.target.value.toUpperCase())}
+            onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
+            placeholder="AAPL, TSLA, NVDA, AMZN..."
+            className="flex-1 h-6 px-2 bg-background border border-border text-[11px] text-foreground font-mono focus:outline-none focus:border-primary"
+          />
+          <button onClick={saveEdit} className="text-[9px] tracking-widest text-primary hover:text-primary/80 px-2 py-1 border border-primary/30">GUARDAR</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Report View (ticker accordion) ────────────────────────────────────
 
 function ReportView({
@@ -560,7 +701,7 @@ function ReportView({
 
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
-                {key === "Finanzas" && hasQuarterly && (
+                {key === "Finanzas" && (
                   <QuarterlyHistorySection data={quarterlyData} />
                 )}
                 {sectionNodes && renderElements(sectionNodes)}
@@ -679,8 +820,27 @@ function SavedReportCard({
 
 // ── Quarterly history (Alpha-style, multi-source) ──────────────────────
 
+type QTab = "income" | "cashflow" | "balance";
+
 function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
-  if (!data.length) return null;
+  const [tab, setTab] = useState<QTab>("income");
+
+  if (!data.length) {
+    return (
+      <div className="mb-6 border border-border overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+            <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
+            <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
+          </div>
+        </div>
+        <div className="px-5 py-6 text-center text-[10px] tracking-widest text-muted-foreground/40">
+          DATOS TRIMESTRALES NO DISPONIBLES — VERIFICA CLAVES FINNHUB / FMP EN SUPABASE
+        </div>
+      </div>
+    );
+  }
 
   // Oldest → newest left to right
   const sorted  = [...data].reverse();
@@ -688,22 +848,31 @@ function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
   const latest  = sorted.length - 1;
   const col     = (f: keyof QuarterlyPeriod) => sorted.map((q) => q[f] as string);
 
-  const ROWS: { label: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean }[] = [
-    { label: "Revenue",         values: col("revenue"),       bold: true  },
-    { label: "Rev. Growth YoY", values: col("revenueGrowth"), colorize: true },
-    { label: "Gross Margin",    values: col("grossMargin"),   colorize: true, separator: true },
-    { label: "EBITDA",          values: col("ebitda"),        bold: true  },
-    { label: "Net Income",      values: col("netIncome"),     bold: true  },
-    { label: "Net Margin",      values: col("netMargin"),     colorize: true, separator: true },
-    { label: "Operating CF",    values: col("operatingCF"),   bold: true  },
-    { label: "Free Cash Flow",  values: col("freeCashFlow"),  bold: true  },
-    { label: "CapEx",           values: col("capex") },
-    { label: "Cash",            values: col("cash"),          separator: true },
-    { label: "Total Debt",      values: col("totalDebt") },
-    { label: "Net Debt",        values: col("netDebt"),       colorize: true },
-    { label: "Equity",          values: col("equity") },
-    { label: "EPS",             values: col("eps") },
-  ].filter(r => !allND(r.values));
+  const ROWS_MAP: Record<QTab, { label: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean }[]> = {
+    income: [
+      { label: "Total Revenue",    values: col("revenue"),       bold: true  },
+      { label: "Rev. Growth YoY",  values: col("revenueGrowth"), colorize: true },
+      { label: "Gross Margin",     values: col("grossMargin"),   colorize: true, separator: true },
+      { label: "EBITDA",           values: col("ebitda"),        bold: true  },
+      { label: "Net Income",       values: col("netIncome"),     bold: true  },
+      { label: "Net Margin",       values: col("netMargin"),     colorize: true },
+      { label: "EPS (Diluted)",    values: col("eps"),           separator: true },
+    ],
+    cashflow: [
+      { label: "Operating CF",     values: col("operatingCF"),  bold: true  },
+      { label: "Capital Expenditure", values: col("capex") },
+      { label: "Free Cash Flow",   values: col("freeCashFlow"), bold: true, colorize: true },
+    ],
+    balance: [
+      { label: "Cash & Equivalents", values: col("cash"),       bold: true  },
+      { label: "Total Debt",          values: col("totalDebt") },
+      { label: "Net Debt",            values: col("netDebt"),   colorize: true, separator: true },
+      { label: "Total Equity",        values: col("equity"),    bold: true  },
+      { label: "Total Assets",        values: col("totalAssets"), bold: true },
+    ],
+  };
+
+  const ROWS = ROWS_MAP[tab].filter(r => !allND(r.values));
 
   return (
     <div className="mb-6 border border-border overflow-hidden">
@@ -711,15 +880,36 @@ function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
       <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
         <div className="flex items-center gap-3">
           <span className="w-1.5 h-1.5 bg-primary shrink-0" />
-          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FINANCIAL STATEMENTS</span>
+          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
         </div>
         <span className="text-[10px] tracking-widest text-muted-foreground/30">{sorted.length}Q · FINNHUB + FMP</span>
       </div>
 
+      {/* Statement tabs */}
+      <div className="flex border-b border-border bg-card">
+        {([
+          { id: "income"   as QTab, label: "Income Statement" },
+          { id: "cashflow" as QTab, label: "Cash Flow"        },
+          { id: "balance"  as QTab, label: "Balance Sheet"    },
+        ]).map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-5 py-2.5 text-[11px] tracking-wider transition-colors border-b-2 ${
+              tab === t.id
+                ? "text-primary border-primary"
+                : "text-muted-foreground/50 border-transparent hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {/* Scrollable table */}
       <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
-        <table className="w-full" style={{ minWidth: Math.max(500, 160 + sorted.length * 90) }}>
+        <table className="w-full" style={{ minWidth: Math.max(700, 180 + sorted.length * 100) }}>
           <thead>
             <tr className="border-b border-border bg-secondary/20">
               <th className="px-5 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium sticky left-0 bg-secondary/20 z-10"

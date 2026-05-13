@@ -1,5 +1,37 @@
-// Single unified Supabase function — dispatches by body shape ({ticker} vs {sector})
+// Single unified Supabase function — dispatches by body shape ({ticker} | {sector} | {marketData})
 const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
+
+export interface MarketQuote {
+  symbol: string;
+  label: string;
+  price: number | null;
+  change1d: number | null;
+  change1m: number | null;
+}
+
+export interface MarketData {
+  indices: MarketQuote[];
+  yield10y: number | null;
+  yield2y: number | null;
+  spread: number | null;
+  stocks: MarketQuote[];
+  ts: number;
+}
+
+export async function fetchMarketData(symbols: string[]): Promise<MarketData | null> {
+  try {
+    const resp = await fetch(ANALYZE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ marketData: true, symbols }),
+    });
+    if (!resp.ok) return null;
+    return resp.json();
+  } catch (_) { return null; }
+}
 
 export interface QuarterlyPeriod {
   period: string;

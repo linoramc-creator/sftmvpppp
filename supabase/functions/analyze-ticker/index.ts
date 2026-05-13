@@ -261,7 +261,7 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
   const cfByPeriod = new Map<string, any>(cfList.map((q: any) => [q.period, q]));
   const bsByPeriod = new Map<string, any>(bsList.map((q: any) => [q.period, q]));
 
-  return icList.slice(0, 6).map((q: any) => {
+  return icList.slice(0, 12).map((q: any) => {
     const cf = cfByPeriod.get(q.period) ?? {};
     const bs = bsByPeriod.get(q.period) ?? {};
 
@@ -308,11 +308,11 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
   const base = "https://financialmodelingprep.com/api/v3";
   try {
     const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
-      fetch(`${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+      fetch(`${base}/income-statement/${t}?period=quarter&limit=16&apikey=${key}`)
         .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=16&apikey=${key}`)
         .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=16&apikey=${key}`)
         .then(r => r.ok ? r.json() : []).catch(() => []),
     ]);
 
@@ -363,7 +363,7 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         equity:       fmt(equity, "B"),
         totalAssets:  fmt(totalAssets, "B"),
       };
-    }).slice(0, 8);
+    }).slice(0, 12);
   } catch (_) { return []; }
 }
 
@@ -391,7 +391,7 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[]): any[] {
 
   return Array.from(merged.values())
     .sort((a: any, b: any) => b.period.localeCompare(a.period))
-    .slice(0, 8);
+    .slice(0, 12);
 }
 
 // =====================================================
@@ -1277,11 +1277,82 @@ Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones 
 }
 
 // =====================================================
+// MARKET DATA HANDLER
+// =====================================================
+
+async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<Response> {
+  const now    = Math.floor(Date.now() / 1000);
+  const ago30d = now - 30 * 24 * 3600;
+
+  const allSymbols = ["SPY", "QQQ", ...extraSymbols.filter(s => s !== "SPY" && s !== "QQQ")];
+
+  const [quotesResult, spyCandle, qqqCandle, fred10y, fred2y] = await Promise.allSettled([
+    Promise.all(allSymbols.map(s =>
+      finnhubGet(`/quote?symbol=${s}`, env.FINNHUB_KEY)
+        .then(d => d ? { symbol: s, c: d.c as number, dp: d.dp as number } : { symbol: s, c: null, dp: null })
+    )),
+    finnhubGet(`/stock/candle?symbol=SPY&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
+    finnhubGet(`/stock/candle?symbol=QQQ&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
+    env.FRED_KEY
+      ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
+      : Promise.resolve(null),
+    env.FRED_KEY
+      ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS2&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  const quoteList = quotesResult.status === "fulfilled" ? quotesResult.value : [];
+  const quoteMap: Record<string, { c: number | null; dp: number | null }> = {};
+  for (const q of quoteList) quoteMap[q.symbol] = q;
+
+  const calc1m = (candle: any): number | null => {
+    if (!candle || candle.s === "no_data" || !Array.isArray(candle.c) || candle.c.length < 2) return null;
+    const first = candle.c[0] as number;
+    const last  = candle.c[candle.c.length - 1] as number;
+    return first > 0 ? +((last - first) / first * 100).toFixed(2) : null;
+  };
+
+  const spy1m = spyCandle.status === "fulfilled" ? calc1m(spyCandle.value) : null;
+  const qqq1m = qqqCandle.status === "fulfilled" ? calc1m(qqqCandle.value) : null;
+
+  const getYield = (result: PromiseSettledResult<any>): number | null => {
+    if (result.status !== "fulfilled" || !result.value) return null;
+    const obs: any[] = result.value?.observations?.filter((o: any) => o.value !== ".") ?? [];
+    return obs.length ? parseFloat(obs[0].value) : null;
+  };
+
+  const yield10y = getYield(fred10y);
+  const yield2y  = getYield(fred2y);
+  const spread   = yield10y != null && yield2y != null ? +((yield10y - yield2y) * 100).toFixed(0) : null;
+
+  const makeQ = (symbol: string, label: string, change1m: number | null = null) => ({
+    symbol, label,
+    price:    quoteMap[symbol]?.c ?? null,
+    change1d: quoteMap[symbol]?.dp != null ? +quoteMap[symbol].dp!.toFixed(2) : null,
+    change1m,
+  });
+
+  return new Response(JSON.stringify({
+    indices: [
+      makeQ("SPY", "S&P 500", spy1m),
+      makeQ("QQQ", "NASDAQ",  qqq1m),
+    ],
+    yield10y,
+    yield2y,
+    spread,
+    stocks: extraSymbols.map(s => makeQ(s, s)),
+    ts: Date.now(),
+  }), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+// =====================================================
 // MAIN DISPATCHER
 // =====================================================
 
 Deno.serve(async (req) => {
-  console.log("analyze v7-UNIFIED started");
+  console.log("analyze v8-UNIFIED started");
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -1297,6 +1368,15 @@ Deno.serve(async (req) => {
       FRED_KEY:       Deno.env.get("Fred")        ?? "",
       TWELVE_KEY:     Deno.env.get("Twelve Data") ?? "",
     };
+
+    // Market data — no Gemini needed
+    if (body.marketData === true) {
+      const extraSymbols: string[] = Array.isArray(body.symbols)
+        ? (body.symbols as any[]).filter(s => typeof s === "string" && /^[A-Z0-9.^]{1,10}$/.test(s)).slice(0, 6)
+        : [];
+      return await handleMarketData(env, extraSymbols);
+    }
+
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
     // Dispatch by body shape
@@ -1308,7 +1388,7 @@ Deno.serve(async (req) => {
       return await handleTickerAnalysis(body.ticker, env);
     }
 
-    return jsonError("Petición inválida: debe incluir 'ticker' (≤10 chars) o 'sector' (≤80 chars).", 400);
+    return jsonError("Petición inválida: debe incluir 'ticker' (≤10 chars), 'sector' (≤80 chars), o 'marketData: true'.", 400);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : "";
