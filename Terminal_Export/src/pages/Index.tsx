@@ -74,6 +74,27 @@ function cleanVal(v: string): string {
 
 function allND(values: string[]) { return values.every((v) => ND_VALUES.has(v)); }
 
+// Extract the "| Métrica | Valor |" markdown table from analysis text
+function extractCurrentMetrics(content: string): { label: string; value: string }[] {
+  const result: { label: string; value: string }[] = [];
+  if (!content) return result;
+  const match = content.match(/\|\s*Métrica\s*\|\s*Valor\s*\|[\s\S]+?(?=\n\s*\n|\n##|\n###|\n[^|])/i);
+  if (!match) return result;
+  const lines = match[0].split("\n");
+  const ND = new Set(["N/D", "N/A", "—", "-", ""]);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line.includes("|")) continue;
+    if (/^\|?[\s\-:|]+\|?$/.test(line)) continue;
+    if (/Métrica/i.test(line)) continue;
+    const cells = line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.replace(/^\*+|\*+$/g, "").trim());
+    if (cells.length >= 2 && cells[0] && !ND.has(cells[1])) {
+      result.push({ label: cells[0], value: cells[1] });
+    }
+  }
+  return result;
+}
+
 // ── Main component ─────────────────────────────────────────────────────
 
 const Index = () => {
@@ -663,6 +684,7 @@ function ReportView({
   onToggle: (key: string) => void;
 }) {
   const sections = parseSections(content, EXPECTED_TABS);
+  const currentMetrics = extractCurrentMetrics(content);
 
   return (
     <div className="space-y-px">
@@ -707,7 +729,7 @@ function ReportView({
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
                 {key === "Finanzas" && (
-                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} />
+                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} />
                 )}
                 {sectionNodes && renderElements(sectionNodes)}
                 {isLoading && isLastSection && (
@@ -827,10 +849,16 @@ function SavedReportCard({
 
 type QTab = "income" | "cashflow" | "balance";
 
-function QuarterlyHistorySection({ data, debug }: { data: QuarterlyPeriod[]; debug?: QuarterlyDebug | null }) {
+function QuarterlyHistorySection({
+  data, debug, currentMetrics = [],
+}: {
+  data: QuarterlyPeriod[];
+  debug?: QuarterlyDebug | null;
+  currentMetrics?: { label: string; value: string }[];
+}) {
   const [tab, setTab] = useState<QTab>("income");
 
-  if (!data.length) {
+  if (!data.length && !currentMetrics.length) {
     let diagnostic = "Esperando datos del backend...";
     if (debug) {
       const problems: string[] = [];
@@ -868,32 +896,45 @@ function QuarterlyHistorySection({ data, debug }: { data: QuarterlyPeriod[]; deb
   const periods = sorted.map((q) => fmtPeriod(q.period));
   const latest  = sorted.length - 1;
   const col     = (f: keyof QuarterlyPeriod) => sorted.map((q) => q[f] as string);
+  const lastVal = (vals: string[]) => vals[vals.length - 1] ?? "";
 
-  const ROWS_MAP: Record<QTab, { label: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean }[]> = {
+  type Row = { label: string; current: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean; currentOnly?: boolean };
+
+  // Snapshot rows from LLM (P/E TTM, Market Cap, Beta, 52W, etc.) — only shown in Income tab
+  const snapshotRows: Row[] = currentMetrics.map(m => ({
+    label: m.label,
+    current: m.value,
+    values: sorted.map(() => ""),
+    bold: false,
+    currentOnly: true,
+  }));
+
+  const ROWS_MAP: Record<QTab, Row[]> = {
     income: [
-      { label: "Total Revenue",    values: col("revenue"),       bold: true  },
-      { label: "Rev. Growth YoY",  values: col("revenueGrowth"), colorize: true },
-      { label: "Gross Margin",     values: col("grossMargin"),   colorize: true, separator: true },
-      { label: "EBITDA",           values: col("ebitda"),        bold: true  },
-      { label: "Net Income",       values: col("netIncome"),     bold: true  },
-      { label: "Net Margin",       values: col("netMargin"),     colorize: true },
-      { label: "EPS (Diluted)",    values: col("eps"),           separator: true },
+      ...snapshotRows,
+      { label: "Total Revenue",      current: lastVal(col("revenue")),       values: col("revenue"),       bold: true,  separator: snapshotRows.length > 0 },
+      { label: "Rev. Growth YoY",    current: lastVal(col("revenueGrowth")), values: col("revenueGrowth"), colorize: true },
+      { label: "Gross Margin",       current: lastVal(col("grossMargin")),   values: col("grossMargin"),   colorize: true, separator: true },
+      { label: "EBITDA",             current: lastVal(col("ebitda")),        values: col("ebitda"),        bold: true  },
+      { label: "Net Income",         current: lastVal(col("netIncome")),     values: col("netIncome"),     bold: true  },
+      { label: "Net Margin",         current: lastVal(col("netMargin")),     values: col("netMargin"),     colorize: true },
+      { label: "EPS (Diluted)",      current: lastVal(col("eps")),           values: col("eps")            },
     ],
     cashflow: [
-      { label: "Operating CF",     values: col("operatingCF"),  bold: true  },
-      { label: "Capital Expenditure", values: col("capex") },
-      { label: "Free Cash Flow",   values: col("freeCashFlow"), bold: true, colorize: true },
+      { label: "Operating CF",       current: lastVal(col("operatingCF")),  values: col("operatingCF"),   bold: true  },
+      { label: "Capital Expenditure", current: lastVal(col("capex")),       values: col("capex")           },
+      { label: "Free Cash Flow",     current: lastVal(col("freeCashFlow")), values: col("freeCashFlow"),  bold: true, colorize: true },
     ],
     balance: [
-      { label: "Cash & Equivalents", values: col("cash"),       bold: true  },
-      { label: "Total Debt",          values: col("totalDebt") },
-      { label: "Net Debt",            values: col("netDebt"),   colorize: true, separator: true },
-      { label: "Total Equity",        values: col("equity"),    bold: true  },
-      { label: "Total Assets",        values: col("totalAssets"), bold: true },
+      { label: "Cash & Equivalents", current: lastVal(col("cash")),         values: col("cash"),          bold: true  },
+      { label: "Total Debt",          current: lastVal(col("totalDebt")),   values: col("totalDebt")       },
+      { label: "Net Debt",            current: lastVal(col("netDebt")),     values: col("netDebt"),       colorize: true, separator: true },
+      { label: "Total Equity",        current: lastVal(col("equity")),      values: col("equity"),        bold: true  },
+      { label: "Total Assets",        current: lastVal(col("totalAssets")), values: col("totalAssets"),   bold: true },
     ],
   };
 
-  const ROWS = ROWS_MAP[tab].filter(r => !allND(r.values));
+  const ROWS = ROWS_MAP[tab].filter(r => r.currentOnly || !allND(r.values));
 
   return (
     <div className="mb-6 border border-border overflow-hidden">
@@ -904,7 +945,7 @@ function QuarterlyHistorySection({ data, debug }: { data: QuarterlyPeriod[]; deb
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
         </div>
-        <span className="text-[10px] tracking-widest text-muted-foreground/30">{sorted.length}Q · FINNHUB + FMP</span>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">{sorted.length}Q · FMP + TWELVE DATA + FINNHUB + AI</span>
       </div>
 
       {/* Statement tabs */}
@@ -930,17 +971,21 @@ function QuarterlyHistorySection({ data, debug }: { data: QuarterlyPeriod[]; deb
 
       {/* Scrollable table */}
       <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
-        <table className="w-full" style={{ minWidth: Math.max(700, 180 + sorted.length * 100) }}>
+        <table className="w-full" style={{ minWidth: Math.max(700, 220 + 110 + sorted.length * 95) }}>
           <thead>
             <tr className="border-b border-border bg-secondary/20">
-              <th className="px-5 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium sticky left-0 bg-secondary/20 z-10"
-                  style={{ minWidth: 160 }}>
-                LINE ITEM
+              <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium sticky left-0 bg-secondary/20 z-10"
+                  style={{ minWidth: 200 }}>
+                MÉTRICA
+              </th>
+              <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap border-r border-border/40"
+                  style={{ minWidth: 110 }}>
+                VALOR
               </th>
               {periods.map((p, i) => (
                 <th key={i}
-                    className={`px-4 py-3 text-right text-[11px] tracking-widest font-semibold whitespace-nowrap ${
-                      i === latest ? "text-primary" : "text-muted-foreground/40"
+                    className={`px-3 py-3 text-right text-[11px] tracking-widest font-semibold whitespace-nowrap ${
+                      i === latest ? "text-foreground/85" : "text-muted-foreground/40"
                     }`}
                     style={{ minWidth: 90 }}>
                   {p}
@@ -950,39 +995,60 @@ function QuarterlyHistorySection({ data, debug }: { data: QuarterlyPeriod[]; deb
           </thead>
           <tbody>
             {ROWS.map((row) => {
+              const cleanedCurrent = cleanVal(row.current);
               const cleaned = row.values.map(cleanVal);
+              const ndCurrent = cleanedCurrent === "—" || cleanedCurrent === "";
+              const negCur = !ndCurrent && cleanedCurrent.startsWith("-");
+              const posCur = !ndCurrent && row.colorize && cleanedCurrent.startsWith("+");
+              let curCls = row.bold ? "text-foreground font-semibold" : "text-foreground/85";
+              if (ndCurrent) curCls = "text-muted-foreground/20";
+              else if (negCur && row.colorize) curCls = "text-destructive font-semibold";
+              else if (negCur)                 curCls = "text-foreground/85";
+              else if (posCur)                 curCls = "text-primary font-semibold";
+              else if (!row.currentOnly)       curCls = "text-primary " + (row.bold ? "font-semibold" : "");
+
               return (
                 <tr key={row.label}
                     className={`border-b transition-colors hover:bg-primary/3 ${
                       row.separator ? "border-border/60" : "border-border/20"
                     }`}>
-                  <td className={`px-5 py-3.5 whitespace-nowrap border-r border-border/20 sticky left-0 bg-card z-10 ${
-                    row.bold
-                      ? "text-[13px] text-foreground font-semibold"
-                      : "text-[12px] text-muted-foreground/60 font-normal"
+                  <td className={`px-4 py-3 whitespace-nowrap border-r border-border/20 sticky left-0 bg-card z-10 ${
+                    row.bold || row.currentOnly
+                      ? "text-[13px] text-foreground/90 font-medium"
+                      : "text-[12px] text-muted-foreground/70 font-normal"
                   }`}>
                     {row.label}
                   </td>
-                  {cleaned.map((v, i) => {
-                    const nd  = v === "—";
-                    const neg = !nd && (v.startsWith("-") || (row.colorize && v.startsWith("-")));
-                    const pos = !nd && row.colorize && v.startsWith("+");
-                    const isLatest = i === latest;
+                  <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] border-r border-border/40 ${curCls}`}>
+                    {ndCurrent ? <span className="text-muted-foreground/20">—</span> : cleanedCurrent}
+                  </td>
+                  {row.currentOnly
+                    ? sorted.map((_, i) => (
+                        <td key={i} className="px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] text-muted-foreground/15">
+                          —
+                        </td>
+                      ))
+                    : cleaned.map((v, i) => {
+                        const nd  = v === "—";
+                        const neg = !nd && v.startsWith("-");
+                        const pos = !nd && row.colorize && v.startsWith("+");
+                        const isLatest = i === latest;
 
-                    let cls = isLatest
-                      ? (row.bold ? "text-foreground font-semibold" : "text-foreground/80")
-                      : "text-foreground/50";
-                    if (nd)  cls = "text-muted-foreground/20";
-                    if (neg) cls = isLatest ? "text-destructive font-semibold" : "text-destructive/60";
-                    if (pos) cls = isLatest ? "text-primary font-semibold"     : "text-primary/60";
+                        let cls = isLatest
+                          ? (row.bold ? "text-foreground/85 font-semibold" : "text-foreground/75")
+                          : "text-foreground/45";
+                        if (nd)               cls = "text-muted-foreground/20";
+                        else if (neg && row.colorize) cls = isLatest ? "text-destructive font-semibold" : "text-destructive/60";
+                        else if (pos)         cls = isLatest ? "text-primary font-semibold" : "text-primary/60";
 
-                    return (
-                      <td key={i}
-                          className={`px-4 py-3.5 text-right tabular-nums whitespace-nowrap text-[14px] ${cls}`}>
-                        {nd ? <span className="text-muted-foreground/20">—</span> : v}
-                      </td>
-                    );
-                  })}
+                        return (
+                          <td key={i}
+                              className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] ${cls}`}>
+                            {nd ? <span className="text-muted-foreground/20">—</span> : v}
+                          </td>
+                        );
+                      })
+                  }
                 </tr>
               );
             })}
@@ -1090,6 +1156,11 @@ function renderTable(tableLines: string[], baseKey: number) {
     line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
 
   const headerCells = parseRow(tableLines[0]);
+
+  // Skip the "Métrica | Valor" table — it's rendered inside the unified Historical Financials table
+  if (headerCells.length === 2 && /^Métrica$/i.test(headerCells[0]) && /^Valor$/i.test(headerCells[1])) {
+    return null;
+  }
   const isSep = (line: string) => /^\|?[\s\-:|]+\|?$/.test(line);
   const startData = isSep(tableLines[1]) ? 2 : 1;
   const ND_VALS = new Set(["N/D", "N/A", "—", "-", ""]);
