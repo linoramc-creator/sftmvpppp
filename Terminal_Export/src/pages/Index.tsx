@@ -67,6 +67,15 @@ const ND_VALUES = new Set(["N/D", "", "N/A", "-"]);
 
 function cleanVal(v: string): string {
   if (ND_VALUES.has(v)) return "—";
+  // Normalize large M values to B: "$864,498.00M" → "$864.50B"
+  const mMatch = v.match(/^\$?([\d,]+(?:\.\d+)?)M$/);
+  if (mMatch) {
+    const millions = parseFloat(mMatch[1].replace(/,/g, ""));
+    if (!isNaN(millions) && millions >= 1000) {
+      const prefix = v.startsWith("$") ? "$" : "";
+      return `${prefix}${(millions / 1000).toFixed(2)}B`;
+    }
+  }
   return v.replace(/(-?\d+\.\d{3,})/g, (m) => {
     const n = parseFloat(m); return isNaN(n) ? m : n.toFixed(2);
   });

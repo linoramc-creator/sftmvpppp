@@ -317,6 +317,7 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
     ]);
 
     const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
+    console.log(`FMP ${ticker}: income=${incomeList.length} isError=${!Array.isArray(incomeRaw) ? JSON.stringify(incomeRaw)?.slice(0,80) : "no"}`);
     if (!incomeList.length) return [];
 
     const cashByDate = new Map<string, any>(Array.isArray(cashRaw) ? (cashRaw as any[]).map((q: any) => [q.date, q]) : []);
@@ -382,6 +383,7 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
     ]);
 
     const incomeList: any[] = Array.isArray(incomeRaw?.income_statement) ? incomeRaw.income_statement : [];
+    console.log(`TwelveData ${ticker}: income=${incomeList.length} status=${incomeRaw?.status ?? "ok"} code=${incomeRaw?.code ?? ""}`);
     if (!incomeList.length) return [];
 
     const cashList:    any[] = Array.isArray(cashRaw?.cash_flow)        ? cashRaw.cash_flow        : [];
@@ -409,17 +411,34 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
       const netIncome   = num(q.net_income);
       const eps         = num(q.eps_diluted) ?? num(q.eps_basic);
 
-      const opCF  = num(cf?.operating_activities?.operating_cash_flow) ?? num(cf?.operating_activities?.net_cash_from_operating_activities);
-      const fcf   = num(cf?.free_cash_flow);
-      const capex = num(cf?.investing_activities?.capital_expenditures);
+      // Handle both nested and flat Twelve Data response structures
+      const opCF  = num(cf?.operating_activities?.operating_cash_flow)
+                 ?? num(cf?.operating_activities?.net_cash_from_operating_activities)
+                 ?? num(cf?.net_cash_from_operating_activities)
+                 ?? num(cf?.operating_cash_flow);
+      const fcf   = num(cf?.free_cash_flow)
+                 ?? num(cf?.freeCashFlow);
+      const capex = num(cf?.investing_activities?.capital_expenditures)
+                 ?? num(cf?.capital_expenditures)
+                 ?? num(cf?.capex);
 
-      const cash      = num(bs?.assets?.current_assets?.cash_and_cash_equivalents) ?? num(bs?.assets?.current_assets?.cash);
-      const shortDebt = num(bs?.liabilities?.current_liabilities?.short_term_debt);
-      const longDebt  = num(bs?.liabilities?.non_current_liabilities?.long_term_debt);
-      const totalDebt = (shortDebt != null || longDebt != null) ? (shortDebt ?? 0) + (longDebt ?? 0) : null;
+      const cash      = num(bs?.assets?.current_assets?.cash_and_cash_equivalents)
+                     ?? num(bs?.assets?.current_assets?.cash)
+                     ?? num(bs?.cash_and_cash_equivalents)
+                     ?? num(bs?.cash);
+      const shortDebt = num(bs?.liabilities?.current_liabilities?.short_term_debt)
+                     ?? num(bs?.short_term_debt);
+      const longDebt  = num(bs?.liabilities?.non_current_liabilities?.long_term_debt)
+                     ?? num(bs?.long_term_debt);
+      const totalDebt = num(bs?.total_debt)
+                     ?? ((shortDebt != null || longDebt != null) ? (shortDebt ?? 0) + (longDebt ?? 0) : null);
       const netDebt   = (totalDebt != null && cash != null) ? totalDebt - cash : null;
-      const equity      = num(bs?.shareholders_equity?.total_shareholders_equity) ?? num(bs?.shareholders_equity?.common_equity);
-      const totalAssets = num(bs?.assets?.total_assets);
+      const equity      = num(bs?.shareholders_equity?.total_shareholders_equity)
+                       ?? num(bs?.shareholders_equity?.common_equity)
+                       ?? num(bs?.total_shareholders_equity)
+                       ?? num(bs?.total_equity);
+      const totalAssets = num(bs?.assets?.total_assets)
+                       ?? num(bs?.total_assets);
 
       const prevQ = sorted[idx + 4];
       const prevRev = num(prevQ?.sales);
@@ -457,86 +476,111 @@ async function fetchAiQuarterlyFallback(
 ): Promise<any[]> {
   if (!tavilyKey || !geminiKey) return [];
   try {
-    // 1) Search for raw earnings data on the web
-    const searchResp = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: tavilyKey,
-        query: `${companyName} ${ticker} quarterly earnings revenue net income EPS operating cash flow last 8 quarters 2023 2024 2025`,
-        search_depth: "advanced",
-        max_results: 8,
-        include_answer: true,
-        include_raw_content: true,
-      }),
-    });
-    if (!searchResp.ok) return [];
-    const searchData = await searchResp.json();
-    const context: string = (searchData.results ?? [])
-      .map((r: any) => `## ${r.title}\n${(r.raw_content || r.content || "").slice(0, 4000)}`)
-      .join("\n\n")
-      .slice(0, 18000);
+    // Two parallel Tavily searches: one on financial data sites, one for earnings news
+    const [finDataSearch, earningsSearch] = await Promise.all([
+      fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: tavilyKey,
+          query: `${ticker} ${companyName} quarterly revenue net income cash flow 2022 2023 2024 2025 financial statements`,
+          search_depth: "advanced",
+          max_results: 5,
+          include_answer: false,
+          include_domains: ["macrotrends.net", "stockanalysis.com", "wisesheets.io", "simplywall.st"],
+        }),
+      }).then(r => r.ok ? r.json() : { results: [] }).catch(() => ({ results: [] })),
+
+      fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: tavilyKey,
+          query: `"${companyName}" ${ticker} quarterly earnings revenue EPS results Q1 Q2 Q3 Q4 2023 2024 2025`,
+          search_depth: "advanced",
+          max_results: 6,
+          include_answer: true,
+        }),
+      }).then(r => r.ok ? r.json() : { answer: "", results: [] }).catch(() => ({ answer: "", results: [] })),
+    ]);
+
+    const pieces: string[] = [];
+    if (earningsSearch?.answer) pieces.push(`Resumen financiero: ${earningsSearch.answer}`);
+    for (const r of [...(finDataSearch?.results ?? []), ...(earningsSearch?.results ?? [])]) {
+      const content = (r.raw_content || r.content || "").slice(0, 3500);
+      if (content) pieces.push(`## ${r.title}\n${content}`);
+    }
+    const context = pieces.join("\n\n").slice(0, 22000);
     if (!context) return [];
 
-    // 2) Ask Gemini to extract structured quarterly data
-    const extractionPrompt = `Extrae los datos financieros trimestrales de ${companyName} (${ticker}) de los textos siguientes. Devuelve EXCLUSIVAMENTE un JSON array (sin texto adicional, sin markdown) con hasta 8 trimestres, del más reciente al más antiguo. Cada elemento debe tener:
-{
-  "period":      "YYYY-MM-DD",   // último día del trimestre fiscal
-  "revenue":     número o null,  // en USD absolutos (no en B/M)
-  "netIncome":   número o null,
-  "ebitda":      número o null,
-  "grossProfit": número o null,
-  "eps":         número o null,  // diluted preferred
-  "operatingCF": número o null,
-  "freeCashFlow":número o null,
-  "capex":       número o null,
-  "cash":        número o null,
-  "totalDebt":   número o null,
-  "equity":      número o null,
-  "totalAssets": número o null
-}
-Si no encuentras un valor concreto en el texto, pon null. No inventes cifras.
+    const extractionPrompt = `Eres un analista financiero experto. Extrae los datos financieros trimestrales de ${companyName} (${ticker}) de los textos siguientes.
 
-TEXTOS:
+Devuelve SOLO un array JSON válido (sin texto adicional, sin bloques de código, sin markdown) con hasta 12 trimestres ordenados del más reciente al más antiguo. Cada objeto DEBE tener exactamente estos campos:
+{
+  "period": "YYYY-MM-DD",
+  "revenue": número_o_null,
+  "netIncome": número_o_null,
+  "ebitda": número_o_null,
+  "grossProfit": número_o_null,
+  "eps": número_o_null,
+  "operatingCF": número_o_null,
+  "freeCashFlow": número_o_null,
+  "capex": número_o_null,
+  "cash": número_o_null,
+  "totalDebt": número_o_null,
+  "equity": número_o_null,
+  "totalAssets": número_o_null
+}
+
+REGLAS:
+- "period" = fecha del último día del trimestre fiscal, formato YYYY-MM-DD exacto (ej: "2024-09-30", "2024-12-31")
+- Todos los valores monetarios en USD absolutos: si está en Miles de Millones (B/bn/billions) multiplica por 1000000000; si está en Millones (M/mm/millions) multiplica por 1000000
+- Si no encuentras un valor concreto, pon null. NUNCA inventes cifras.
+- Devuelve solo el array, empieza con [ y termina con ]
+
+TEXTOS FUENTE:
 ${context}`;
 
-    // Try Gemini models in order of quality: 3.1 Pro Preview → 3 Pro → 2.5 Pro → 2.5 Flash
+    // Start with reliable models, then try newer ones
     const EXTRACTION_MODELS = [
-      "gemini-3.1-pro-preview",
-      "gemini-3-pro-preview",
-      "gemini-3-pro-latest",
-      "gemini-2.5-pro-latest",
       "gemini-2.5-pro",
       "gemini-2.5-flash",
+      "gemini-2.5-pro-latest",
+      "gemini-3-pro-preview",
+      "gemini-3.1-pro-preview",
     ];
 
     let raw = "";
     for (const model of EXTRACTION_MODELS) {
-      const geminiResp = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${geminiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: [{ role: "user", content: extractionPrompt }],
-            temperature: 0.1,
-            stream: false,
-          }),
+      try {
+        const geminiResp = await fetch(
+          "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${geminiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: "user", content: extractionPrompt }],
+              temperature: 0.1,
+              stream: false,
+            }),
+          }
+        );
+        if (!geminiResp.ok) {
+          console.log(`AI fallback model ${model} returned ${geminiResp.status}, trying next`);
+          continue;
         }
-      );
-      if (!geminiResp.ok) {
-        console.log(`AI fallback model ${model} returned ${geminiResp.status}, trying next`);
-        continue;
-      }
-      const geminiData = await geminiResp.json();
-      raw = geminiData?.choices?.[0]?.message?.content ?? "";
-      if (raw) {
-        console.log(`AI fallback succeeded with model ${model}`);
-        break;
+        const geminiData = await geminiResp.json();
+        raw = geminiData?.choices?.[0]?.message?.content ?? "";
+        if (raw) {
+          console.log(`AI fallback succeeded with model ${model}`);
+          break;
+        }
+      } catch (modelErr) {
+        console.log(`AI fallback model ${model} threw: ${modelErr}`);
       }
     }
     if (!raw) return [];
@@ -544,10 +588,13 @@ ${context}`;
     const firstBracket = raw.indexOf("[");
     const lastBracket  = raw.lastIndexOf("]");
     if (firstBracket < 0 || lastBracket <= firstBracket) return [];
-    const parsed = JSON.parse(raw.slice(firstBracket, lastBracket + 1));
+    let parsed: any[];
+    try {
+      parsed = JSON.parse(raw.slice(firstBracket, lastBracket + 1));
+    } catch (_) { return []; }
     if (!Array.isArray(parsed)) return [];
 
-    return parsed.map((q: any, idx: number) => {
+    const result = parsed.map((q: any, idx: number) => {
       const rev = typeof q.revenue === "number" ? q.revenue : null;
       const grossProfit = typeof q.grossProfit === "number" ? q.grossProfit : null;
       const netIncome   = typeof q.netIncome === "number" ? q.netIncome : null;
@@ -587,7 +634,12 @@ ${context}`;
         totalAssets:   fmt(totalAssets, "B"),
       };
     }).filter(q => q.period && /^\d{4}-\d{2}-\d{2}$/.test(q.period));
-  } catch (_) { return []; }
+    console.log(`AI fallback extracted ${result.length} valid quarters from sources`);
+    return result;
+  } catch (e) {
+    console.log("AI fallback error:", e);
+    return [];
+  }
 }
 
 function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFallback: any[] = []): any[] {
