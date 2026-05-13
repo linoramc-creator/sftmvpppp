@@ -1174,7 +1174,14 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 
   // Combined stream: quarterly JSON event first, then Gemini SSE
   const encoder = new TextEncoder();
-  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory })}\n\n`);
+  const quarterlyDebug = {
+    hasFinnhub:     !!env.FINNHUB_KEY,
+    hasFmp:         !!env.FMP_KEY,
+    finnhubRows:    (finnhubQuarterly as any[]).length,
+    fmpRows:        (fmpQuarterly as any[]).length,
+    mergedRows:     quarterlyHistory.length,
+  };
+  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug })}\n\n`);
   const geminiReader = gemini.response.body.getReader();
 
   const combined = new ReadableStream({

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
-import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData } from "@/lib/analyze";
+import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -84,6 +84,7 @@ const Index = () => {
   const [currentTicker, setCurrentTicker] = useState("");
   const [error, setError]                 = useState("");
   const [quarterlyData, setQuarterlyData] = useState<QuarterlyPeriod[]>([]);
+  const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
   const [savedReports, setSavedReports]   = useState<SavedReport[]>(loadReports);
   const [expanded, setExpanded]           = useState<Record<string, boolean>>({});
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
@@ -163,6 +164,7 @@ const Index = () => {
     setError("");
     setCurrentTicker(clean);
     setQuarterlyData([]);
+    setQuarterlyDebug(null);
     setViewingReport(null);
     openAllSections();
 
@@ -179,6 +181,7 @@ const Index = () => {
           toast({ title: "Error", description: err, variant: "destructive" });
         },
         onQuarterlyData: (data) => setQuarterlyData(data),
+        onQuarterlyDebug: (debug) => setQuarterlyDebug(debug),
       });
     } catch (e: unknown) {
       if (e instanceof Error && e.name === "AbortError") return;
@@ -406,6 +409,7 @@ const Index = () => {
             <ReportView
               content={activeAnalysis}
               quarterlyData={activeQuarterly}
+              quarterlyDebug={isLive ? quarterlyDebug : null}
               ticker={activeTicker}
               isLoading={isLoading && isLive}
               expanded={expanded}
@@ -648,10 +652,11 @@ function MarketTickerBar({
 // ── Report View (ticker accordion) ────────────────────────────────────
 
 function ReportView({
-  content, quarterlyData, ticker, isLoading, expanded, onToggle,
+  content, quarterlyData, quarterlyDebug, ticker, isLoading, expanded, onToggle,
 }: {
   content: string;
   quarterlyData: QuarterlyPeriod[];
+  quarterlyDebug?: QuarterlyDebug | null;
   ticker: string;
   isLoading: boolean;
   expanded: Record<string, boolean>;
@@ -702,7 +707,7 @@ function ReportView({
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
                 {key === "Finanzas" && (
-                  <QuarterlyHistorySection data={quarterlyData} />
+                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} />
                 )}
                 {sectionNodes && renderElements(sectionNodes)}
                 {isLoading && isLastSection && (
@@ -822,10 +827,21 @@ function SavedReportCard({
 
 type QTab = "income" | "cashflow" | "balance";
 
-function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
+function QuarterlyHistorySection({ data, debug }: { data: QuarterlyPeriod[]; debug?: QuarterlyDebug | null }) {
   const [tab, setTab] = useState<QTab>("income");
 
   if (!data.length) {
+    let diagnostic = "Esperando datos del backend...";
+    if (debug) {
+      const problems: string[] = [];
+      if (!debug.hasFinnhub) problems.push("FINNHUB key no configurada");
+      if (!debug.hasFmp)     problems.push("FMP key no configurada");
+      if (debug.hasFinnhub && debug.finnhubRows === 0) problems.push("FINNHUB devolvió 0 filas (¿plan free sin /stock/financials?)");
+      if (debug.hasFmp     && debug.fmpRows     === 0) problems.push("FMP devolvió 0 filas (¿ticker no cubierto?)");
+      diagnostic = problems.length
+        ? problems.join(" · ")
+        : `Backend respondió pero con 0 trimestres (Finnhub: ${debug.finnhubRows}, FMP: ${debug.fmpRows})`;
+    }
     return (
       <div className="mb-6 border border-border overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
@@ -835,8 +851,9 @@ function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
             <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
           </div>
         </div>
-        <div className="px-5 py-6 text-center text-[10px] tracking-widest text-muted-foreground/40">
-          DATOS TRIMESTRALES NO DISPONIBLES — VERIFICA CLAVES FINNHUB / FMP EN SUPABASE
+        <div className="px-5 py-6 text-center">
+          <div className="text-[10px] tracking-widest text-muted-foreground/50 mb-2">DATOS TRIMESTRALES NO DISPONIBLES</div>
+          <div className="text-[10px] tracking-wider text-muted-foreground/35">{diagnostic}</div>
         </div>
       </div>
     );
