@@ -834,13 +834,17 @@ function QuarterlyHistorySection({ data, debug }: { data: QuarterlyPeriod[]; deb
     let diagnostic = "Esperando datos del backend...";
     if (debug) {
       const problems: string[] = [];
-      if (!debug.hasFinnhub) problems.push("FINNHUB key no configurada");
-      if (!debug.hasFmp)     problems.push("FMP key no configurada");
-      if (debug.hasFinnhub && debug.finnhubRows === 0) problems.push("FINNHUB devolvió 0 filas (¿plan free sin /stock/financials?)");
-      if (debug.hasFmp     && debug.fmpRows     === 0) problems.push("FMP devolvió 0 filas (¿ticker no cubierto?)");
+      if (!debug.hasFinnhub)                          problems.push("FINNHUB no configurada");
+      if (!debug.hasFmp)                              problems.push("FMP no configurada");
+      if (debug.hasTwelveData === false)              problems.push("TWELVE DATA no configurada");
+      if (debug.hasTavily     === false)              problems.push("TAVILY no configurada (fallback IA)");
+      if (debug.hasFinnhub && debug.finnhubRows === 0)    problems.push("FINNHUB: 0 filas (plan free no incluye /stock/financials)");
+      if (debug.hasFmp     && debug.fmpRows     === 0)    problems.push("FMP: 0 filas (ticker no cubierto)");
+      if (debug.hasTwelveData && (debug.twelveDataRows ?? 0) === 0) problems.push("TWELVE DATA: 0 filas (ticker no cubierto)");
+      if (debug.hasTavily && (debug.aiFallbackRows ?? 0) === 0)     problems.push("Fallback IA no encontró datos");
       diagnostic = problems.length
         ? problems.join(" · ")
-        : `Backend respondió pero con 0 trimestres (Finnhub: ${debug.finnhubRows}, FMP: ${debug.fmpRows})`;
+        : `Backend respondió pero con 0 trimestres`;
     }
     return (
       <div className="mb-6 border border-border overflow-hidden">

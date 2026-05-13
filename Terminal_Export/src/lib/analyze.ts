@@ -132,11 +132,15 @@ async function streamSSE({
 }
 
 export interface QuarterlyDebug {
-  hasFinnhub:  boolean;
-  hasFmp:      boolean;
-  finnhubRows: number;
-  fmpRows:     number;
-  mergedRows:  number;
+  hasFinnhub:     boolean;
+  hasFmp:         boolean;
+  hasTwelveData?: boolean;
+  hasTavily?:     boolean;
+  finnhubRows:    number;
+  fmpRows:        number;
+  twelveDataRows?: number;
+  aiFallbackRows?: number;
+  mergedRows:     number;
 }
 
 export async function streamAnalysis({
