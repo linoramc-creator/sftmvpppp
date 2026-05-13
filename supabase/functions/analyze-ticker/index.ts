@@ -367,27 +367,235 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
   } catch (_) { return []; }
 }
 
-function mergeQuarterlyData(finnhub: any[], fmp: any[]): any[] {
+async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): Promise<any[]> {
+  if (!key) return [];
+  const t = encodeURIComponent(ticker);
+  const base = "https://api.twelvedata.com";
+  try {
+    const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
+      fetch(`${base}/income_statement?symbol=${t}&period=quarterly&apikey=${key}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/cash_flow?symbol=${t}&period=quarterly&apikey=${key}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/balance_sheet?symbol=${t}&period=quarterly&apikey=${key}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+
+    const incomeList: any[] = Array.isArray(incomeRaw?.income_statement) ? incomeRaw.income_statement : [];
+    if (!incomeList.length) return [];
+
+    const cashList:    any[] = Array.isArray(cashRaw?.cash_flow)        ? cashRaw.cash_flow        : [];
+    const balanceList: any[] = Array.isArray(balanceRaw?.balance_sheet) ? balanceRaw.balance_sheet : [];
+
+    const cashByDate = new Map<string, any>(cashList   .map((q: any) => [q.fiscal_date, q]));
+    const balByDate  = new Map<string, any>(balanceList.map((q: any) => [q.fiscal_date, q]));
+
+    const num = (v: any): number | null => {
+      if (v == null || v === "") return null;
+      const n = typeof v === "string" ? parseFloat(v) : Number(v);
+      return isNaN(n) ? null : n;
+    };
+
+    const sorted = [...incomeList].sort((a, b) => (b.fiscal_date ?? "").localeCompare(a.fiscal_date ?? ""));
+
+    return sorted.map((q: any, idx: number) => {
+      const date = q.fiscal_date ?? "";
+      const cf = cashByDate.get(date) ?? {};
+      const bs = balByDate.get(date) ?? {};
+
+      const rev         = num(q.sales);
+      const grossProfit = num(q.gross_profit);
+      const ebitda      = num(q.ebitda);
+      const netIncome   = num(q.net_income);
+      const eps         = num(q.eps_diluted) ?? num(q.eps_basic);
+
+      const opCF  = num(cf?.operating_activities?.operating_cash_flow) ?? num(cf?.operating_activities?.net_cash_from_operating_activities);
+      const fcf   = num(cf?.free_cash_flow);
+      const capex = num(cf?.investing_activities?.capital_expenditures);
+
+      const cash      = num(bs?.assets?.current_assets?.cash_and_cash_equivalents) ?? num(bs?.assets?.current_assets?.cash);
+      const shortDebt = num(bs?.liabilities?.current_liabilities?.short_term_debt);
+      const longDebt  = num(bs?.liabilities?.non_current_liabilities?.long_term_debt);
+      const totalDebt = (shortDebt != null || longDebt != null) ? (shortDebt ?? 0) + (longDebt ?? 0) : null;
+      const netDebt   = (totalDebt != null && cash != null) ? totalDebt - cash : null;
+      const equity      = num(bs?.shareholders_equity?.total_shareholders_equity) ?? num(bs?.shareholders_equity?.common_equity);
+      const totalAssets = num(bs?.assets?.total_assets);
+
+      const prevQ = sorted[idx + 4];
+      const prevRev = num(prevQ?.sales);
+      const revGrowth = (rev != null && prevRev != null && Math.abs(prevRev) > 0)
+        ? `${((rev - prevRev) / Math.abs(prevRev) * 100) >= 0 ? "+" : ""}${((rev - prevRev) / Math.abs(prevRev) * 100).toFixed(1)}%`
+        : "N/D";
+
+      return {
+        period:        date,
+        revenue:       fmt(rev, "B"),
+        revenueGrowth: revGrowth,
+        grossMargin:   (rev && grossProfit) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+        ebitda:        fmt(ebitda, "B"),
+        netIncome:     fmt(netIncome, "B"),
+        netMargin:     (rev && netIncome) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+        eps:           eps != null ? `$${eps.toFixed(2)}` : "N/D",
+        operatingCF:   fmt(opCF, "B"),
+        freeCashFlow:  fmt(fcf, "B"),
+        capex:         capex != null ? fmt(capex, "B") : "N/D",
+        cash:          fmt(cash, "B"),
+        totalDebt:     fmt(totalDebt, "B"),
+        netDebt:       fmt(netDebt, "B"),
+        equity:        fmt(equity, "B"),
+        totalAssets:   fmt(totalAssets, "B"),
+      };
+    }).slice(0, 12);
+  } catch (_) { return []; }
+}
+
+async function fetchAiQuarterlyFallback(
+  ticker: string,
+  companyName: string,
+  tavilyKey: string,
+  geminiKey: string,
+): Promise<any[]> {
+  if (!tavilyKey || !geminiKey) return [];
+  try {
+    // 1) Search for raw earnings data on the web
+    const searchResp = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: tavilyKey,
+        query: `${companyName} ${ticker} quarterly earnings revenue net income EPS operating cash flow last 8 quarters 2023 2024 2025`,
+        search_depth: "advanced",
+        max_results: 8,
+        include_answer: true,
+        include_raw_content: true,
+      }),
+    });
+    if (!searchResp.ok) return [];
+    const searchData = await searchResp.json();
+    const context: string = (searchData.results ?? [])
+      .map((r: any) => `## ${r.title}\n${(r.raw_content || r.content || "").slice(0, 4000)}`)
+      .join("\n\n")
+      .slice(0, 18000);
+    if (!context) return [];
+
+    // 2) Ask Gemini to extract structured quarterly data
+    const extractionPrompt = `Extrae los datos financieros trimestrales de ${companyName} (${ticker}) de los textos siguientes. Devuelve EXCLUSIVAMENTE un JSON array (sin texto adicional, sin markdown) con hasta 8 trimestres, del más reciente al más antiguo. Cada elemento debe tener:
+{
+  "period":      "YYYY-MM-DD",   // último día del trimestre fiscal
+  "revenue":     número o null,  // en USD absolutos (no en B/M)
+  "netIncome":   número o null,
+  "ebitda":      número o null,
+  "grossProfit": número o null,
+  "eps":         número o null,  // diluted preferred
+  "operatingCF": número o null,
+  "freeCashFlow":número o null,
+  "capex":       número o null,
+  "cash":        número o null,
+  "totalDebt":   número o null,
+  "equity":      número o null,
+  "totalAssets": número o null
+}
+Si no encuentras un valor concreto en el texto, pon null. No inventes cifras.
+
+TEXTOS:
+${context}`;
+
+    const geminiResp = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${geminiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gemini-2.5-flash",
+          messages: [{ role: "user", content: extractionPrompt }],
+          temperature: 0.1,
+          stream: false,
+        }),
+      }
+    );
+    if (!geminiResp.ok) return [];
+    const geminiData = await geminiResp.json();
+    let raw = geminiData?.choices?.[0]?.message?.content ?? "";
+    raw = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const firstBracket = raw.indexOf("[");
+    const lastBracket  = raw.lastIndexOf("]");
+    if (firstBracket < 0 || lastBracket <= firstBracket) return [];
+    const parsed = JSON.parse(raw.slice(firstBracket, lastBracket + 1));
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map((q: any, idx: number) => {
+      const rev = typeof q.revenue === "number" ? q.revenue : null;
+      const grossProfit = typeof q.grossProfit === "number" ? q.grossProfit : null;
+      const netIncome   = typeof q.netIncome === "number" ? q.netIncome : null;
+      const ebitda      = typeof q.ebitda === "number" ? q.ebitda : null;
+      const eps         = typeof q.eps === "number" ? q.eps : null;
+      const opCF        = typeof q.operatingCF === "number" ? q.operatingCF : null;
+      const fcf         = typeof q.freeCashFlow === "number" ? q.freeCashFlow : null;
+      const capex       = typeof q.capex === "number" ? q.capex : null;
+      const cash        = typeof q.cash === "number" ? q.cash : null;
+      const totalDebt   = typeof q.totalDebt === "number" ? q.totalDebt : null;
+      const netDebt     = (totalDebt != null && cash != null) ? totalDebt - cash : null;
+      const equity      = typeof q.equity === "number" ? q.equity : null;
+      const totalAssets = typeof q.totalAssets === "number" ? q.totalAssets : null;
+
+      const prevQ = parsed[idx + 4];
+      const prevRev = typeof prevQ?.revenue === "number" ? prevQ.revenue : null;
+      const revGrowth = (rev != null && prevRev != null && Math.abs(prevRev) > 0)
+        ? `${((rev - prevRev) / Math.abs(prevRev) * 100) >= 0 ? "+" : ""}${((rev - prevRev) / Math.abs(prevRev) * 100).toFixed(1)}%`
+        : "N/D";
+
+      return {
+        period:        q.period ?? "",
+        revenue:       fmt(rev, "B"),
+        revenueGrowth: revGrowth,
+        grossMargin:   (rev && grossProfit) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+        ebitda:        fmt(ebitda, "B"),
+        netIncome:     fmt(netIncome, "B"),
+        netMargin:     (rev && netIncome) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+        eps:           eps != null ? `$${eps.toFixed(2)}` : "N/D",
+        operatingCF:   fmt(opCF, "B"),
+        freeCashFlow:  fmt(fcf, "B"),
+        capex:         capex != null ? fmt(capex, "B") : "N/D",
+        cash:          fmt(cash, "B"),
+        totalDebt:     fmt(totalDebt, "B"),
+        netDebt:       fmt(netDebt, "B"),
+        equity:        fmt(equity, "B"),
+        totalAssets:   fmt(totalAssets, "B"),
+      };
+    }).filter(q => q.period && /^\d{4}-\d{2}-\d{2}$/.test(q.period));
+  } catch (_) { return []; }
+}
+
+function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFallback: any[] = []): any[] {
   const merged = new Map<string, any>();
+  const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
+                  "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets","revenue"];
 
-  for (const q of fmp) {
-    const key = q.period.slice(0, 7);
-    merged.set(key, q);
-  }
-
-  for (const q of finnhub) {
-    const key = q.period.slice(0, 7);
-    if (!merged.has(key)) {
-      merged.set(key, q);
-    } else {
-      const existing = merged.get(key)!;
-      const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
-                      "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets"];
-      for (const f of fields) {
-        if (existing[f] === "N/D" && q[f] !== "N/D") existing[f] = q[f];
+  const fillFrom = (source: any[]) => {
+    for (const q of source) {
+      if (!q.period) continue;
+      const key = q.period.slice(0, 7);
+      if (!merged.has(key)) {
+        merged.set(key, { ...q });
+      } else {
+        const existing = merged.get(key)!;
+        for (const f of fields) {
+          if ((existing[f] === "N/D" || existing[f] == null) && q[f] !== "N/D" && q[f] != null) {
+            existing[f] = q[f];
+          }
+        }
       }
     }
-  }
+  };
+
+  // Priority order: FMP > Twelve Data > Finnhub > AI fallback (last resort)
+  fillFrom(fmp);
+  fillFrom(twelveData);
+  fillFrom(finnhub);
+  fillFrom(aiFallback);
 
   return Array.from(merged.values())
     .sort((a: any, b: any) => b.period.localeCompare(a.period))
@@ -1070,6 +1278,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
   const [
     finnhubQuarterly,
     fmpQuarterly,
+    twelveDataQuarterly,
     peerData,
     polymarketContext,
     fredContext,
@@ -1085,6 +1294,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
   ] = await Promise.all([
     env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
     env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
+    env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
     env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
     fetchPolymarketData(cleanTicker, companyName),
     fetchFredData(env.FRED_KEY),
@@ -1111,7 +1321,26 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
       : Promise.resolve(null),
   ]);
 
-  const quarterlyHistory = mergeQuarterlyData(finnhubQuarterly as any[], fmpQuarterly as any[]);
+  let quarterlyHistory = mergeQuarterlyData(
+    finnhubQuarterly    as any[],
+    fmpQuarterly        as any[],
+    twelveDataQuarterly as any[],
+  );
+
+  // AI fallback: if all structured APIs returned nothing, ask Gemini to extract from web search
+  let aiFallback: any[] = [];
+  if (quarterlyHistory.length === 0 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
+    console.log("Quarterly fallback: triggering AI extraction via Tavily + Gemini");
+    aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
+    if (aiFallback.length > 0) {
+      quarterlyHistory = mergeQuarterlyData(
+        finnhubQuarterly    as any[],
+        fmpQuarterly        as any[],
+        twelveDataQuarterly as any[],
+        aiFallback,
+      );
+    }
+  }
 
   const dataContext = buildTickerDataContext(
     finnhubData,
@@ -1137,6 +1366,8 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
     quarterly_history: quarterlyHistory.length,
     quarterly_finnhub: (finnhubQuarterly as any[]).length,
     quarterly_fmp: (fmpQuarterly as any[]).length,
+    quarterly_twelve_data: (twelveDataQuarterly as any[]).length,
+    quarterly_ai_fallback: aiFallback.length,
     peer_data: (peerData as any[]).length,
     tavily_ticker_news: tickerNews?.results?.length ?? 0,
     polymarket_ok: !!polymarketContext,
@@ -1174,7 +1405,18 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 
   // Combined stream: quarterly JSON event first, then Gemini SSE
   const encoder = new TextEncoder();
-  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory })}\n\n`);
+  const quarterlyDebug = {
+    hasFinnhub:     !!env.FINNHUB_KEY,
+    hasFmp:         !!env.FMP_KEY,
+    hasTwelveData:  !!env.TWELVE_KEY,
+    hasTavily:      !!env.TAVILY_KEY,
+    finnhubRows:    (finnhubQuarterly as any[]).length,
+    fmpRows:        (fmpQuarterly as any[]).length,
+    twelveDataRows: (twelveDataQuarterly as any[]).length,
+    aiFallbackRows: aiFallback.length,
+    mergedRows:     quarterlyHistory.length,
+  };
+  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug })}\n\n`);
   const geminiReader = gemini.response.body.getReader();
 
   const combined = new ReadableStream({

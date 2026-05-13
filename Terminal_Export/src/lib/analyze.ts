@@ -131,12 +131,25 @@ async function streamSSE({
   onDone();
 }
 
+export interface QuarterlyDebug {
+  hasFinnhub:     boolean;
+  hasFmp:         boolean;
+  hasTwelveData?: boolean;
+  hasTavily?:     boolean;
+  finnhubRows:    number;
+  fmpRows:        number;
+  twelveDataRows?: number;
+  aiFallbackRows?: number;
+  mergedRows:     number;
+}
+
 export async function streamAnalysis({
   ticker,
   onDelta,
   onDone,
   onError,
   onQuarterlyData,
+  onQuarterlyDebug,
   signal,
 }: {
   ticker: string;
@@ -144,6 +157,7 @@ export async function streamAnalysis({
   onDone: () => void;
   onError: (error: string) => void;
   onQuarterlyData?: (data: QuarterlyPeriod[]) => void;
+  onQuarterlyDebug?: (debug: QuarterlyDebug) => void;
   signal?: AbortSignal;
 }) {
   await streamSSE({
@@ -156,6 +170,9 @@ export async function streamAnalysis({
     onEvent: (parsed) => {
       if (parsed.__quarterly && onQuarterlyData) {
         onQuarterlyData(parsed.__quarterly as QuarterlyPeriod[]);
+      }
+      if (parsed.__quarterlyDebug && onQuarterlyDebug) {
+        onQuarterlyDebug(parsed.__quarterlyDebug as QuarterlyDebug);
       }
     },
   });
