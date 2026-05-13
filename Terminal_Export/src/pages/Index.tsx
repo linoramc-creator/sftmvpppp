@@ -701,7 +701,7 @@ function ReportView({
 
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
-                {key === "Finanzas" && hasQuarterly && (
+                {key === "Finanzas" && (
                   <QuarterlyHistorySection data={quarterlyData} />
                 )}
                 {sectionNodes && renderElements(sectionNodes)}
@@ -824,7 +824,23 @@ type QTab = "income" | "cashflow" | "balance";
 
 function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
   const [tab, setTab] = useState<QTab>("income");
-  if (!data.length) return null;
+
+  if (!data.length) {
+    return (
+      <div className="mb-6 border border-border overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+            <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
+            <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
+          </div>
+        </div>
+        <div className="px-5 py-6 text-center text-[10px] tracking-widest text-muted-foreground/40">
+          DATOS TRIMESTRALES NO DISPONIBLES — VERIFICA CLAVES FINNHUB / FMP EN SUPABASE
+        </div>
+      </div>
+    );
+  }
 
   // Oldest → newest left to right
   const sorted  = [...data].reverse();
@@ -893,7 +909,7 @@ function QuarterlyHistorySection({ data }: { data: QuarterlyPeriod[] }) {
 
       {/* Scrollable table */}
       <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
-        <table className="w-full" style={{ minWidth: Math.max(500, 160 + sorted.length * 90) }}>
+        <table className="w-full" style={{ minWidth: Math.max(700, 180 + sorted.length * 100) }}>
           <thead>
             <tr className="border-b border-border bg-secondary/20">
               <th className="px-5 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium sticky left-0 bg-secondary/20 z-10"

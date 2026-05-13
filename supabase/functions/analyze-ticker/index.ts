@@ -261,7 +261,7 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
   const cfByPeriod = new Map<string, any>(cfList.map((q: any) => [q.period, q]));
   const bsByPeriod = new Map<string, any>(bsList.map((q: any) => [q.period, q]));
 
-  return icList.slice(0, 6).map((q: any) => {
+  return icList.slice(0, 12).map((q: any) => {
     const cf = cfByPeriod.get(q.period) ?? {};
     const bs = bsByPeriod.get(q.period) ?? {};
 
@@ -308,11 +308,11 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
   const base = "https://financialmodelingprep.com/api/v3";
   try {
     const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
-      fetch(`${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+      fetch(`${base}/income-statement/${t}?period=quarter&limit=16&apikey=${key}`)
         .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=16&apikey=${key}`)
         .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`)
+      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=16&apikey=${key}`)
         .then(r => r.ok ? r.json() : []).catch(() => []),
     ]);
 
@@ -363,7 +363,7 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         equity:       fmt(equity, "B"),
         totalAssets:  fmt(totalAssets, "B"),
       };
-    }).slice(0, 8);
+    }).slice(0, 12);
   } catch (_) { return []; }
 }
 
@@ -391,7 +391,7 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[]): any[] {
 
   return Array.from(merged.values())
     .sort((a: any, b: any) => b.period.localeCompare(a.period))
-    .slice(0, 8);
+    .slice(0, 12);
 }
 
 // =====================================================
