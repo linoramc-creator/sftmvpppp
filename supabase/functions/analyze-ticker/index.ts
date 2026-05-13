@@ -500,25 +500,46 @@ Si no encuentras un valor concreto en el texto, pon null. No inventes cifras.
 TEXTOS:
 ${context}`;
 
-    const geminiResp = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${geminiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash",
-          messages: [{ role: "user", content: extractionPrompt }],
-          temperature: 0.1,
-          stream: false,
-        }),
+    // Try Gemini models in order of quality: 3.1 Pro Preview → 3 Pro → 2.5 Pro → 2.5 Flash
+    const EXTRACTION_MODELS = [
+      "gemini-3.1-pro-preview",
+      "gemini-3-pro-preview",
+      "gemini-3-pro-latest",
+      "gemini-2.5-pro-latest",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+    ];
+
+    let raw = "";
+    for (const model of EXTRACTION_MODELS) {
+      const geminiResp = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${geminiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: extractionPrompt }],
+            temperature: 0.1,
+            stream: false,
+          }),
+        }
+      );
+      if (!geminiResp.ok) {
+        console.log(`AI fallback model ${model} returned ${geminiResp.status}, trying next`);
+        continue;
       }
-    );
-    if (!geminiResp.ok) return [];
-    const geminiData = await geminiResp.json();
-    let raw = geminiData?.choices?.[0]?.message?.content ?? "";
+      const geminiData = await geminiResp.json();
+      raw = geminiData?.choices?.[0]?.message?.content ?? "";
+      if (raw) {
+        console.log(`AI fallback succeeded with model ${model}`);
+        break;
+      }
+    }
+    if (!raw) return [];
     raw = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
     const firstBracket = raw.indexOf("[");
     const lastBracket  = raw.lastIndexOf("]");
@@ -1017,7 +1038,6 @@ Genera EXACTAMENTE las 8 secciones siguientes, cada una iniciada con "## " (no l
 - Párrafo 2 (4-5 líneas): posicionamiento competitivo y ventajas diferenciales.
 - Párrafo 3 (4-5 líneas): catalizadores y riesgos macro (aranceles, tipos, geopolítica).
 - ### Perfil de la Empresa: sector, país, exchange, IPO, descripción del negocio (3-4 líneas).
-- ### Consenso de Analistas: total analistas, distribución Buy/Hold/Sell, precio objetivo.
 
 ## Finanzas
 PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
@@ -1090,7 +1110,6 @@ Usa los INDICADORES TÉCNICOS (TWELVE DATA) y el precio actual / rango 52W de Fi
 ## Institucional
 - ### Tenencias Institucionales: usa datos de TENENCIAS INSTITUCIONALES (FMP) para listar los principales holders con acciones y valor. Añade % institucional de Twelve Data si disponible.
 - ### Precio Objetivo: usa PRECIO OBJETIVO ANALISTAS (FMP) — consenso, rango alto/bajo, mediana. Párrafo 2-3 líneas sobre implicaciones.
-- ### Consenso de Analistas — Detalle: tabla Strong Buy/Buy/Hold/Sell/Strong Sell con datos de Finnhub y FMP combinados + párrafo 3-4 líneas.
 - ### Actividad Insider: resume los datos de ACTIVIDAD INSIDER (FMP) — compras/ventas recientes.
 - ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales y sentimiento general.
 
@@ -1327,10 +1346,17 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
     twelveDataQuarterly as any[],
   );
 
-  // AI fallback: if all structured APIs returned nothing, ask Gemini to extract from web search
+  // Detect gaps: trigger AI fallback if we have fewer than 6 quarters OR any column has N/D values
+  const hasGaps = (rows: any[]): boolean => {
+    if (rows.length < 6) return true;
+    const ndFields = ["revenueGrowth", "grossMargin", "ebitda", "netIncome", "operatingCF", "freeCashFlow", "cash", "totalDebt", "equity"];
+    return rows.some(r => ndFields.some(f => r[f] === "N/D" || r[f] == null));
+  };
+
+  // AI fallback: if data is missing OR has gaps, ask Gemini (3.1 Pro) to extract from web search
   let aiFallback: any[] = [];
-  if (quarterlyHistory.length === 0 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
-    console.log("Quarterly fallback: triggering AI extraction via Tavily + Gemini");
+  if (hasGaps(quarterlyHistory) && env.TAVILY_KEY && env.GEMINI_API_KEY) {
+    console.log(`Quarterly fallback triggered: ${quarterlyHistory.length} quarters with gaps. Calling AI extraction.`);
     aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
     if (aiFallback.length > 0) {
       quarterlyHistory = mergeQuarterlyData(
@@ -1339,6 +1365,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
         twelveDataQuarterly as any[],
         aiFallback,
       );
+      console.log(`AI fallback added ${aiFallback.length} quarters. Final merged: ${quarterlyHistory.length}`);
     }
   }
 
