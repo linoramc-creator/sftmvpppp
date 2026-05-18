@@ -193,7 +193,7 @@ async function fetchFinnhubData(ticker: string, key: string) {
     recommendations: Array.isArray(recs) && recs.length > 0 ? recs[0] : null,
     allRecommendations: Array.isArray(recs) ? recs.slice(0, 6) : [],
     news: Array.isArray(news)
-      ? news.slice(0, 6).map((n: any) => ({ headline: n.headline, source: n.source }))
+      ? news.slice(0, 6).map((n: any) => ({ headline: n.headline, source: n.source, url: n.url ?? "" }))
       : [],
     peers: Array.isArray(peers) ? peers.filter((p: string) => p !== ticker).slice(0, 4) : [],
   };
@@ -306,13 +306,29 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
   if (!key) return [];
   const t = encodeURIComponent(ticker);
   const base = "https://financialmodelingprep.com/api/v3";
-  // Normalize FMP date strings to YYYY-MM-DD (FMP returns this format,
-  // but defensively strip anything after the date portion just in case).
   const normDate = (d: any): string => {
     if (typeof d !== "string") return "";
     const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
     return m ? m[1] : "";
   };
+  // Fuzzy date lookup: exact match first, then ±7 days closest match.
+  // Needed because FMP sometimes returns slightly different dates across statement types.
+  const fuzzyGet = (byDate: Map<string, any>, targetDate: string): any => {
+    const exact = byDate.get(targetDate);
+    if (exact) return exact;
+    const target = new Date(targetDate + "T00:00:00Z").getTime();
+    if (isNaN(target)) return {};
+    let best: any = null;
+    let bestDiff = Infinity;
+    for (const [d, obj] of byDate.entries()) {
+      const t2 = new Date(d + "T00:00:00Z").getTime();
+      if (isNaN(t2)) continue;
+      const diff = Math.abs(t2 - target);
+      if (diff <= 7 * 86400_000 && diff < bestDiff) { bestDiff = diff; best = obj; }
+    }
+    return best ?? {};
+  };
+
   try {
     const incomeUrl  = `${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`;
     const cashUrl    = `${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`;
@@ -324,33 +340,39 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
     ]);
 
     const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
-    console.log(`FMP ${ticker} quarter limit=12: income=${incomeList.length} cf=${Array.isArray(cashRaw) ? cashRaw.length : "err"} bs=${Array.isArray(balanceRaw) ? balanceRaw.length : "err"} ${!Array.isArray(incomeRaw) ? "incomeErr=" + JSON.stringify(incomeRaw).slice(0, 120) : ""}`);
+    const cfList: any[]     = Array.isArray(cashRaw)    ? cashRaw    : [];
+    const bsList: any[]     = Array.isArray(balanceRaw) ? balanceRaw : [];
+    console.log(`FMP ${ticker} quarter: income=${incomeList.length} cf=${cfList.length} bs=${bsList.length}${!Array.isArray(incomeRaw) ? " incomeErr=" + JSON.stringify(incomeRaw).slice(0, 100) : ""}${!Array.isArray(cashRaw) ? " cfErr=" + JSON.stringify(cashRaw).slice(0, 100) : ""}${!Array.isArray(balanceRaw) ? " bsErr=" + JSON.stringify(balanceRaw).slice(0, 100) : ""}`);
     if (!incomeList.length) return [];
 
-    const cashByDate = new Map<string, any>(
-      Array.isArray(cashRaw) ? (cashRaw as any[]).map((q: any) => [normDate(q.date), q]) : []
-    );
-    const balByDate = new Map<string, any>(
-      Array.isArray(balanceRaw) ? (balanceRaw as any[]).map((q: any) => [normDate(q.date), q]) : []
-    );
+    const cashByDate = new Map<string, any>(cfList.map((q: any) => [normDate(q.date), q]));
+    const balByDate  = new Map<string, any>(bsList.map((q: any) => [normDate(q.date), q]));
+    console.log(`FMP ${ticker} CF dates: [${[...cashByDate.keys()].slice(0,4).join(",")}] BS dates: [${[...balByDate.keys()].slice(0,4).join(",")}]`);
 
     return incomeList.map((q: any, idx: number) => {
       const period = normDate(q.date);
-      const cf = cashByDate.get(period) ?? {};
-      const bs = balByDate.get(period) ?? {};
+      const cf = fuzzyGet(cashByDate, period);
+      const bs = fuzzyGet(balByDate, period);
 
       const rev         = q.revenue ?? null;
       const grossProfit = q.grossProfit ?? null;
       const ebitda      = q.ebitda ?? null;
       const netIncome   = q.netIncome ?? null;
       const eps         = q.epsdiluted ?? q.eps ?? null;
-      const opCF        = cf.operatingCashFlow ?? null;
-      const fcf         = cf.freeCashFlow ?? null;
-      const capex       = cf.capitalExpenditure ?? null;
-      const cash        = bs.cashAndCashEquivalents ?? null;
-      const totalDebt   = bs.totalDebt ?? null;
-      const netDebt     = (totalDebt != null && cash != null) ? totalDebt - cash : null;
-      const equity      = bs.totalStockholdersEquity ?? null;
+
+      const opCF      = cf.operatingCashFlow ?? null;
+      // FMP reports capitalExpenditure as a negative number (cash outflow)
+      const capexRaw  = cf.capitalExpenditure ?? null;
+      const capex     = capexRaw != null ? Math.abs(capexRaw) : null;
+      // Use FMP's freeCashFlow if present; otherwise compute opCF + capexRaw (capex is negative)
+      const fcfRaw    = cf.freeCashFlow ?? null;
+      const fcf       = fcfRaw != null ? fcfRaw
+                      : (opCF != null && capexRaw != null ? opCF + capexRaw : null);
+
+      const cash      = bs.cashAndCashEquivalents ?? bs.cashAndShortTermInvestments ?? null;
+      const totalDebt = bs.totalDebt ?? null;
+      const netDebt   = (totalDebt != null && cash != null) ? totalDebt - cash : null;
+      const equity    = bs.totalStockholdersEquity ?? bs.totalEquity ?? bs.stockholdersEquity ?? null;
       const totalAssets = bs.totalAssets ?? null;
 
       const prevQ = incomeList[idx + 4] as any;
@@ -869,6 +891,49 @@ async function fetchTechnicalIndicators(ticker: string, key: string): Promise<st
 }
 
 // =====================================================
+// TICKER: CATALYST CALENDAR
+// =====================================================
+
+interface CatalystCalendar {
+  earnings: { date: string; epsEstimate: string | null; revenueEstimate: string | null }[];
+  dividends: { exDate: string; amount: string; frequency: string }[];
+}
+
+async function fetchCatalystCalendar(ticker: string, fmpKey: string): Promise<CatalystCalendar> {
+  const empty: CatalystCalendar = { earnings: [], dividends: [] };
+  if (!fmpKey) return empty;
+  const t = encodeURIComponent(ticker);
+  const base = "https://financialmodelingprep.com/api/v3";
+  const today = new Date().toISOString().slice(0, 10);
+  const future = new Date(Date.now() + 120 * 86400_000).toISOString().slice(0, 10);
+  try {
+    const [earningsRaw, dividendRaw] = await Promise.all([
+      fetch(`${base}/earning_calendar?symbol=${t}&from=${today}&to=${future}&apikey=${fmpKey}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}/stock_dividend/${t}?apikey=${fmpKey}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    const earningsList: any[] = Array.isArray(earningsRaw) ? earningsRaw : [];
+    const dividendList: any[] = dividendRaw?.historical ?? (Array.isArray(dividendRaw) ? dividendRaw : []);
+    const earnings = earningsList.slice(0, 3).map((e: any) => ({
+      date: e.date ?? "",
+      epsEstimate: e.epsEstimated != null ? `$${Number(e.epsEstimated).toFixed(2)}` : null,
+      revenueEstimate: e.revenueEstimated != null ? fmt(Number(e.revenueEstimated), "B") : null,
+    }));
+    const dividends = dividendList.slice(0, 5).map((d: any) => ({
+      exDate: d.date ?? d.exDividendDate ?? "",
+      amount: d.dividend != null ? `$${Number(d.dividend).toFixed(4)}` : "",
+      frequency: d.frequency ?? "",
+    }));
+    console.log(`CatalystCalendar ${ticker}: earnings=${earnings.length} dividends=${dividends.length}`);
+    return { earnings, dividends };
+  } catch (e) {
+    console.log(`CatalystCalendar ${ticker} error:`, e);
+    return empty;
+  }
+}
+
+// =====================================================
 // TICKER: CONTEXT BUILDER + PROMPT
 // =====================================================
 
@@ -1001,7 +1066,8 @@ function buildTickerDataContext(
   if (news.length > 0) {
     lines.push("", "--- NOTICIAS RECIENTES DEL TICKER (ÚLTIMAS 4 SEMANAS, FINNHUB) ---");
     for (const n of news) {
-      lines.push(`- ${n.headline}${n.source ? ` [${n.source}]` : ""}`);
+      const urlPart = n.url ? ` [URL: ${n.url}]` : "";
+      lines.push(`- ${n.headline}${n.source ? ` [${n.source}]` : ""}${urlPart}`);
     }
   }
 
@@ -1009,7 +1075,8 @@ function buildTickerDataContext(
     lines.push("", "--- NOTICIAS ADICIONALES DEL TICKER (BÚSQUEDA WEB) ---");
     if (tickerNews.answer) lines.push(`Resumen: ${tickerNews.answer}`);
     for (const result of tickerNews.results) {
-      lines.push(`- ${result.title}`);
+      const urlPart = result.url ? ` [URL: ${result.url}]` : "";
+      lines.push(`- ${result.title}${urlPart}`);
       if (result.content) lines.push(`  ${result.content}`);
     }
   }
@@ -1018,7 +1085,8 @@ function buildTickerDataContext(
     lines.push("", "--- NOTICIAS DEL SECTOR (BÚSQUEDA WEB) ---");
     if (sectorNews.answer) lines.push(`Resumen del sector: ${sectorNews.answer}`);
     for (const result of sectorNews.results) {
-      lines.push(`- ${result.title}`);
+      const urlPart = result.url ? ` [URL: ${result.url}]` : "";
+      lines.push(`- ${result.title}${urlPart}`);
       if (result.content) lines.push(`  ${result.content}`);
     }
   }
@@ -1027,7 +1095,8 @@ function buildTickerDataContext(
     lines.push("", "--- RESULTADOS FINANCIEROS RECIENTES (EARNINGS) ---");
     if (earningsSearch.answer) lines.push(earningsSearch.answer);
     for (const result of earningsSearch.results) {
-      lines.push(`- ${result.title}`);
+      const urlPart = result.url ? ` [URL: ${result.url}]` : "";
+      lines.push(`- ${result.title}${urlPart}`);
       if (result.content) lines.push(`  ${result.content}`);
     }
   }
@@ -1036,7 +1105,8 @@ function buildTickerDataContext(
     lines.push("", "--- POSICIÓN COMPETITIVA Y CUOTA DE MERCADO ---");
     if (competitiveSearch.answer) lines.push(competitiveSearch.answer);
     for (const result of competitiveSearch.results) {
-      lines.push(`- ${result.title}`);
+      const urlPart = result.url ? ` [URL: ${result.url}]` : "";
+      lines.push(`- ${result.title}${urlPart}`);
       if (result.content) lines.push(`  ${result.content}`);
     }
   }
@@ -1045,7 +1115,8 @@ function buildTickerDataContext(
     lines.push("", "--- RIESGOS Y CATALIZADORES — NOTICIAS RECIENTES ---");
     if (risksCatalystsSearch.answer) lines.push(risksCatalystsSearch.answer);
     for (const result of risksCatalystsSearch.results) {
-      lines.push(`- [${result.published_date ?? ""}] ${result.title}`);
+      const urlPart = result.url ? ` [URL: ${result.url}]` : "";
+      lines.push(`- [${result.published_date ?? ""}] ${result.title}${urlPart}`);
       if (result.content) lines.push(`  ${result.content}`);
     }
   }
@@ -1157,8 +1228,8 @@ PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 - ### Posicionamiento Competitivo: 3-4 líneas sobre cuota de mercado y ventajas diferenciales.
 
 ## Noticias
-- ### Noticias Corporativas Recientes: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. (Fuente)"
-- ### Noticias del Sector: 3-4 noticias. Mismo formato.
+- ### Noticias Corporativas Recientes: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL proporcionada en los datos de contexto ([URL: ...]) para enlazar directamente la fuente en formato markdown [texto](url). Si no hay URL disponible para una noticia, usa "(Fuente)" sin enlace.
+- ### Noticias del Sector: 3-4 noticias. Mismo formato con enlace si URL disponible.
 - ### Contexto Macro Relevante: 4-5 líneas sobre entorno macro/geopolítico con impacto directo. Integra indicadores FRED (tipos, inflación, yield 10Y).
 
 ## Señales Técnicas
@@ -1381,6 +1452,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
     earningsSearch,
     competitiveSearch,
     risksCatalystsSearch,
+    catalystCalendar,
   ] = await Promise.all([
     env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
     env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
@@ -1409,6 +1481,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
     env.TAVILY_KEY
       ? fetchTavilySearch(`${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
       : Promise.resolve(null),
+    fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
   ]);
 
   let quarterlyHistory = mergeQuarterlyData(
@@ -1514,7 +1587,7 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
     aiFallbackRows: aiFallback.length,
     mergedRows:     quarterlyHistory.length,
   };
-  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug })}\n\n`);
+  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug, __catalystCalendar: catalystCalendar })}\n\n`);
   const geminiReader = gemini.response.body.getReader();
 
   const combined = new ReadableStream({
