@@ -856,7 +856,7 @@ function SavedReportCard({
 
 // ── Quarterly history (Alpha-style, multi-source) ──────────────────────
 
-type QTab = "income" | "cashflow" | "balance";
+type QTab = "valuation" | "income" | "cashflow" | "balance";
 
 function QuarterlyHistorySection({
   data, debug, currentMetrics = [], isLoading = false,
@@ -919,50 +919,50 @@ function QuarterlyHistorySection({
     );
   }
 
-  // Oldest → newest left to right
-  const sorted  = [...data].reverse();
-  const periods = sorted.map((q) => fmtPeriod(q.period));
-  const latest  = sorted.length - 1;
-  const col     = (f: keyof QuarterlyPeriod) => sorted.map((q) => q[f] as string);
-  const lastVal = (vals: string[]) => vals[vals.length - 1] ?? "";
+  // 4 most recent quarters, oldest→newest left-to-right
+  const recentFour = [...data].slice(0, 4).reverse();
+  const periods    = recentFour.map((q) => fmtPeriod(q.period));
+  const latest     = recentFour.length - 1;
+  const col        = (f: keyof QuarterlyPeriod) => recentFour.map((q) => q[f] as string);
+  const lastVal    = (vals: string[]) => vals[vals.length - 1] ?? "";
 
-  type Row = { label: string; current: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean; currentOnly?: boolean };
+  type Row = { label: string; current: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean };
 
-  // Snapshot rows from LLM (P/E TTM, Market Cap, Beta, 52W, etc.) — only shown in Income tab
-  const snapshotRows: Row[] = currentMetrics.map(m => ({
-    label: m.label,
-    current: m.value,
-    values: sorted.map(() => ""),
-    bold: false,
-    currentOnly: true,
-  }));
-
-  const ROWS_MAP: Record<QTab, Row[]> = {
+  const QUARTERLY_TABS: Record<Exclude<QTab, "valuation">, Row[]> = {
     income: [
-      ...snapshotRows,
-      { label: "Total Revenue",      current: lastVal(col("revenue")),       values: col("revenue"),       bold: true,  separator: snapshotRows.length > 0 },
-      { label: "Rev. Growth YoY",    current: lastVal(col("revenueGrowth")), values: col("revenueGrowth"), colorize: true },
-      { label: "Gross Margin",       current: lastVal(col("grossMargin")),   values: col("grossMargin"),   colorize: true, separator: true },
-      { label: "EBITDA",             current: lastVal(col("ebitda")),        values: col("ebitda"),        bold: true  },
-      { label: "Net Income",         current: lastVal(col("netIncome")),     values: col("netIncome"),     bold: true  },
-      { label: "Net Margin",         current: lastVal(col("netMargin")),     values: col("netMargin"),     colorize: true },
-      { label: "EPS (Diluted)",      current: lastVal(col("eps")),           values: col("eps")            },
+      { label: "Total Revenue",       current: lastVal(col("revenue")),       values: col("revenue"),       bold: true  },
+      { label: "Rev. Growth YoY",     current: lastVal(col("revenueGrowth")), values: col("revenueGrowth"), colorize: true },
+      { label: "Gross Margin",        current: lastVal(col("grossMargin")),   values: col("grossMargin"),   colorize: true, separator: true },
+      { label: "EBITDA",              current: lastVal(col("ebitda")),        values: col("ebitda"),        bold: true  },
+      { label: "Net Income",          current: lastVal(col("netIncome")),     values: col("netIncome"),     bold: true  },
+      { label: "Net Margin",          current: lastVal(col("netMargin")),     values: col("netMargin"),     colorize: true },
+      { label: "EPS (Diluted)",       current: lastVal(col("eps")),           values: col("eps")            },
     ],
     cashflow: [
-      { label: "Operating CF",       current: lastVal(col("operatingCF")),  values: col("operatingCF"),   bold: true  },
-      { label: "Capital Expenditure", current: lastVal(col("capex")),       values: col("capex")           },
-      { label: "Free Cash Flow",     current: lastVal(col("freeCashFlow")), values: col("freeCashFlow"),  bold: true, colorize: true },
+      { label: "Operating CF",        current: lastVal(col("operatingCF")),  values: col("operatingCF"),   bold: true  },
+      { label: "Capital Expenditure", current: lastVal(col("capex")),        values: col("capex")           },
+      { label: "Free Cash Flow",      current: lastVal(col("freeCashFlow")), values: col("freeCashFlow"),  bold: true, colorize: true },
     ],
     balance: [
-      { label: "Cash & Equivalents", current: lastVal(col("cash")),         values: col("cash"),          bold: true  },
-      { label: "Total Debt",          current: lastVal(col("totalDebt")),   values: col("totalDebt")       },
-      { label: "Net Debt",            current: lastVal(col("netDebt")),     values: col("netDebt"),       colorize: true, separator: true },
-      { label: "Total Equity",        current: lastVal(col("equity")),      values: col("equity"),        bold: true  },
-      { label: "Total Assets",        current: lastVal(col("totalAssets")), values: col("totalAssets"),   bold: true },
+      { label: "Cash & Equivalents",  current: lastVal(col("cash")),         values: col("cash"),          bold: true  },
+      { label: "Total Debt",          current: lastVal(col("totalDebt")),    values: col("totalDebt")       },
+      { label: "Net Debt",            current: lastVal(col("netDebt")),      values: col("netDebt"),       colorize: true, separator: true },
+      { label: "Total Equity",        current: lastVal(col("equity")),       values: col("equity"),        bold: true  },
+      { label: "Total Assets",        current: lastVal(col("totalAssets")),  values: col("totalAssets"),   bold: true  },
     ],
   };
 
-  const ROWS = ROWS_MAP[tab].filter(r => r.currentOnly || !allND(r.values));
+  const isValuationTab = tab === "valuation";
+  const ROWS = isValuationTab
+    ? [] // rendered separately below
+    : QUARTERLY_TABS[tab].filter(r => !allND(r.values));
+
+  const TABS = [
+    { id: "valuation" as QTab, label: "Valoración" },
+    { id: "income"    as QTab, label: "Income Statement" },
+    { id: "cashflow"  as QTab, label: "Cash Flow" },
+    { id: "balance"   as QTab, label: "Balance Sheet" },
+  ];
 
   return (
     <div className="mb-6 border border-border overflow-hidden">
@@ -973,20 +973,16 @@ function QuarterlyHistorySection({
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
         </div>
-        <span className="text-[10px] tracking-widest text-muted-foreground/30">{sorted.length}Q · FMP + TWELVE DATA + FINNHUB + AI</span>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">{data.length}Q · FMP + TWELVE DATA + FINNHUB + AI</span>
       </div>
 
-      {/* Statement tabs */}
-      <div className="flex border-b border-border bg-card">
-        {([
-          { id: "income"   as QTab, label: "Income Statement" },
-          { id: "cashflow" as QTab, label: "Cash Flow"        },
-          { id: "balance"  as QTab, label: "Balance Sheet"    },
-        ]).map(t => (
+      {/* Tabs */}
+      <div className="flex border-b border-border bg-card overflow-x-auto">
+        {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-5 py-2.5 text-[11px] tracking-wider transition-colors border-b-2 ${
+            className={`px-4 py-2.5 text-[11px] tracking-wider transition-colors border-b-2 whitespace-nowrap shrink-0 ${
               tab === t.id
                 ? "text-primary border-primary"
                 : "text-muted-foreground/50 border-transparent hover:text-foreground"
@@ -997,92 +993,131 @@ function QuarterlyHistorySection({
         ))}
       </div>
 
-      {/* Scrollable table */}
-      <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
-        <table className="w-full" style={{ minWidth: Math.max(700, 220 + 110 + sorted.length * 95) }}>
-          <thead>
-            <tr className="border-b border-border bg-secondary/20">
-              <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium sticky left-0 bg-secondary/20 z-10"
-                  style={{ minWidth: 200 }}>
-                MÉTRICA
-              </th>
-              <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap border-r border-border/40"
-                  style={{ minWidth: 110 }}>
-                VALOR
-              </th>
-              {periods.map((p, i) => (
-                <th key={i}
-                    className={`px-3 py-3 text-right text-[11px] tracking-widest font-semibold whitespace-nowrap ${
-                      i === latest ? "text-foreground/85" : "text-muted-foreground/40"
-                    }`}
-                    style={{ minWidth: 90 }}>
-                  {p}
+      {/* ── Valoración tab: point-in-time metrics only, no quarter columns ── */}
+      {isValuationTab && (
+        <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
+          <table className="w-full" style={{ minWidth: 320 }}>
+            <thead>
+              <tr className="border-b border-border bg-secondary/20">
+                <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium sticky left-0 bg-secondary/20 z-10"
+                    style={{ minWidth: 200 }}>
+                  MÉTRICA
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {ROWS.map((row) => {
-              const cleanedCurrent = cleanVal(row.current);
-              const cleaned = row.values.map(cleanVal);
-              const ndCurrent = cleanedCurrent === "—" || cleanedCurrent === "";
-              const negCur = !ndCurrent && cleanedCurrent.startsWith("-");
-              const posCur = !ndCurrent && row.colorize && cleanedCurrent.startsWith("+");
-              let curCls = row.bold ? "text-foreground font-semibold" : "text-foreground/85";
-              if (ndCurrent) curCls = "text-muted-foreground/20";
-              else if (negCur && row.colorize) curCls = "text-destructive font-semibold";
-              else if (negCur)                 curCls = "text-foreground/85";
-              else if (posCur)                 curCls = "text-primary font-semibold";
-              else if (!row.currentOnly)       curCls = "text-primary " + (row.bold ? "font-semibold" : "");
-
-              return (
-                <tr key={row.label}
-                    className={`border-b transition-colors hover:bg-primary/3 ${
-                      row.separator ? "border-border/60" : "border-border/20"
-                    }`}>
-                  <td className={`px-4 py-3 whitespace-nowrap border-r border-border/20 sticky left-0 bg-card z-10 ${
-                    row.bold || row.currentOnly
-                      ? "text-[13px] text-foreground/90 font-medium"
-                      : "text-[12px] text-muted-foreground/70 font-normal"
-                  }`}>
-                    {row.label}
+                <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap"
+                    style={{ minWidth: 140 }}>
+                  VALOR ACTUAL
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentMetrics.length === 0 && (
+                <tr>
+                  <td colSpan={2} className="px-4 py-6 text-center text-[10px] tracking-widest text-muted-foreground/30">
+                    MÉTRICAS DE VALORACIÓN NO DISPONIBLES
                   </td>
-                  <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] border-r border-border/40 ${curCls}`}>
-                    {ndCurrent ? <span className="text-muted-foreground/20">—</span> : cleanedCurrent}
-                  </td>
-                  {row.currentOnly
-                    ? sorted.map((_, i) => (
-                        <td key={i} className="px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] text-muted-foreground/15">
-                          —
-                        </td>
-                      ))
-                    : cleaned.map((v, i) => {
-                        const nd  = v === "—";
-                        const neg = !nd && v.startsWith("-");
-                        const pos = !nd && row.colorize && v.startsWith("+");
-                        const isLatest = i === latest;
-
-                        let cls = isLatest
-                          ? (row.bold ? "text-foreground/85 font-semibold" : "text-foreground/75")
-                          : "text-foreground/45";
-                        if (nd)               cls = "text-muted-foreground/20";
-                        else if (neg && row.colorize) cls = isLatest ? "text-destructive font-semibold" : "text-destructive/60";
-                        else if (pos)         cls = isLatest ? "text-primary font-semibold" : "text-primary/60";
-
-                        return (
-                          <td key={i}
-                              className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] ${cls}`}>
-                            {nd ? <span className="text-muted-foreground/20">—</span> : v}
-                          </td>
-                        );
-                      })
-                  }
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              )}
+              {currentMetrics.map((m) => {
+                const v = cleanVal(m.value);
+                return (
+                  <tr key={m.label} className="border-b border-border/20 hover:bg-primary/3 transition-colors">
+                    <td className="px-4 py-3 text-[13px] text-foreground/90 font-medium whitespace-nowrap sticky left-0 bg-card z-10 border-r border-border/20">
+                      {m.label}
+                    </td>
+                    <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] ${v === "—" ? "text-muted-foreground/20" : "text-primary font-semibold"}`}>
+                      {v === "—" ? <span className="text-muted-foreground/20">—</span> : v}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Quarterly tabs: 4 most recent quarters ── */}
+      {!isValuationTab && (
+        <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
+          <table className="w-full" style={{ minWidth: Math.max(520, 200 + 110 + recentFour.length * 100) }}>
+            <thead>
+              <tr className="border-b border-border bg-secondary/20">
+                <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium sticky left-0 bg-secondary/20 z-10"
+                    style={{ minWidth: 190 }}>
+                  MÉTRICA
+                </th>
+                <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap border-r border-border/40"
+                    style={{ minWidth: 100 }}>
+                  ÚLTIMO
+                </th>
+                {periods.map((p, i) => (
+                  <th key={i}
+                      className={`px-3 py-3 text-right text-[11px] tracking-widest font-semibold whitespace-nowrap ${
+                        i === latest ? "text-foreground/85" : "text-muted-foreground/40"
+                      }`}
+                      style={{ minWidth: 90 }}>
+                    {p}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ROWS.length === 0 && (
+                <tr>
+                  <td colSpan={2 + recentFour.length} className="px-4 py-6 text-center text-[10px] tracking-widest text-muted-foreground/30">
+                    SIN DATOS — VERIFICA QUE EL BACKEND ESTÉ ACTUALIZADO EN SUPABASE
+                  </td>
+                </tr>
+              )}
+              {ROWS.map((row) => {
+                const cleanedCurrent = cleanVal(row.current);
+                const cleaned = row.values.map(cleanVal);
+                const ndCurrent = cleanedCurrent === "—" || cleanedCurrent === "";
+                const negCur = !ndCurrent && cleanedCurrent.startsWith("-");
+                const posCur = !ndCurrent && row.colorize && cleanedCurrent.startsWith("+");
+                let curCls = row.bold ? "text-foreground font-semibold" : "text-foreground/85";
+                if (ndCurrent)                curCls = "text-muted-foreground/20";
+                else if (negCur && row.colorize) curCls = "text-destructive font-semibold";
+                else if (negCur)              curCls = "text-foreground/85";
+                else if (posCur)              curCls = "text-primary font-semibold";
+                else                          curCls = "text-primary " + (row.bold ? "font-semibold" : "");
+
+                return (
+                  <tr key={row.label}
+                      className={`border-b transition-colors hover:bg-primary/3 ${
+                        row.separator ? "border-border/60" : "border-border/20"
+                      }`}>
+                    <td className={`px-4 py-3 whitespace-nowrap border-r border-border/20 sticky left-0 bg-card z-10 ${
+                      row.bold ? "text-[13px] text-foreground/90 font-medium" : "text-[12px] text-muted-foreground/70 font-normal"
+                    }`}>
+                      {row.label}
+                    </td>
+                    <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] border-r border-border/40 ${curCls}`}>
+                      {ndCurrent ? <span className="text-muted-foreground/20">—</span> : cleanedCurrent}
+                    </td>
+                    {cleaned.map((v, i) => {
+                      const nd  = v === "—";
+                      const neg = !nd && v.startsWith("-");
+                      const pos = !nd && row.colorize && v.startsWith("+");
+                      const isLast = i === latest;
+                      let cls = isLast
+                        ? (row.bold ? "text-foreground/85 font-semibold" : "text-foreground/75")
+                        : "text-foreground/45";
+                      if (nd)               cls = "text-muted-foreground/20";
+                      else if (neg && row.colorize) cls = isLast ? "text-destructive font-semibold" : "text-destructive/60";
+                      else if (pos)         cls = isLast ? "text-primary font-semibold" : "text-primary/60";
+                      return (
+                        <td key={i} className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] ${cls}`}>
+                          {nd ? <span className="text-muted-foreground/20">—</span> : v}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

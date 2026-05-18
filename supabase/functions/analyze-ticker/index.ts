@@ -685,7 +685,11 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
   fillFrom(finnhub);
   fillFrom(aiFallback);
 
+  // Only keep quarters that have at least one key financial value — prevents
+  // AI-fallback date-only entries from polluting the table with all-"N/D" rows.
+  const KEY_FIELDS = ["revenue", "ebitda", "netIncome", "operatingCF", "freeCashFlow", "cash", "equity"];
   return Array.from(merged.values())
+    .filter((q: any) => KEY_FIELDS.some(f => q[f] !== "N/D" && q[f] != null && q[f] !== ""))
     .sort((a: any, b: any) => b.period.localeCompare(a.period))
     .slice(0, 12);
 }
