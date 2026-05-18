@@ -738,7 +738,7 @@ function ReportView({
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
                 {key === "Finanzas" && (
-                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} />
+                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
                 )}
                 {sectionNodes && renderElements(sectionNodes)}
                 {isLoading && isLastSection && (
@@ -859,13 +859,32 @@ function SavedReportCard({
 type QTab = "income" | "cashflow" | "balance";
 
 function QuarterlyHistorySection({
-  data, debug, currentMetrics = [],
+  data, debug, currentMetrics = [], isLoading = false,
 }: {
   data: QuarterlyPeriod[];
   debug?: QuarterlyDebug | null;
   currentMetrics?: { label: string; value: string }[];
+  isLoading?: boolean;
 }) {
   const [tab, setTab] = useState<QTab>("income");
+
+  // Loading state: backend not yet returned the quarterly event
+  if (isLoading && !data.length && !debug) {
+    return (
+      <div className="mb-6 border border-border overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-1.5 bg-primary shrink-0 animate-pulse" />
+            <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
+            <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
+          </div>
+        </div>
+        <div className="px-5 py-6 text-center">
+          <div className="text-[10px] tracking-widest text-muted-foreground/50">CARGANDO DATOS TRIMESTRALES...</div>
+        </div>
+      </div>
+    );
+  }
 
   if (!data.length && !currentMetrics.length) {
     let diagnostic = "Esperando datos del backend...";

@@ -306,26 +306,38 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
   if (!key) return [];
   const t = encodeURIComponent(ticker);
   const base = "https://financialmodelingprep.com/api/v3";
+  // Normalize FMP date strings to YYYY-MM-DD (FMP returns this format,
+  // but defensively strip anything after the date portion just in case).
+  const normDate = (d: any): string => {
+    if (typeof d !== "string") return "";
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : "";
+  };
   try {
+    const incomeUrl  = `${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`;
+    const cashUrl    = `${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`;
+    const balanceUrl = `${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`;
     const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
-      fetch(`${base}/income-statement/${t}?period=quarter&limit=16&apikey=${key}`)
-        .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/cash-flow-statement/${t}?period=quarter&limit=16&apikey=${key}`)
-        .then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`${base}/balance-sheet-statement/${t}?period=quarter&limit=16&apikey=${key}`)
-        .then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(incomeUrl).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
+      fetch(cashUrl).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
+      fetch(balanceUrl).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
     ]);
 
     const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
-    console.log(`FMP ${ticker}: income=${incomeList.length} isError=${!Array.isArray(incomeRaw) ? JSON.stringify(incomeRaw)?.slice(0,80) : "no"}`);
+    console.log(`FMP ${ticker} quarter limit=12: income=${incomeList.length} cf=${Array.isArray(cashRaw) ? cashRaw.length : "err"} bs=${Array.isArray(balanceRaw) ? balanceRaw.length : "err"} ${!Array.isArray(incomeRaw) ? "incomeErr=" + JSON.stringify(incomeRaw).slice(0, 120) : ""}`);
     if (!incomeList.length) return [];
 
-    const cashByDate = new Map<string, any>(Array.isArray(cashRaw) ? (cashRaw as any[]).map((q: any) => [q.date, q]) : []);
-    const balByDate  = new Map<string, any>(Array.isArray(balanceRaw) ? (balanceRaw as any[]).map((q: any) => [q.date, q]) : []);
+    const cashByDate = new Map<string, any>(
+      Array.isArray(cashRaw) ? (cashRaw as any[]).map((q: any) => [normDate(q.date), q]) : []
+    );
+    const balByDate = new Map<string, any>(
+      Array.isArray(balanceRaw) ? (balanceRaw as any[]).map((q: any) => [normDate(q.date), q]) : []
+    );
 
     return incomeList.map((q: any, idx: number) => {
-      const cf = cashByDate.get(q.date) ?? {};
-      const bs = balByDate.get(q.date) ?? {};
+      const period = normDate(q.date);
+      const cf = cashByDate.get(period) ?? {};
+      const bs = balByDate.get(period) ?? {};
 
       const rev         = q.revenue ?? null;
       const grossProfit = q.grossProfit ?? null;
@@ -347,7 +359,7 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         : "N/D";
 
       return {
-        period:       q.date ?? "",
+        period,
         revenue:      fmt(rev, "B"),
         revenueGrowth: revGrowth,
         grossMargin:  rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
@@ -364,8 +376,11 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         equity:       fmt(equity, "B"),
         totalAssets:  fmt(totalAssets, "B"),
       };
-    }).slice(0, 12);
-  } catch (_) { return []; }
+    }).filter(q => /^\d{4}-\d{2}-\d{2}$/.test(q.period)).slice(0, 12);
+  } catch (e) {
+    console.log(`FMP ${ticker} threw:`, e);
+    return [];
+  }
 }
 
 async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): Promise<any[]> {
