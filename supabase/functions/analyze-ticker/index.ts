@@ -356,7 +356,11 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
 
       const rev         = q.revenue ?? null;
       const grossProfit = q.grossProfit ?? null;
-      const ebitda      = q.ebitda ?? null;
+      const ebitdaRaw   = q.ebitda ?? null;
+      const opIncome    = q.operatingIncome ?? null;
+      const dna         = q.depreciationAndAmortization ?? null;
+      const ebitda      = ebitdaRaw != null ? ebitdaRaw
+                        : (opIncome != null && dna != null ? opIncome + dna : null);
       const netIncome   = q.netIncome ?? null;
       const eps         = q.epsdiluted ?? q.eps ?? null;
 
@@ -444,7 +448,11 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
 
       const rev         = num(q.sales);
       const grossProfit = num(q.gross_profit);
-      const ebitda      = num(q.ebitda);
+      const ebitdaRaw   = num(q.ebitda);
+      const opIncomeTD  = num(q.operating_income);
+      const dnaTD       = num(q.depreciation_amortization) ?? num(q.depreciation_and_amortization);
+      const ebitda      = ebitdaRaw != null ? ebitdaRaw
+                        : (opIncomeTD != null && dnaTD != null ? opIncomeTD + dnaTD : null);
       const netIncome   = num(q.net_income);
       const eps         = num(q.eps_diluted) ?? num(q.eps_basic);
 
@@ -707,11 +715,14 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
   fillFrom(finnhub);
   fillFrom(aiFallback);
 
-  // Only keep quarters that have at least one key financial value — prevents
-  // AI-fallback date-only entries from polluting the table with all-"N/D" rows.
+  // Require at least 3 of 7 key fields to be populated — prevents AI-fallback
+  // "phantom" quarters (revenue-only) from polluting the table with empty rows.
   const KEY_FIELDS = ["revenue", "ebitda", "netIncome", "operatingCF", "freeCashFlow", "cash", "equity"];
   return Array.from(merged.values())
-    .filter((q: any) => KEY_FIELDS.some(f => q[f] !== "N/D" && q[f] != null && q[f] !== ""))
+    .filter((q: any) => {
+      const keyCount = KEY_FIELDS.filter(f => q[f] !== "N/D" && q[f] != null && q[f] !== "").length;
+      return keyCount >= 3;
+    })
     .sort((a: any, b: any) => b.period.localeCompare(a.period))
     .slice(0, 12);
 }
@@ -1216,6 +1227,19 @@ PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
 ## Valoración
 - ### Análisis de Múltiplos: tabla P/E, P/B, EV/EBITDA, P/S empresa vs media sectorial. Párrafo 4-5 líneas.
 - ### Análisis del Sector: 5-6 líneas sobre estado, tendencias estructurales, macro, perspectivas 12M.
+- ### Red Flags Automáticos: ESCANEA los datos del HISTORIAL TRIMESTRAL (P&L, Cash Flow, Balance) y detecta señales cuantitativas de alerta comparando trimestres entre sí. Genera 3-6 viñetas SÓLO si encuentras patrones reales en los datos. Formato obligatorio:
+  "- **[Categoría]:** descripción específica con cifras concretas comparando trimestres. Severidad: **ALTA** / **MEDIA** / **BAJA**"
+
+  Categorías a evaluar (no inventes datos, sólo reporta lo que veas en el historial trimestral):
+  - Apalancamiento: deuda total creciendo mientras equity/FCF cae
+  - Compresión de márgenes: gross/net margin descendiendo 2+ trimestres seguidos
+  - Calidad de beneficios: net income creciendo pero operating CF cayendo (warning de earnings quality)
+  - Capex / FCF: capex aumentando mientras FCF se deteriora
+  - Working capital: cash cayendo + deuda corto plazo subiendo
+  - Crecimiento de ingresos: desaceleración secuencial significativa (>5pp drop QoQ en YoY growth)
+  - Dilución / Recompras: equity decreciendo rápido (recompras agresivas) o equity diluido (emisiones)
+
+  Si NO detectas red flags relevantes en los datos: escribe UNA sola viñeta: "- **Sin alertas:** los fundamentales trimestrales no muestran señales cuantitativas de alerta material."
 - ### Factores de Riesgo (8-10 viñetas):
   Formato: "- **Tipo:** descripción con cifras/eventos. Nivel: **ALTO** / **MEDIO** / **BAJO**"
   Cubre: regulatorio, competitivo, macro (tipos/aranceles/divisa), operativo, concentración, geopolítico.

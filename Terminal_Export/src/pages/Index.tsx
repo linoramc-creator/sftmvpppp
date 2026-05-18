@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
+import { IndexChartOnly, IndexMiniChart } from "@/components/charts/IndexCharts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -361,7 +362,8 @@ const Index = () => {
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "ticker" && (
-        <div className="max-w-5xl mx-auto px-4 pt-5 pb-16">
+        <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
+          <div className="flex-1 min-w-0">
 
           {/* Search row */}
           <div className="flex gap-2 mb-5">
@@ -451,12 +453,19 @@ const Index = () => {
               onToggle={toggleSection}
             />
           )}
+          </div>
+
+          {/* Right column — TradingView index charts */}
+          <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
+            <IndexChartsPanel />
+          </aside>
         </div>
       )}
 
       {/* ── SECTOR tab ──────────────────────────────────────────────── */}
       {navTab === "sector" && (
-        <div className="max-w-5xl mx-auto px-4 pt-5 pb-16">
+        <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
+          <div className="flex-1 min-w-0">
 
           {/* Sector search row */}
           <div className="flex gap-2 mb-5">
@@ -530,6 +539,12 @@ const Index = () => {
               onToggle={toggleSectorSection}
             />
           )}
+          </div>
+
+          {/* Right column — TradingView index charts */}
+          <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
+            <IndexChartsPanel />
+          </aside>
         </div>
       )}
 
@@ -569,6 +584,57 @@ const Index = () => {
     </div>
   );
 };
+
+// ── Index Charts Panel (TradingView, right column) ────────────────────
+
+function IndexChartsPanel() {
+  const [main, setMain] = useState<'SP:SPX' | 'NASDAQ:COMP' | 'DJ:DJI'>('SP:SPX');
+  const indices: { s: 'SP:SPX' | 'NASDAQ:COMP' | 'DJ:DJI'; l: string }[] = [
+    { s: 'SP:SPX',       l: 'S&P 500' },
+    { s: 'NASDAQ:COMP',  l: 'NASDAQ'  },
+    { s: 'DJ:DJI',       l: 'DOW'     },
+  ];
+  return (
+    <div className="space-y-3 lg:sticky lg:top-4">
+      <div className="border border-border bg-card">
+        <div className="px-3 py-2 border-b border-border/60 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+          <span className="text-[10px] tracking-[0.2em] text-foreground font-semibold">ÍNDICES GLOBALES</span>
+          <span className="text-[9px] tracking-widest text-muted-foreground/30 ml-auto">12M</span>
+        </div>
+        <div className="divide-y divide-border/40">
+          {indices.map((idx) => (
+            <div key={idx.s} className="px-2 py-1">
+              <div className="px-1 text-[9px] tracking-widest text-muted-foreground/55">{idx.l}</div>
+              <IndexMiniChart symbol={idx.s} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="border border-border bg-card">
+        <div className="flex">
+          {indices.map((opt) => (
+            <button
+              key={opt.s}
+              onClick={() => setMain(opt.s)}
+              className={`flex-1 px-2 py-2 text-[10px] tracking-widest transition-colors border-b-2 ${
+                main === opt.s
+                  ? 'text-primary border-primary'
+                  : 'text-muted-foreground/50 border-transparent hover:text-foreground'
+              }`}
+            >
+              {opt.l}
+            </button>
+          ))}
+        </div>
+        <div className="p-1">
+          <IndexChartOnly symbol={main} height={350} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Market Ticker Bar ─────────────────────────────────────────────────
 
@@ -935,36 +1001,36 @@ function QuarterlyHistorySection({
   const col        = (f: keyof QuarterlyPeriod) => recentFour.map((q) => q[f] as string);
   const lastVal    = (vals: string[]) => vals[vals.length - 1] ?? "";
 
-  type Row = { label: string; current: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean };
+  type Row = { label: string; current: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean; alwaysShow?: boolean };
 
   const QUARTERLY_TABS: Record<Exclude<QTab, "valuation">, Row[]> = {
     income: [
-      { label: "Total Revenue",       current: lastVal(col("revenue")),       values: col("revenue"),       bold: true  },
+      { label: "Total Revenue",       current: lastVal(col("revenue")),       values: col("revenue"),       bold: true, alwaysShow: true },
       { label: "Rev. Growth YoY",     current: lastVal(col("revenueGrowth")), values: col("revenueGrowth"), colorize: true },
       { label: "Gross Margin",        current: lastVal(col("grossMargin")),   values: col("grossMargin"),   colorize: true, separator: true },
-      { label: "EBITDA",              current: lastVal(col("ebitda")),        values: col("ebitda"),        bold: true  },
-      { label: "Net Income",          current: lastVal(col("netIncome")),     values: col("netIncome"),     bold: true  },
+      { label: "EBITDA",              current: lastVal(col("ebitda")),        values: col("ebitda"),        bold: true, alwaysShow: true },
+      { label: "Net Income",          current: lastVal(col("netIncome")),     values: col("netIncome"),     bold: true, alwaysShow: true },
       { label: "Net Margin",          current: lastVal(col("netMargin")),     values: col("netMargin"),     colorize: true },
-      { label: "EPS (Diluted)",       current: lastVal(col("eps")),           values: col("eps")            },
+      { label: "EPS (Diluted)",       current: lastVal(col("eps")),           values: col("eps"),                       alwaysShow: true },
     ],
     cashflow: [
-      { label: "Operating CF",        current: lastVal(col("operatingCF")),  values: col("operatingCF"),   bold: true  },
-      { label: "Capital Expenditure", current: lastVal(col("capex")),        values: col("capex")           },
-      { label: "Free Cash Flow",      current: lastVal(col("freeCashFlow")), values: col("freeCashFlow"),  bold: true, colorize: true },
+      { label: "Operating CF",        current: lastVal(col("operatingCF")),  values: col("operatingCF"),   bold: true, alwaysShow: true },
+      { label: "Capital Expenditure", current: lastVal(col("capex")),        values: col("capex"),                     alwaysShow: true },
+      { label: "Free Cash Flow",      current: lastVal(col("freeCashFlow")), values: col("freeCashFlow"),  bold: true, colorize: true, alwaysShow: true },
     ],
     balance: [
-      { label: "Cash & Equivalents",  current: lastVal(col("cash")),         values: col("cash"),          bold: true  },
-      { label: "Total Debt",          current: lastVal(col("totalDebt")),    values: col("totalDebt")       },
+      { label: "Cash & Equivalents",  current: lastVal(col("cash")),         values: col("cash"),          bold: true, alwaysShow: true },
+      { label: "Total Debt",          current: lastVal(col("totalDebt")),    values: col("totalDebt"),                 alwaysShow: true },
       { label: "Net Debt",            current: lastVal(col("netDebt")),      values: col("netDebt"),       colorize: true, separator: true },
-      { label: "Total Equity",        current: lastVal(col("equity")),       values: col("equity"),        bold: true  },
-      { label: "Total Assets",        current: lastVal(col("totalAssets")),  values: col("totalAssets"),   bold: true  },
+      { label: "Total Equity",        current: lastVal(col("equity")),       values: col("equity"),        bold: true, alwaysShow: true },
+      { label: "Total Assets",        current: lastVal(col("totalAssets")),  values: col("totalAssets"),   bold: true, alwaysShow: true },
     ],
   };
 
   const isValuationTab = tab === "valuation";
   const ROWS = isValuationTab
     ? [] // rendered separately below
-    : QUARTERLY_TABS[tab].filter(r => !allND(r.values));
+    : QUARTERLY_TABS[tab].filter(r => r.alwaysShow || !allND(r.values));
 
   const TABS = [
     { id: "valuation" as QTab, label: "Valoración" },
