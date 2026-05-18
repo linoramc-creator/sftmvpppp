@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
-import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug } from "@/lib/analyze";
+import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -115,6 +115,7 @@ const Index = () => {
   const [error, setError]                 = useState("");
   const [quarterlyData, setQuarterlyData] = useState<QuarterlyPeriod[]>([]);
   const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
+  const [catalystCalendar, setCatalystCalendar] = useState<CatalystCalendar | null>(null);
   const [savedReports, setSavedReports]   = useState<SavedReport[]>(loadReports);
   const [expanded, setExpanded]           = useState<Record<string, boolean>>({});
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
@@ -195,6 +196,7 @@ const Index = () => {
     setCurrentTicker(clean);
     setQuarterlyData([]);
     setQuarterlyDebug(null);
+    setCatalystCalendar(null);
     setViewingReport(null);
     openAllSections();
 
@@ -212,6 +214,7 @@ const Index = () => {
         },
         onQuarterlyData: (data) => setQuarterlyData(data),
         onQuarterlyDebug: (debug) => setQuarterlyDebug(debug),
+        onCatalystCalendar: (data) => setCatalystCalendar(data),
       });
     } catch (e: unknown) {
       if (e instanceof Error && e.name === "AbortError") return;
@@ -295,6 +298,7 @@ const Index = () => {
   const activeAnalysis  = viewingReport ? viewingReport.analysis     : analysis;
   const activeQuarterly = viewingReport ? viewingReport.quarterlyData : quarterlyData;
   const activeTicker    = viewingReport ? viewingReport.ticker        : currentTicker;
+  const activeCatalyst  = viewingReport ? null                        : catalystCalendar;
   const isLive          = !viewingReport;
 
   return (
@@ -440,6 +444,7 @@ const Index = () => {
               content={activeAnalysis}
               quarterlyData={activeQuarterly}
               quarterlyDebug={isLive ? quarterlyDebug : null}
+              catalystCalendar={activeCatalyst}
               ticker={activeTicker}
               isLoading={isLoading && isLive}
               expanded={expanded}
@@ -682,11 +687,12 @@ function MarketTickerBar({
 // ── Report View (ticker accordion) ────────────────────────────────────
 
 function ReportView({
-  content, quarterlyData, quarterlyDebug, ticker, isLoading, expanded, onToggle,
+  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, expanded, onToggle,
 }: {
   content: string;
   quarterlyData: QuarterlyPeriod[];
   quarterlyDebug?: QuarterlyDebug | null;
+  catalystCalendar?: CatalystCalendar | null;
   ticker: string;
   isLoading: boolean;
   expanded: Record<string, boolean>;
@@ -738,7 +744,10 @@ function ReportView({
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
                 {key === "Finanzas" && (
-                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
+                  <>
+                    <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
+                    <CatalystCalendarSection data={catalystCalendar ?? null} />
+                  </>
                 )}
                 {sectionNodes && renderElements(sectionNodes)}
                 {isLoading && isLastSection && (
@@ -1118,6 +1127,66 @@ function QuarterlyHistorySection({
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Catalyst Calendar ─────────────────────────────────────────────────
+
+function CatalystCalendarSection({ data }: { data: CatalystCalendar | null }) {
+  if (!data || (data.earnings.length === 0 && data.dividends.length === 0)) return null;
+
+  return (
+    <div className="mb-4 border border-border overflow-hidden">
+      <div className="px-4 py-2.5 bg-secondary/30 border-b border-border flex items-center gap-2">
+        <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+        <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">CATALYST CALENDAR</span>
+        <span className="text-[10px] text-muted-foreground/40 tracking-widest ml-auto">FMP</span>
+      </div>
+
+      <div className="divide-y divide-border/30">
+        {data.earnings.length > 0 && (
+          <div className="px-4 py-3">
+            <div className="text-[9px] tracking-widest text-muted-foreground/45 mb-2.5">PRÓXIMOS EARNINGS</div>
+            <div className="space-y-1.5">
+              {data.earnings.map((e, i) => (
+                <div key={i} className="flex items-center gap-4 flex-wrap">
+                  <span className="text-[12px] text-primary font-mono tabular-nums font-semibold">{e.date}</span>
+                  {e.epsEstimate && (
+                    <span className="text-[11px] text-muted-foreground/60">
+                      EPS est. <span className="text-foreground/80">{e.epsEstimate}</span>
+                    </span>
+                  )}
+                  {e.revenueEstimate && (
+                    <span className="text-[11px] text-muted-foreground/60">
+                      Rev est. <span className="text-foreground/80">{e.revenueEstimate}</span>
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {data.dividends.length > 0 && (
+          <div className="px-4 py-3">
+            <div className="text-[9px] tracking-widest text-muted-foreground/45 mb-2.5">EX-DIVIDEND DATES</div>
+            <div className="space-y-1.5">
+              {data.dividends.map((d, i) => (
+                <div key={i} className="flex items-center gap-4 flex-wrap">
+                  <span className="text-[12px] text-primary font-mono tabular-nums font-semibold">{d.exDate}</span>
+                  {d.amount && (
+                    <span className="text-[11px] text-foreground/80">{d.amount}/share</span>
+                  )}
+                  {d.frequency && (
+                    <span className="text-[10px] text-muted-foreground/40">{d.frequency}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -143,6 +143,11 @@ export interface QuarterlyDebug {
   mergedRows:     number;
 }
 
+export interface CatalystCalendar {
+  earnings: { date: string; epsEstimate: string | null; revenueEstimate: string | null }[];
+  dividends: { exDate: string; amount: string; frequency: string }[];
+}
+
 export async function streamAnalysis({
   ticker,
   onDelta,
@@ -150,6 +155,7 @@ export async function streamAnalysis({
   onError,
   onQuarterlyData,
   onQuarterlyDebug,
+  onCatalystCalendar,
   signal,
 }: {
   ticker: string;
@@ -158,6 +164,7 @@ export async function streamAnalysis({
   onError: (error: string) => void;
   onQuarterlyData?: (data: QuarterlyPeriod[]) => void;
   onQuarterlyDebug?: (debug: QuarterlyDebug) => void;
+  onCatalystCalendar?: (data: CatalystCalendar) => void;
   signal?: AbortSignal;
 }) {
   await streamSSE({
@@ -173,6 +180,9 @@ export async function streamAnalysis({
       }
       if (parsed.__quarterlyDebug && onQuarterlyDebug) {
         onQuarterlyDebug(parsed.__quarterlyDebug as QuarterlyDebug);
+      }
+      if (parsed.__catalystCalendar && onCatalystCalendar) {
+        onCatalystCalendar(parsed.__catalystCalendar as CatalystCalendar);
       }
     },
   });
