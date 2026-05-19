@@ -276,6 +276,8 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
     const opCF     = cf.operatingCashFlow ?? null;
     const fcf      = cf.freeCashFlow ?? null;
     const capex    = cf.capitalExpenditures ?? cf.capex ?? null;
+    const investingCF = cf.netInvestingCashFlow ?? cf.investingCashFlow ?? null;
+    const financingCF = cf.netFinancingCashFlow ?? cf.financingCashFlow ?? null;
 
     const cash     = bs.cashAndEquivalents ?? bs.cash ?? bs.cashEquivalents ?? null;
     const totalDebt = bs.totalDebt ?? bs.longTermDebt ?? null;
@@ -295,6 +297,8 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
       operatingCF: fmt(opCF, "B"),
       freeCashFlow: fmt(fcf, "B"),
       capex: capex != null ? fmt(capex, "B") : "N/D",
+      investingCF: fmt(investingCF, "B"),
+      financingCF: fmt(financingCF, "B"),
       cash: fmt(cash, "B"),
       totalDebt: fmt(totalDebt, "B"),
       netDebt: fmt(netDebt, "B"),
@@ -377,6 +381,15 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
       const fcfRaw    = cf.freeCashFlow ?? null;
       const fcf       = fcfRaw != null ? fcfRaw
                       : (opCF != null && capexRaw != null ? opCF + capexRaw : null);
+      // Investing/Financing CF — needed for the CashFlowChart visual breakdown
+      const investingCF = cf.netCashUsedForInvestingActivites
+                        ?? cf.netCashUsedForInvestingActivities
+                        ?? cf.netCashFromInvestingActivities
+                        ?? null;
+      const financingCF = cf.netCashUsedProvidedByFinancingActivities
+                        ?? cf.netCashProvidedByFinancingActivities
+                        ?? cf.netCashFromFinancingActivities
+                        ?? null;
 
       const cash      = bs.cashAndCashEquivalents ?? bs.cashAndShortTermInvestments ?? null;
       const totalDebt = bs.totalDebt ?? null;
@@ -401,6 +414,8 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         operatingCF:  fmt(opCF, "B"),
         freeCashFlow: fmt(fcf, "B"),
         capex:        capex != null ? fmt(capex, "B") : "N/D",
+        investingCF:  fmt(investingCF, "B"),
+        financingCF:  fmt(financingCF, "B"),
         cash:         fmt(cash, "B"),
         totalDebt:    fmt(totalDebt, "B"),
         netDebt:      fmt(netDebt, "B"),
@@ -471,6 +486,14 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
       const capex = num(cf?.investing_activities?.capital_expenditures)
                  ?? num(cf?.capital_expenditures)
                  ?? num(cf?.capex);
+      const investingCF = num(cf?.investing_activities?.net_cash_from_investing_activities)
+                       ?? num(cf?.investing_activities?.investing_cash_flow)
+                       ?? num(cf?.net_cash_from_investing_activities)
+                       ?? num(cf?.investing_cash_flow);
+      const financingCF = num(cf?.financing_activities?.net_cash_from_financing_activities)
+                       ?? num(cf?.financing_activities?.financing_cash_flow)
+                       ?? num(cf?.net_cash_from_financing_activities)
+                       ?? num(cf?.financing_cash_flow);
 
       const cash      = num(bs?.assets?.current_assets?.cash_and_cash_equivalents)
                      ?? num(bs?.assets?.current_assets?.cash)
@@ -508,6 +531,8 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
         operatingCF:   fmt(opCF, "B"),
         freeCashFlow:  fmt(fcf, "B"),
         capex:         capex != null ? fmt(capex, "B") : "N/D",
+        investingCF:   fmt(investingCF, "B"),
+        financingCF:   fmt(financingCF, "B"),
         cash:          fmt(cash, "B"),
         totalDebt:     fmt(totalDebt, "B"),
         netDebt:       fmt(netDebt, "B"),
@@ -678,6 +703,9 @@ ${context}`;
         operatingCF:   fmt(opCF, "B"),
         freeCashFlow:  fmt(fcf, "B"),
         capex:         capex != null ? fmt(capex, "B") : "N/D",
+        // AI fallback typically can't reliably extract CFI/CFF — leave N/D
+        investingCF:   "N/D",
+        financingCF:   "N/D",
         cash:          fmt(cash, "B"),
         totalDebt:     fmt(totalDebt, "B"),
         netDebt:       fmt(netDebt, "B"),
@@ -696,7 +724,8 @@ ${context}`;
 function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFallback: any[] = []): any[] {
   const merged = new Map<string, any>();
   const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
-                  "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets","revenue"];
+                  "operatingCF","freeCashFlow","capex","investingCF","financingCF",
+                  "cash","totalDebt","netDebt","equity","totalAssets","revenue"];
 
   // Map a date (YYYY-MM-DD) to a calendar-quarter key (YYYYQn). Different data providers
   // sometimes report the same fiscal quarter ±1 day across quarter boundaries (e.g. one
