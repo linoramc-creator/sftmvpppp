@@ -118,17 +118,19 @@ type GeminiResult =
 
 async function callGeminiStream(messages: any[], apiKey: string): Promise<GeminiResult> {
   const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-  // Gemini 3.1 Pro Preview (SOTA, Feb 2026) first, with fallbacks
+  // Reliable models first. Gemini 3.x is preview-only; trying it first wastes 4-5s per
+  // request via 404s before falling through to a working model. Order is now:
+  // proven first → speculative previews last.
   const GEMINI_MODELS = [
+    "gemini-2.5-pro",
+    "gemini-2.5-pro-latest",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
     "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-3-pro-latest",
     "gemini-3.0-pro",
     "gemini-3-pro",
-    "gemini-2.5-pro-latest",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
   ];
 
   for (const model of GEMINI_MODELS) {
@@ -356,15 +358,18 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
 
       const rev         = q.revenue ?? null;
       const grossProfit = q.grossProfit ?? null;
-      const ebitdaRaw   = q.ebitda ?? null;
       const opIncome    = q.operatingIncome ?? null;
-      const dna         = q.depreciationAndAmortization ?? null;
+      // D&A: FMP sometimes leaves it null in income statement; fall back to cash flow statement
+      const dna         = q.depreciationAndAmortization
+                         ?? cf.depreciationAndAmortization
+                         ?? null;
+      const ebitdaRaw   = q.ebitda ?? null;
       const ebitda      = ebitdaRaw != null ? ebitdaRaw
                         : (opIncome != null && dna != null ? opIncome + dna : null);
       const netIncome   = q.netIncome ?? null;
       const eps         = q.epsdiluted ?? q.eps ?? null;
 
-      const opCF      = cf.operatingCashFlow ?? null;
+      const opCF      = cf.operatingCashFlow ?? cf.netCashProvidedByOperatingActivities ?? null;
       // FMP reports capitalExpenditure as a negative number (cash outflow)
       const capexRaw  = cf.capitalExpenditure ?? null;
       const capex     = capexRaw != null ? Math.abs(capexRaw) : null;
@@ -579,7 +584,8 @@ Devuelve SOLO un array JSON válido (sin texto adicional, sin bloques de código
 
 REGLAS:
 - "period" = fecha del último día del trimestre fiscal, formato YYYY-MM-DD exacto (ej: "2024-09-30", "2024-12-31")
-- Todos los valores monetarios en USD absolutos: si está en Miles de Millones (B/bn/billions) multiplica por 1000000000; si está en Millones (M/mm/millions) multiplica por 1000000
+- Valores AGREGADOS (revenue, netIncome, ebitda, grossProfit, operatingCF, freeCashFlow, capex, cash, totalDebt, equity, totalAssets): expresar en USD absolutos. Si el texto dice "B/bn/billion(s)" multiplica por 1000000000; si dice "M/mm/million(s)" multiplica por 1000000.
+- Valor POR ACCIÓN (eps): NO multiplicar. EPS es valor por acción en dólares normales (ej: 2.43, no 2430000000).
 - Si no encuentras un valor concreto, pon null. NUNCA inventes cifras.
 - Devuelve solo el array, empieza con [ y termina con ]
 
@@ -692,10 +698,32 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
   const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
                   "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets","revenue"];
 
+  // Map a date (YYYY-MM-DD) to a calendar-quarter key (YYYYQn). Different data providers
+  // sometimes report the same fiscal quarter ±1 day across quarter boundaries (e.g. one
+  // source reports "2024-06-30" and another "2024-07-01" for the same Q2 results).
+  // Slicing YYYY-MM put them in different buckets and the merge couldn't fill gaps
+  // across sources. Treating "first ≤7 days of a new quarter" as the previous quarter
+  // makes the join robust to this drift.
+  const quarterKey = (period: string): string => {
+    if (typeof period !== "string" || period.length < 10) return period.slice(0, 7);
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(period);
+    if (!m) return period.slice(0, 7);
+    let year = parseInt(m[1], 10);
+    let month = parseInt(m[2], 10);
+    const day = parseInt(m[3], 10);
+    // If the date falls in the first week of a new quarter, treat as previous quarter
+    if ((month === 1 || month === 4 || month === 7 || month === 10) && day <= 7) {
+      month -= 1;
+      if (month < 1) { month = 12; year -= 1; }
+    }
+    const q = Math.min(4, Math.max(1, Math.floor((month - 1) / 3) + 1));
+    return `${year}Q${q}`;
+  };
+
   const fillFrom = (source: any[]) => {
     for (const q of source) {
       if (!q.period) continue;
-      const key = q.period.slice(0, 7);
+      const key = quarterKey(q.period);
       if (!merged.has(key)) {
         merged.set(key, { ...q });
       } else {
@@ -704,6 +732,11 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
           if ((existing[f] === "N/D" || existing[f] == null) && q[f] !== "N/D" && q[f] != null) {
             existing[f] = q[f];
           }
+        }
+        // Prefer the later period date when sources disagree, so the displayed Q1'24
+        // label aligns with how the company itself reports the quarter.
+        if (q.period && existing.period && q.period > existing.period) {
+          existing.period = q.period;
         }
       }
     }
@@ -1290,7 +1323,13 @@ REGLAS DE FORMATO:
 - Niveles de riesgo en **NEGRITAS**: **ALTO**, **MEDIO**, **BAJO**.
 - Cuando menciones trimestres específicos en el análisis narrativo, usa SIEMPRE formato Q1'24, Q2'24, Q3'24, Q4'24 (nunca "primer trimestre 2024", ni "ENE 24", ni "marzo 2024").
 - Entre cada viñeta deja UNA LÍNEA EN BLANCO (doble salto de línea) para máxima legibilidad. Las viñetas pegadas son ilegibles.
-- CERO N/D EN EL INFORME: Está PROHIBIDO escribir N/D, N/A, -, — o cualquier equivalente en el informe. Si un dato no está en Finnhub, búscalo en DATOS TWELVE DATA (enterprise_to_ebitda, forward_pe, total_debt_to_equity_mrq, etc.), luego en FMP, luego en HISTORIAL TRIMESTRAL. Si tras buscar en TODAS las fuentes no existe el dato, OMITE esa fila de la tabla completamente — no la incluyas. Un informe sin una fila es mejor que un informe con N/D.
+- MANEJO DE DATOS FALTANTES:
+  - Si un dato concreto no aparece en NINGUNA fuente (Finnhub, Twelve Data, FMP, historial trimestral): escribe simplemente "—" (em-dash) en esa celda específica.
+  - NO escribas "N/D" ni "N/A" — usa "—".
+  - NUNCA omitas una FILA ENTERA de la tabla "Métrica | Valor" — todas las métricas de la lista DEBEN aparecer. Si te falta el dato, pon "—" en la columna Valor.
+  - Solo está permitido omitir una fila ENTERA si TODAS las celdas de esa fila serían "—".
+  - Antes de poner "—", SIEMPRE busca en las 4 fuentes: Finnhub (metrics, profile), Twelve Data (statistics_metrics), FMP, y HISTORIAL TRIMESTRAL.
+- TABLAS COMPLETAS: las 8 secciones son OBLIGATORIAS, no las puedes omitir aunque tengas pocos datos. Si una sección tiene poco contenido, escribe lo que sepas; nunca dejes una sección vacía.
 - No cortes frases a medias.`;
 }
 
@@ -1434,7 +1473,8 @@ REGLAS DE FORMATO:
 - Tendencias/señales en **NEGRITAS**: **BULLISH**, **BEARISH**, **ALCISTA**, **BAJISTA**.
 - Cuando menciones trimestres específicos, usa SIEMPRE formato Q1'24, Q2'24, Q3'24, Q4'24 (nunca "primer trimestre 2024", "ENE 24", ni "marzo 2024").
 - Entre cada viñeta deja UNA LÍNEA EN BLANCO (doble salto de línea) para máxima legibilidad. Las viñetas pegadas son ilegibles.
-- Si no tienes un dato específico, omite esa fila — nunca escribas N/D, N/A o similar.
+- Datos faltantes: escribe "—" en la celda específica, NUNCA "N/D" o "N/A". Solo omite una fila entera si TODAS sus celdas estarían vacías.
+- TODAS las 7 secciones (## ...) son obligatorias. No omitas ninguna.
 - No cortes frases a medias.`;
 }
 
@@ -1514,17 +1554,21 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
     twelveDataQuarterly as any[],
   );
 
-  // Detect gaps: trigger AI fallback if we have fewer than 6 quarters OR any column has N/D values
-  const hasGaps = (rows: any[]): boolean => {
-    if (rows.length < 6) return true;
-    const ndFields = ["revenueGrowth", "grossMargin", "ebitda", "netIncome", "operatingCF", "freeCashFlow", "cash", "totalDebt", "equity"];
-    return rows.some(r => ndFields.some(f => r[f] === "N/D" || r[f] == null));
+  // Trigger AI fallback ONLY when structured sources are clearly insufficient. Previously
+  // triggered on any N/D field, which made the AI inject low-quality data on top of mostly
+  // good FMP/TwelveData results. Now: only if we have <4 quarters OR if the latest quarter
+  // is missing all 3 critical fields (revenue, netIncome, operatingCF).
+  const isQuarterCritical = (q: any): boolean => {
+    const critical = ["revenue", "netIncome", "operatingCF"];
+    return critical.every(f => q[f] === "N/D" || q[f] == null);
   };
+  const needsAiFallback =
+    quarterlyHistory.length < 4 ||
+    (quarterlyHistory.length > 0 && isQuarterCritical(quarterlyHistory[0]));
 
-  // AI fallback: if data is missing OR has gaps, ask Gemini (3.1 Pro) to extract from web search
   let aiFallback: any[] = [];
-  if (hasGaps(quarterlyHistory) && env.TAVILY_KEY && env.GEMINI_API_KEY) {
-    console.log(`Quarterly fallback triggered: ${quarterlyHistory.length} quarters with gaps. Calling AI extraction.`);
+  if (needsAiFallback && env.TAVILY_KEY && env.GEMINI_API_KEY) {
+    console.log(`Quarterly AI fallback triggered: ${quarterlyHistory.length} quarters, latest critical=${quarterlyHistory[0] ? isQuarterCritical(quarterlyHistory[0]) : "n/a"}.`);
     aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
     if (aiFallback.length > 0) {
       quarterlyHistory = mergeQuarterlyData(

@@ -23,9 +23,9 @@ function loadReports(): SavedReport[] {
   catch (_) { return []; }
 }
 
-function persistReports(reports: SavedReport[]) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reports)); }
-  catch (_) { /* quota exceeded */ }
+function persistReports(reports: SavedReport[]): boolean {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reports)); return true; }
+  catch (_) { return false; }
 }
 
 // ── Section configs ────────────────────────────────────────────────────
@@ -271,8 +271,16 @@ const Index = () => {
     };
     const updated = [report, ...savedReports.filter((r) => r.ticker !== currentTicker)];
     setSavedReports(updated);
-    persistReports(updated);
-    toast({ title: "Informe guardado", description: `${currentTicker} guardado correctamente.` });
+    const ok = persistReports(updated);
+    if (ok) {
+      toast({ title: "Informe guardado", description: `${currentTicker} guardado correctamente.` });
+    } else {
+      toast({
+        title: "Espacio agotado",
+        description: "Se ha alcanzado el límite de almacenamiento del navegador. Borra informes antiguos.",
+        variant: "destructive",
+      });
+    }
   }, [analysis, currentTicker, quarterlyData, savedReports, toast]);
 
   const handleDeleteReport = useCallback((id: string) => {
@@ -1259,9 +1267,23 @@ function CatalystCalendarSection({ data }: { data: CatalystCalendar | null }) {
 
 // ── Markdown parser ────────────────────────────────────────────────────
 
+// Normalize section names so Gemini drift ("Resumen ejecutivo", "Resumen Ejecutivo.",
+// "##  Resumen Ejecutivo") still matches the canonical EXPECTED_TABS entry.
+function normalizeSectionName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function parseSections(content: string, knownTabs: string[]): Record<string, React.ReactNode[]> {
   const lines = content.split("\n");
   const sections: Record<string, React.ReactNode[]> = {};
+  // Map of normalized -> canonical name from knownTabs
+  const canonicalByNorm = new Map<string, string>(
+    knownTabs.map(t => [normalizeSectionName(t), t])
+  );
   let currentSection = knownTabs[0] ?? "Section";
   let currentElements: React.ReactNode[] = [];
 
@@ -1280,7 +1302,9 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
 
     if (line.startsWith("## ")) {
       flush();
-      currentSection = line.slice(3).trim();
+      const raw = line.replace(/^##\s+/, "").replace(/[:.]+\s*$/, "").trim();
+      const norm = normalizeSectionName(raw);
+      currentSection = canonicalByNorm.get(norm) ?? raw;
       i++;
       continue;
     }
@@ -1334,11 +1358,19 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
 
   flush();
 
+  // Keep a section if it has ANY non-spacer content. Tables are wrapped in <div> (so
+  // a naïve "type !== div" check incorrectly drops table-only sections like Sector's
+  // Tabla Comparativa or Empresas Líderes). We treat only the empty-line spacer divs
+  // (rendered with className="h-2") as ignorable.
   const cleaned: Record<string, React.ReactNode[]> = {};
   for (const [k, els] of Object.entries(sections)) {
-    if (els.some((el) => el !== null && typeof el === "object" && (el as any).type !== "div")) {
-      cleaned[k] = els;
-    }
+    const hasSubstance = els.some((el) => {
+      if (el === null || typeof el !== "object") return false;
+      const reactEl = el as { type?: unknown; props?: { className?: string } };
+      if (reactEl.type === "div" && reactEl.props?.className === "h-2") return false;
+      return true;
+    });
+    if (hasSubstance) cleaned[k] = els;
   }
   return cleaned;
 }
