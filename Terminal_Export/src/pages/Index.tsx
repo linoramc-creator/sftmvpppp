@@ -3,6 +3,7 @@ import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "luc
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 import { IndexChartOnly, IndexMiniChart } from "@/components/charts/IndexCharts";
+import { CashFlowChart, FundamentalsChart, type CashFlowData, type FundamentalsData } from "@/components/charts/FintechCharts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -83,6 +84,78 @@ function cleanVal(v: string): string {
 }
 
 function allND(values: string[]) { return values.every((v) => ND_VALUES.has(v)); }
+
+// ── Chart data transformers ────────────────────────────────────────────
+// The backend ships pre-formatted strings ("$12.34B", "-$5.67B", "+45.6%", "N/D")
+// so the UI tables can render directly. Recharts needs raw numbers, so we parse
+// the same strings back. Returns null when the value is N/D so chart series
+// gracefully skip missing points instead of plotting as 0.
+function parseMoney(s: string | undefined | null): number | null {
+  if (!s || ND_VALUES.has(s)) return null;
+  const m = s.match(/^(-?)\$?(-?)([\d,]+(?:\.\d+)?)([BMK]?)$/);
+  if (!m) return null;
+  const sign = (m[1] === "-" || m[2] === "-") ? -1 : 1;
+  const num = parseFloat(m[3].replace(/,/g, ""));
+  if (isNaN(num)) return null;
+  const mult = m[4] === "B" ? 1e9 : m[4] === "M" ? 1e6 : m[4] === "K" ? 1e3 : 1;
+  return sign * num * mult;
+}
+
+function parsePercent(s: string | undefined | null): number | null {
+  if (!s || ND_VALUES.has(s)) return null;
+  const m = s.match(/^([+-]?)([\d.]+)%$/);
+  if (!m) return null;
+  const sign = m[1] === "-" ? -1 : 1;
+  const num = parseFloat(m[2]);
+  return isNaN(num) ? null : sign * num;
+}
+
+// Build chart-ready arrays from the full quarterly history (oldest → newest).
+// We only include quarters that have at least one non-null field for the chart's
+// dimension; missing fields default to 0 so the chart still renders the
+// quarters present and the user can see the gaps in context.
+function buildCashFlowChartData(data: QuarterlyPeriod[]): CashFlowData[] {
+  return [...data]
+    .reverse()
+    .map((q) => {
+      const operating = parseMoney(q.operatingCF);
+      const fcf = parseMoney(q.freeCashFlow);
+      const capex = parseMoney(q.capex);
+      const investing = parseMoney(q.investingCF) ?? (capex != null ? -Math.abs(capex) : null);
+      const financing = parseMoney(q.financingCF);
+      if (operating == null && fcf == null && investing == null && financing == null) return null;
+      return {
+        period: fmtPeriod(q.period),
+        operating: operating ?? 0,
+        investing: investing ?? 0,
+        financing: financing ?? 0,
+        fcf: fcf ?? 0,
+      };
+    })
+    .filter((d): d is CashFlowData => d !== null);
+}
+
+function buildFundamentalsChartData(data: QuarterlyPeriod[]): FundamentalsData[] {
+  return [...data]
+    .reverse()
+    .map((q) => {
+      const revenue = parseMoney(q.revenue);
+      const netIncome = parseMoney(q.netIncome);
+      const totalDebt = parseMoney(q.totalDebt);
+      const grossMargin = parsePercent(q.grossMargin);
+      const netMargin = parsePercent(q.netMargin);
+      if (revenue == null && netIncome == null && totalDebt == null) return null;
+      return {
+        period: fmtPeriod(q.period),
+        revenue: revenue ?? 0,
+        netIncome: netIncome ?? 0,
+        totalDebt: totalDebt ?? 0,
+        grossMargin: grossMargin ?? 0,
+        netMargin: netMargin ?? 0,
+      };
+    })
+    .filter((d): d is FundamentalsData => d !== null);
+}
 
 // Extract the "| Métrica | Valor |" markdown table from analysis text
 function extractCurrentMetrics(content: string): { label: string; value: string }[] {
@@ -820,6 +893,7 @@ function ReportView({
                 {key === "Finanzas" && (
                   <>
                     <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
+                    <FinancialChartsSection data={quarterlyData} />
                     <CatalystCalendarSection data={catalystCalendar ?? null} />
                   </>
                 )}
@@ -832,6 +906,45 @@ function ReportView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── Financial Charts (Recharts visualisations of the full quarterly history) ──
+
+function FinancialChartsSection({ data }: { data: QuarterlyPeriod[] }) {
+  if (!data || data.length === 0) return null;
+
+  const fundamentalsData = buildFundamentalsChartData(data);
+  const cashFlowData = buildCashFlowChartData(data);
+
+  if (fundamentalsData.length === 0 && cashFlowData.length === 0) return null;
+
+  return (
+    <div className="mb-6 border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
+        <div className="flex items-center gap-3">
+          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">QUARTERLY EVOLUTION</span>
+          <span className="text-[10px] text-muted-foreground/40 tracking-widest">CHARTS</span>
+        </div>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">{data.length}Q · FULL HISTORY</span>
+      </div>
+
+      <div className="px-4 py-4 space-y-4 bg-background/30">
+        {fundamentalsData.length > 0 && (
+          <div>
+            <div className="text-[9px] tracking-[0.25em] text-muted-foreground/45 mb-2">FUNDAMENTALES</div>
+            <FundamentalsChart data={fundamentalsData} />
+          </div>
+        )}
+        {cashFlowData.length > 0 && (
+          <div>
+            <div className="text-[9px] tracking-[0.25em] text-muted-foreground/45 mb-2">CASH FLOW BREAKDOWN</div>
+            <CashFlowChart data={cashFlowData} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1002,11 +1115,14 @@ function QuarterlyHistorySection({
     );
   }
 
-  // 4 most recent quarters, oldest→newest left-to-right
-  const recentFour = [...data].slice(0, 4).reverse();
+  // Render the FULL quarterly history (up to 12 quarters) ordered oldest→newest
+  // left-to-right. The table is horizontally scrollable so additional quarters
+  // don't blow out the layout. Previously this was capped at 4 quarters which
+  // silently hid the older trimestres the backend was already shipping.
+  const recentFour = [...data].reverse();
   const periods    = recentFour.map((q) => fmtPeriod(q.period));
   const latest     = recentFour.length - 1;
-  const col        = (f: keyof QuarterlyPeriod) => recentFour.map((q) => q[f] as string);
+  const col        = (f: keyof QuarterlyPeriod) => recentFour.map((q) => (q[f] as string) ?? "N/D");
   const lastVal    = (vals: string[]) => vals[vals.length - 1] ?? "";
 
   type Row = { label: string; current: string; values: string[]; bold?: boolean; colorize?: boolean; separator?: boolean; alwaysShow?: boolean };

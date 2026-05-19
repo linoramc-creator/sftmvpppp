@@ -1,0 +1,20 @@
+# Protocolo Avanzado de Ingeniería Fintech y Gestión de Contexto
+
+## 1. Diagnóstico e Investigación Profesional de Errores (Anti-Parches)
+- PRIORIDAD CRÍTICA: Tu directriz principal al trabajar en las vistas de la app es resolver el problema de los DATOS FINANCIEROS HISTÓRICOS TRIMESTRALES AUSENTES. Debes rastrear por qué la UI actual omite o pierde trimestres pasados, revisar la query de Supabase correspondiente a los históricos y asegurar que el array completo llegue al frontend.
+- Está terminantemente prohibido "adivinar" parches, asumir comportamientos o lanzar soluciones de prueba y error sobre fallos de código complejos (como los problemas en `parseSections` o funciones Regex de filtrado).
+- Antes de modificar el código para resolver un bug, debes rastrear el origen e investigar la causa raíz del error: inspecciona el flujo de entrada de datos, lee minuciosamente los archivos de definición de tipos (.d.ts) implicados y analiza las dependencias de los módulos afectados.
+- Tras corregir cualquier bug, es obligatorio ejecutar la validación estática de tipos de TypeScript (`tsc --noEmit` o el comando de build de la app) para garantizar que la solución sea robusta y no genere efectos secundarios.
+
+## 2. Política de Preservación Absoluta de Información (Cero Borrados)
+- Tienes una política restrictiva de "CERO BORRADOS POR DEFECTO". Queda estrictamente prohibido eliminar, comentar o simplificar lógica existente, estructuras de datos, funciones de formateo, variables de estado, props o bloques informativos de la UI bajo la falsa suposición de que son redundantes.
+- Toda la información y KPIs que salían previamente en los informes y secciones de fundamentales de la app DEBEN seguir apareciendo de forma idéntica o mejorada. Tus adiciones deben COMPLEMENTAR y ENRIQUECER lo existente, jamás canibalizarlo o hacerlo desaparecer.
+
+## 3. Explotación Exhaustiva de APIs y Tablas de Supabase
+- Es tu obligación mapear y usar TODAS las fuentes de datos configuradas en Supabase a tu alcance. No te limites a las consultas más obvias ni dejes datos vacíos o campos incompletos en los fundamentales por falta de iniciativa.
+- Inspecciona activamente las definiciones del cliente de Supabase, esquemas locales, tablas de históricos (`Database.ts`), vistas y funciones RPC del backend para extraer hasta la última métrica de balance, ingresos o flujos requerida en el informe. Si un dato fundamental no aparece, busca activamente en las tablas relacionales de la base de datos antes de darlo por omitido.
+
+## 4. Optimización Radical de Créditos y Eficiencia de Tokens (Sin Pérdida de Calidad)
+- Para proteger el consumo de créditos y no saturar la ventana de contexto de la IA, queda prohibido realizar consultas masivas en crudo (selects sin filtros) para luego procesar, ordenar o filtrar los arreglos de datos en memoria mediante JavaScript/TypeScript.
+- Diseña queries de Supabase ultra-eficientes ejecutando el trabajo pesado directamente en el motor de la base de datos (PostgreSQL): utiliza de forma estricta selectores específicos `.select('campo1,campo2')`, filtros `.eq()`, ordenamiento `.order()` y paginación/límites `.range()`.
+- Garantiza la máxima profundidad analítica del informe consumiendo el mínimo número de tokens posibles a través de un código de infraestructura limpio, asíncrono y optimizado.

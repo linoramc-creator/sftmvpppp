@@ -276,6 +276,8 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
     const opCF     = cf.operatingCashFlow ?? null;
     const fcf      = cf.freeCashFlow ?? null;
     const capex    = cf.capitalExpenditures ?? cf.capex ?? null;
+    const investingCF = cf.netInvestingCashFlow ?? cf.investingCashFlow ?? null;
+    const financingCF = cf.netFinancingCashFlow ?? cf.financingCashFlow ?? null;
 
     const cash     = bs.cashAndEquivalents ?? bs.cash ?? bs.cashEquivalents ?? null;
     const totalDebt = bs.totalDebt ?? bs.longTermDebt ?? null;
@@ -295,6 +297,8 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
       operatingCF: fmt(opCF, "B"),
       freeCashFlow: fmt(fcf, "B"),
       capex: capex != null ? fmt(capex, "B") : "N/D",
+      investingCF: fmt(investingCF, "B"),
+      financingCF: fmt(financingCF, "B"),
       cash: fmt(cash, "B"),
       totalDebt: fmt(totalDebt, "B"),
       netDebt: fmt(netDebt, "B"),
@@ -377,6 +381,15 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
       const fcfRaw    = cf.freeCashFlow ?? null;
       const fcf       = fcfRaw != null ? fcfRaw
                       : (opCF != null && capexRaw != null ? opCF + capexRaw : null);
+      // Investing/Financing CF — needed for the CashFlowChart visual breakdown
+      const investingCF = cf.netCashUsedForInvestingActivites
+                        ?? cf.netCashUsedForInvestingActivities
+                        ?? cf.netCashFromInvestingActivities
+                        ?? null;
+      const financingCF = cf.netCashUsedProvidedByFinancingActivities
+                        ?? cf.netCashProvidedByFinancingActivities
+                        ?? cf.netCashFromFinancingActivities
+                        ?? null;
 
       const cash      = bs.cashAndCashEquivalents ?? bs.cashAndShortTermInvestments ?? null;
       const totalDebt = bs.totalDebt ?? null;
@@ -401,6 +414,8 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         operatingCF:  fmt(opCF, "B"),
         freeCashFlow: fmt(fcf, "B"),
         capex:        capex != null ? fmt(capex, "B") : "N/D",
+        investingCF:  fmt(investingCF, "B"),
+        financingCF:  fmt(financingCF, "B"),
         cash:         fmt(cash, "B"),
         totalDebt:    fmt(totalDebt, "B"),
         netDebt:      fmt(netDebt, "B"),
@@ -471,6 +486,14 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
       const capex = num(cf?.investing_activities?.capital_expenditures)
                  ?? num(cf?.capital_expenditures)
                  ?? num(cf?.capex);
+      const investingCF = num(cf?.investing_activities?.net_cash_from_investing_activities)
+                       ?? num(cf?.investing_activities?.investing_cash_flow)
+                       ?? num(cf?.net_cash_from_investing_activities)
+                       ?? num(cf?.investing_cash_flow);
+      const financingCF = num(cf?.financing_activities?.net_cash_from_financing_activities)
+                       ?? num(cf?.financing_activities?.financing_cash_flow)
+                       ?? num(cf?.net_cash_from_financing_activities)
+                       ?? num(cf?.financing_cash_flow);
 
       const cash      = num(bs?.assets?.current_assets?.cash_and_cash_equivalents)
                      ?? num(bs?.assets?.current_assets?.cash)
@@ -508,6 +531,8 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
         operatingCF:   fmt(opCF, "B"),
         freeCashFlow:  fmt(fcf, "B"),
         capex:         capex != null ? fmt(capex, "B") : "N/D",
+        investingCF:   fmt(investingCF, "B"),
+        financingCF:   fmt(financingCF, "B"),
         cash:          fmt(cash, "B"),
         totalDebt:     fmt(totalDebt, "B"),
         netDebt:       fmt(netDebt, "B"),
@@ -678,6 +703,9 @@ ${context}`;
         operatingCF:   fmt(opCF, "B"),
         freeCashFlow:  fmt(fcf, "B"),
         capex:         capex != null ? fmt(capex, "B") : "N/D",
+        // AI fallback typically can't reliably extract CFI/CFF — leave N/D
+        investingCF:   "N/D",
+        financingCF:   "N/D",
         cash:          fmt(cash, "B"),
         totalDebt:     fmt(totalDebt, "B"),
         netDebt:       fmt(netDebt, "B"),
@@ -696,7 +724,30 @@ ${context}`;
 function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFallback: any[] = []): any[] {
   const merged = new Map<string, any>();
   const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
-                  "operatingCF","freeCashFlow","capex","cash","totalDebt","netDebt","equity","totalAssets","revenue"];
+                  "operatingCF","freeCashFlow","capex","investingCF","financingCF",
+                  "cash","totalDebt","netDebt","equity","totalAssets","revenue"];
+
+  // Map a date (YYYY-MM-DD) to a calendar-quarter key (YYYYQn). Different data providers
+  // sometimes report the same fiscal quarter ±1 day across quarter boundaries (e.g. one
+  // source reports "2024-06-30" and another "2024-07-01" for the same Q2 results).
+  // Slicing YYYY-MM put them in different buckets and the merge couldn't fill gaps
+  // across sources. Treating "first ≤7 days of a new quarter" as the previous quarter
+  // makes the join robust to this drift.
+  const quarterKey = (period: string): string => {
+    if (typeof period !== "string" || period.length < 10) return period.slice(0, 7);
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(period);
+    if (!m) return period.slice(0, 7);
+    let year = parseInt(m[1], 10);
+    let month = parseInt(m[2], 10);
+    const day = parseInt(m[3], 10);
+    // If the date falls in the first week of a new quarter, treat as previous quarter
+    if ((month === 1 || month === 4 || month === 7 || month === 10) && day <= 7) {
+      month -= 1;
+      if (month < 1) { month = 12; year -= 1; }
+    }
+    const q = Math.min(4, Math.max(1, Math.floor((month - 1) / 3) + 1));
+    return `${year}Q${q}`;
+  };
 
   // Map a date (YYYY-MM-DD) to a calendar-quarter key (YYYYQn). Different data providers
   // sometimes report the same fiscal quarter ±1 day across quarter boundaries (e.g. one

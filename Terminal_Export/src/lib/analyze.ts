@@ -47,6 +47,8 @@ export interface QuarterlyPeriod {
   operatingCF: string;
   freeCashFlow: string;
   capex: string;
+  investingCF?: string;
+  financingCF?: string;
   // Balance
   cash: string;
   totalDebt: string;
