@@ -25,7 +25,7 @@ async function fetchTavilySearch(
     const body: Record<string, unknown> = {
       api_key: key,
       query,
-      search_depth: "advanced",
+      search_depth: "basic",
       max_results: maxResults,
       include_answer: true,
     };
@@ -36,6 +36,7 @@ async function fetchTavilySearch(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return { answer: "", results: [] };
     const data = await res.json();
@@ -118,14 +119,14 @@ type GeminiResult =
 
 async function callGeminiStream(messages: any[], apiKey: string): Promise<GeminiResult> {
   const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-  // Reliable models first. Gemini 3.x is preview-only; trying it first wastes 4-5s per
-  // request via 404s before falling through to a working model. Order is now:
-  // proven first → speculative previews last.
+  // Flash first: 10-20s vs 60-90s for Pro. Pro kept as fallback for quality.
+  // Speculative 3.x models at end (most return 404, just waste time).
   const GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-latest",
+    "gemini-2.0-flash",
     "gemini-2.5-pro",
     "gemini-2.5-pro-latest",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
     "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-3-pro-latest",
@@ -134,11 +135,18 @@ async function callGeminiStream(messages: any[], apiKey: string): Promise<Gemini
   ];
 
   for (const model of GEMINI_MODELS) {
-    const res = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, stream: true, model }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(GEMINI_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, stream: true, model }),
+        signal: AbortSignal.timeout(100_000),
+      });
+    } catch (e: any) {
+      if (e?.name === "TimeoutError") { console.warn(`Gemini [${model}] timed out, trying next`); continue; }
+      throw e;
+    }
     console.log(`Gemini [${model}] status:`, res.status);
     if (res.ok) return { ok: true, response: res, model };
 
@@ -168,7 +176,7 @@ function jsonError(error: string, status: number): Response {
 
 async function finnhubGet(path: string, key: string) {
   try {
-    const res = await fetch(`https://finnhub.io/api/v1${path}&token=${key}`);
+    const res = await fetch(`https://finnhub.io/api/v1${path}&token=${key}`, { signal: AbortSignal.timeout(8_000) });
     if (!res.ok) return null;
     return res.json();
   } catch (_) { return null; }
@@ -1591,9 +1599,10 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
     const critical = ["revenue", "netIncome", "operatingCF"];
     return critical.every(f => q[f] === "N/D" || q[f] == null);
   };
+  // Stricter threshold: AI fallback costs ~25s (Tavily + Gemini extra call).
+  // Only trigger when we have zero usable quarters from structured sources.
   const needsAiFallback =
-    quarterlyHistory.length < 4 ||
-    (quarterlyHistory.length > 0 && isQuarterCritical(quarterlyHistory[0]));
+    quarterlyHistory.length === 0;
 
   let aiFallback: any[] = [];
   if (needsAiFallback && env.TAVILY_KEY && env.GEMINI_API_KEY) {
