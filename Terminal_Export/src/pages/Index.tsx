@@ -293,7 +293,8 @@ const Index = () => {
     } catch (e: unknown) {
       if (e instanceof Error && e.name === "AbortError") return;
       setIsLoading(false);
-      setError("Error de conexión. Inténtalo de nuevo.");
+      const msg = e instanceof Error ? e.message : "Error de conexión. Inténtalo de nuevo.";
+      setError(msg);
     }
   }, [ticker, toast]);
 
@@ -327,7 +328,8 @@ const Index = () => {
     } catch (e: unknown) {
       if (e instanceof Error && e.name === "AbortError") return;
       setIsSectorLoading(false);
-      setSectorError("Error de conexión. Inténtalo de nuevo.");
+      const msg = e instanceof Error ? e.message : "Error de conexión. Inténtalo de nuevo.";
+      setSectorError(msg);
     }
   }, [sectorInput, toast]);
 
