@@ -339,7 +339,7 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
       const t2 = new Date(d + "T00:00:00Z").getTime();
       if (isNaN(t2)) continue;
       const diff = Math.abs(t2 - target);
-      if (diff <= 7 * 86400_000 && diff < bestDiff) { bestDiff = diff; best = obj; }
+      if (diff <= 45 * 86400_000 && diff < bestDiff) { bestDiff = diff; best = obj; }
     }
     return best ?? {};
   };
@@ -366,8 +366,13 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
 
     return incomeList.map((q: any, idx: number) => {
       const period = normDate(q.date);
-      const cf = fuzzyGet(cashByDate, period);
-      const bs = fuzzyGet(balByDate, period);
+      // fuzzyGet first (±45d); fall back to index-aligned statement if no match has key fields
+      const cfFuzzy = fuzzyGet(cashByDate, period);
+      const bsFuzzy = fuzzyGet(balByDate, period);
+      const cf = (cfFuzzy.operatingCashFlow != null || cfFuzzy.netCashProvidedByOperatingActivities != null)
+        ? cfFuzzy : (cfList[idx] ?? {});
+      const bs = (bsFuzzy.totalAssets != null || bsFuzzy.cashAndCashEquivalents != null || bsFuzzy.totalDebt != null || bsFuzzy.totalStockholdersEquity != null)
+        ? bsFuzzy : (bsList[idx] ?? {});
 
       const rev         = q.revenue ?? null;
       const grossProfit = q.grossProfit ?? null;

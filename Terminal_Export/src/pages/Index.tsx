@@ -3,7 +3,7 @@ import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "luc
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 import { IndexSparkline } from "@/components/charts/IndexCharts";
-import { IncomeChart, CashFlowChart, BalanceChart, type IncomeData, type CashFlowData, type BalanceData } from "@/components/charts/FintechCharts";
+import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -119,9 +119,10 @@ function buildIncomeChartData(data: QuarterlyPeriod[]): IncomeData[] {
     .reverse()
     .map((q) => {
       const revenue = parseMoney(q.revenue);
+      const ebitda = parseMoney(q.ebitda);
       const netIncome = parseMoney(q.netIncome);
-      if (revenue == null && netIncome == null) return null;
-      return { period: fmtPeriod(q.period), revenue, netIncome };
+      if (revenue == null && ebitda == null && netIncome == null) return null;
+      return { period: fmtPeriod(q.period), revenue, ebitda, netIncome };
     })
     .filter((d): d is IncomeData => d !== null);
 }
@@ -131,9 +132,10 @@ function buildCashFlowChartData(data: QuarterlyPeriod[]): CashFlowData[] {
     .reverse()
     .map((q) => {
       const operating = parseMoney(q.operatingCF);
+      const capex = parseMoney(q.capex);
       const fcf = parseMoney(q.freeCashFlow);
-      if (operating == null && fcf == null) return null;
-      return { period: fmtPeriod(q.period), operating, fcf };
+      if (operating == null && capex == null && fcf == null) return null;
+      return { period: fmtPeriod(q.period), operating, capex, fcf };
     })
     .filter((d): d is CashFlowData => d !== null);
 }
@@ -142,13 +144,37 @@ function buildBalanceChartData(data: QuarterlyPeriod[]): BalanceData[] {
   return [...data]
     .reverse()
     .map((q) => {
+      const totalAssets = parseMoney(q.totalAssets);
       const cash = parseMoney(q.cash);
       const totalDebt = parseMoney(q.totalDebt);
       const equity = parseMoney(q.equity);
-      if (cash == null && totalDebt == null && equity == null) return null;
-      return { period: fmtPeriod(q.period), cash, totalDebt, equity };
+      if (totalAssets == null && cash == null && totalDebt == null && equity == null) return null;
+      return { period: fmtPeriod(q.period), totalAssets, cash, totalDebt, equity };
     })
     .filter((d): d is BalanceData => d !== null);
+}
+
+function buildMarginsChartData(data: QuarterlyPeriod[]): MarginsData[] {
+  return [...data]
+    .reverse()
+    .map((q) => {
+      const grossMargin = parsePercent(q.grossMargin);
+      const netMargin = parsePercent(q.netMargin);
+      if (grossMargin == null && netMargin == null) return null;
+      return { period: fmtPeriod(q.period), grossMargin, netMargin };
+    })
+    .filter((d): d is MarginsData => d !== null);
+}
+
+function buildGrowthChartData(data: QuarterlyPeriod[]): GrowthData[] {
+  return [...data]
+    .reverse()
+    .map((q) => {
+      const revenueGrowth = parsePercent(q.revenueGrowth);
+      if (revenueGrowth == null) return null;
+      return { period: fmtPeriod(q.period), revenueGrowth };
+    })
+    .filter((d): d is GrowthData => d !== null);
 }
 
 // Extract the "| Métrica | Valor |" markdown table from analysis text
@@ -982,7 +1008,7 @@ function SavedReportCard({
 
 // ── Quarterly history (Alpha-style, multi-source) ──────────────────────
 
-type QTab = "valuation" | "income" | "cashflow" | "balance";
+type QTab = "valuation" | "income" | "cashflow" | "balance" | "margins" | "growth";
 
 function QuarterlyHistorySection({
   data, debug, currentMetrics = [], isLoading = false,
@@ -1045,29 +1071,28 @@ function QuarterlyHistorySection({
     );
   }
 
-  // Chart data — uses the FULL quarterly history. Each chart maps the raw
-  // quarterly data into its own narrow shape (revenue+netIncome /
-  // operatingCF+fcf / cash+debt+equity) and only includes quarters where at
-  // least one of its fields is non-null. Recharts naturally skips bars for
-  // null values, so no fake $0 placeholders.
   const incomeData   = buildIncomeChartData(data);
   const cashFlowData = buildCashFlowChartData(data);
   const balanceData  = buildBalanceChartData(data);
+  const marginsData  = buildMarginsChartData(data);
+  const growthData   = buildGrowthChartData(data);
 
   const isValuationTab = tab === "valuation";
 
   const TABS = [
     { id: "valuation" as QTab, label: "Valoración" },
-    { id: "income"    as QTab, label: "Income Statement" },
+    { id: "income"    as QTab, label: "P&L" },
     { id: "cashflow"  as QTab, label: "Cash Flow" },
-    { id: "balance"   as QTab, label: "Balance Sheet" },
+    { id: "balance"   as QTab, label: "Balance" },
+    { id: "margins"   as QTab, label: "Márgenes" },
+    { id: "growth"    as QTab, label: "Crecimiento" },
   ];
 
   const chartFor = (t: QTab): { rows: { data: any[]; render: () => JSX.Element } | null; emptyMsg: string } => {
     if (t === "income") {
       return incomeData.length > 0
         ? { rows: { data: incomeData, render: () => <IncomeChart data={incomeData} /> }, emptyMsg: "" }
-        : { rows: null, emptyMsg: "Sin datos de Income Statement disponibles." };
+        : { rows: null, emptyMsg: "Sin datos de P&L disponibles." };
     }
     if (t === "cashflow") {
       return cashFlowData.length > 0
@@ -1078,6 +1103,16 @@ function QuarterlyHistorySection({
       return balanceData.length > 0
         ? { rows: { data: balanceData, render: () => <BalanceChart data={balanceData} /> }, emptyMsg: "" }
         : { rows: null, emptyMsg: "Sin datos de Balance Sheet disponibles." };
+    }
+    if (t === "margins") {
+      return marginsData.length > 0
+        ? { rows: { data: marginsData, render: () => <MarginsChart data={marginsData} /> }, emptyMsg: "" }
+        : { rows: null, emptyMsg: "Sin datos de márgenes disponibles." };
+    }
+    if (t === "growth") {
+      return growthData.length > 0
+        ? { rows: { data: growthData, render: () => <GrowthChart data={growthData} /> }, emptyMsg: "" }
+        : { rows: null, emptyMsg: "Sin datos de crecimiento disponibles." };
     }
     return { rows: null, emptyMsg: "" };
   };
