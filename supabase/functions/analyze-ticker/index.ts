@@ -749,28 +749,6 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
     return `${year}Q${q}`;
   };
 
-  // Map a date (YYYY-MM-DD) to a calendar-quarter key (YYYYQn). Different data providers
-  // sometimes report the same fiscal quarter ±1 day across quarter boundaries (e.g. one
-  // source reports "2024-06-30" and another "2024-07-01" for the same Q2 results).
-  // Slicing YYYY-MM put them in different buckets and the merge couldn't fill gaps
-  // across sources. Treating "first ≤7 days of a new quarter" as the previous quarter
-  // makes the join robust to this drift.
-  const quarterKey = (period: string): string => {
-    if (typeof period !== "string" || period.length < 10) return period.slice(0, 7);
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(period);
-    if (!m) return period.slice(0, 7);
-    let year = parseInt(m[1], 10);
-    let month = parseInt(m[2], 10);
-    const day = parseInt(m[3], 10);
-    // If the date falls in the first week of a new quarter, treat as previous quarter
-    if ((month === 1 || month === 4 || month === 7 || month === 10) && day <= 7) {
-      month -= 1;
-      if (month < 1) { month = 12; year -= 1; }
-    }
-    const q = Math.min(4, Math.max(1, Math.floor((month - 1) / 3) + 1));
-    return `${year}Q${q}`;
-  };
-
   const fillFrom = (source: any[]) => {
     for (const q of source) {
       if (!q.period) continue;

@@ -28,9 +28,15 @@ export async function fetchMarketData(symbols: string[]): Promise<MarketData | n
       },
       body: JSON.stringify({ marketData: true, symbols }),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.warn("[fetchMarketData] HTTP", resp.status, await resp.text().catch(() => ""));
+      return null;
+    }
     return resp.json();
-  } catch (_) { return null; }
+  } catch (e) {
+    console.warn("[fetchMarketData] network error:", e);
+    return null;
+  }
 }
 
 export interface QuarterlyPeriod {
@@ -74,19 +80,29 @@ async function streamSSE({
   onEvent?: (parsed: any) => void;
   signal?: AbortSignal;
 }) {
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === "AbortError") return;
+    const msg = e instanceof Error ? e.message : "Error de red desconocido";
+    onError(`Sin conexión con el servidor: ${msg}`);
+    return;
+  }
 
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({ error: "Error de conexión" }));
-    onError(data.error || `Error ${resp.status}`);
+    const text = await resp.text().catch(() => "");
+    let msg = `Error ${resp.status}`;
+    try { const j = JSON.parse(text); msg = j.error || j.message || msg; } catch { if (text) msg = `${msg}: ${text.slice(0, 120)}`; }
+    onError(msg);
     return;
   }
 
