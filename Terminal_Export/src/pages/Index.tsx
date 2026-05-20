@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
-import { IndexChartOnly, IndexMiniChart } from "@/components/charts/IndexCharts";
+import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { CashFlowChart, FundamentalsChart, type CashFlowData, type FundamentalsData } from "@/components/charts/FintechCharts";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -126,10 +126,10 @@ function buildCashFlowChartData(data: QuarterlyPeriod[]): CashFlowData[] {
       if (operating == null && fcf == null && investing == null && financing == null) return null;
       return {
         period: fmtPeriod(q.period),
-        operating: operating ?? 0,
-        investing: investing ?? 0,
-        financing: financing ?? 0,
-        fcf: fcf ?? 0,
+        operating,
+        investing,
+        financing,
+        fcf,
       };
     })
     .filter((d): d is CashFlowData => d !== null);
@@ -147,11 +147,11 @@ function buildFundamentalsChartData(data: QuarterlyPeriod[]): FundamentalsData[]
       if (revenue == null && netIncome == null && totalDebt == null) return null;
       return {
         period: fmtPeriod(q.period),
-        revenue: revenue ?? 0,
-        netIncome: netIncome ?? 0,
-        totalDebt: totalDebt ?? 0,
-        grossMargin: grossMargin ?? 0,
-        netMargin: netMargin ?? 0,
+        revenue,
+        netIncome,
+        totalDebt,
+        grossMargin,
+        netMargin,
       };
     })
     .filter((d): d is FundamentalsData => d !== null);
@@ -538,9 +538,9 @@ const Index = () => {
           )}
           </div>
 
-          {/* Right column — TradingView index charts */}
+          {/* Right column — native Recharts index charts */}
           <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
-            <IndexChartsPanel />
+            <IndexChartsPanel marketData={marketData} />
           </aside>
         </div>
       )}
@@ -624,9 +624,9 @@ const Index = () => {
           )}
           </div>
 
-          {/* Right column — TradingView index charts */}
+          {/* Right column — native Recharts index charts */}
           <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
-            <IndexChartsPanel />
+            <IndexChartsPanel marketData={marketData} />
           </aside>
         </div>
       )}
@@ -668,53 +668,27 @@ const Index = () => {
   );
 };
 
-// ── Index Charts Panel (TradingView, right column) ────────────────────
+// ── Index Charts Panel (native Recharts sparklines) ──────────────────
 
-function IndexChartsPanel() {
-  const [main, setMain] = useState<'SP:SPX' | 'NASDAQ:COMP' | 'DJ:DJI'>('SP:SPX');
-  const indices: { s: 'SP:SPX' | 'NASDAQ:COMP' | 'DJ:DJI'; l: string }[] = [
-    { s: 'SP:SPX',       l: 'S&P 500' },
-    { s: 'NASDAQ:COMP',  l: 'NASDAQ'  },
-    { s: 'DJ:DJI',       l: 'DOW'     },
-  ];
+function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
   return (
-    <div className="space-y-3 lg:sticky lg:top-4">
-      <div className="border border-border bg-card">
-        <div className="px-3 py-2 border-b border-border/60 flex items-center gap-2">
-          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
-          <span className="text-[10px] tracking-[0.2em] text-foreground font-semibold">ÍNDICES GLOBALES</span>
-          <span className="text-[9px] tracking-widest text-muted-foreground/30 ml-auto">12M</span>
-        </div>
-        <div className="divide-y divide-border/40">
-          {indices.map((idx) => (
-            <div key={idx.s} className="px-2 py-1">
-              <div className="px-1 text-[9px] tracking-widest text-muted-foreground/55">{idx.l}</div>
-              <IndexMiniChart symbol={idx.s} />
-            </div>
-          ))}
-        </div>
+    <div className="space-y-1 lg:sticky lg:top-4">
+      <div className="flex items-center gap-2 mb-2 px-1">
+        <span style={{ width: 6, height: 6, background: '#22c55e', borderRadius: '50%', display: 'inline-block' }} />
+        <span style={{ fontSize: 10, letterSpacing: '0.15em', color: '#64748b' }}>ÍNDICES GLOBALES</span>
+        <span style={{ marginLeft: 'auto', fontSize: 9, color: '#334155' }}>1 MIN</span>
       </div>
-
-      <div className="border border-border bg-card">
-        <div className="flex">
-          {indices.map((opt) => (
-            <button
-              key={opt.s}
-              onClick={() => setMain(opt.s)}
-              className={`flex-1 px-2 py-2 text-[10px] tracking-widest transition-colors border-b-2 ${
-                main === opt.s
-                  ? 'text-primary border-primary'
-                  : 'text-muted-foreground/50 border-transparent hover:text-foreground'
-              }`}
-            >
-              {opt.l}
-            </button>
-          ))}
-        </div>
-        <div className="p-1">
-          <IndexChartOnly symbol={main} height={350} />
-        </div>
-      </div>
+      {marketData?.indices.map(idx => (
+        <IndexSparkline
+          key={idx.symbol}
+          label={idx.label}
+          symbol={idx.symbol}
+          price={idx.price}
+          change1d={idx.change1d}
+          change1m={idx.change1m}
+          candle={marketData.candles?.[idx.symbol as 'SPY' | 'QQQ' | 'DIA']}
+        />
+      ))}
     </div>
   );
 }
@@ -1422,7 +1396,17 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
       flush();
       const raw = line.replace(/^##\s+/, "").replace(/[:.]+\s*$/, "").trim();
       const norm = normalizeSectionName(raw);
-      currentSection = canonicalByNorm.get(norm) ?? raw;
+      // Exact match first; then prefix match (handles Gemini drift like "Finanzas (PARTE 1/2)")
+      let canonical = canonicalByNorm.get(norm);
+      if (!canonical) {
+        for (const [knownNorm, knownCanonical] of canonicalByNorm.entries()) {
+          if (norm.startsWith(knownNorm + " ") || norm === knownNorm) {
+            canonical = knownCanonical;
+            break;
+          }
+        }
+      }
+      currentSection = canonical ?? raw;
       i++;
       continue;
     }

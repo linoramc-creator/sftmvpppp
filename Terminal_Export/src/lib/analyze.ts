@@ -15,6 +15,11 @@ export interface MarketData {
   yield2y: number | null;
   spread: number | null;
   stocks: MarketQuote[];
+  candles?: {
+    SPY?: { t: number[]; c: number[] } | null;
+    QQQ?: { t: number[]; c: number[] } | null;
+    DIA?: { t: number[]; c: number[] } | null;
+  };
   ts: number;
 }
 
@@ -201,6 +206,9 @@ export async function streamAnalysis({
       }
       if (parsed.__catalystCalendar && onCatalystCalendar) {
         onCatalystCalendar(parsed.__catalystCalendar as CatalystCalendar);
+      }
+      if (parsed.__error) {
+        onError(parsed.__error as string);
       }
     },
   });

@@ -6,7 +6,7 @@ const formatCurrency = (value: number, currency: string) => {
 };
 const formatPercent = (value: number) => `${value.toFixed(1)}%`;
 
-export interface CashFlowData { period: string; operating: number; investing: number; financing: number; fcf: number; }
+export interface CashFlowData { period: string; operating: number | null; investing: number | null; financing: number | null; fcf: number | null; }
 interface CashFlowChartProps { data: CashFlowData[]; currency?: string; }
 
 export const CashFlowChart = ({ data, currency = 'USD' }: CashFlowChartProps) => {
@@ -17,7 +17,7 @@ export const CashFlowChart = ({ data, currency = 'USD' }: CashFlowChartProps) =>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
           <XAxis dataKey="period" stroke="#64748b" tickLine={false} style={{ fontSize: '12px' }} />
           <YAxis stroke="#64748b" tickLine={false} orientation="right" tickFormatter={(v) => formatCurrency(v, currency)} style={{ fontSize: '12px' }} />
-          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', borderRadius: '8px', color: '#fff' }} formatter={(value: number) => [formatCurrency(value, currency)]} />
+          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', borderRadius: '8px', color: '#fff' }} formatter={(value: number | null) => value != null ? [formatCurrency(value, currency)] : ['N/D']} />
           <Legend verticalAlign="top" height={45} wrapperStyle={{ fontSize: '12px' }} />
           <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1.5} />
           <Bar dataKey="operating" name="Caja Operativa (CFO)" fill="#22c55e" barSize={18} />
@@ -30,7 +30,7 @@ export const CashFlowChart = ({ data, currency = 'USD' }: CashFlowChartProps) =>
   );
 };
 
-export interface FundamentalsData { period: string; revenue: number; netIncome: number; totalDebt: number; grossMargin: number; netMargin: number; }
+export interface FundamentalsData { period: string; revenue: number | null; netIncome: number | null; totalDebt: number | null; grossMargin: number | null; netMargin: number | null; }
 interface FundamentalsChartProps { data: FundamentalsData[]; currency?: string; }
 
 export const FundamentalsChart = ({ data, currency = 'USD' }: FundamentalsChartProps) => {
@@ -42,7 +42,7 @@ export const FundamentalsChart = ({ data, currency = 'USD' }: FundamentalsChartP
           <XAxis dataKey="period" stroke="#64748b" tickLine={false} style={{ fontSize: '12px' }} />
           <YAxis yAxisId="left" orientation="left" stroke="#64748b" tickLine={false} tickFormatter={(v) => formatCurrency(v, currency)} style={{ fontSize: '11px' }} />
           <YAxis yAxisId="right" orientation="right" stroke="#a855f7" tickLine={false} domain={[0, 100]} tickFormatter={formatPercent} style={{ fontSize: '11px' }} />
-          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', borderRadius: '8px', color: '#fff' }} formatter={(value: number, name: string) => name.includes('Margen') ? [formatPercent(value), name] : [formatCurrency(value, currency), name]} />
+          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', borderRadius: '8px', color: '#fff' }} formatter={(value: number | null, name: string) => value != null ? (name.includes('Margen') ? [formatPercent(value), name] : [formatCurrency(value, currency), name]) : ['N/D', name]} />
           <Legend verticalAlign="top" height={45} wrapperStyle={{ fontSize: '12px' }} />
           <ReferenceLine yAxisId="left" y={0} stroke="#475569" />
           <Bar yAxisId="left" dataKey="revenue" name="Ingresos (Revenue)" fill="#10b981" barSize={20} />
