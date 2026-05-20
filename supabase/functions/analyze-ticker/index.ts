@@ -1606,9 +1606,9 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           twelveDataQuarterly as any[],
         );
 
-        // AI fallback only when all structured sources returned nothing
+        // AI fallback when structured sources returned fewer than 4 quarters
         let aiFallback: any[] = [];
-        if (quarterlyHistory.length === 0 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
+        if (quarterlyHistory.length < 4 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
           console.log(`Quarterly AI fallback triggered (0 structured quarters).`);
           aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
           if (aiFallback.length > 0) {

@@ -52,8 +52,16 @@ export function IndexSparkline({ label, symbol, price, change1d, change1m, candl
           </AreaChart>
         </ResponsiveContainer>
       ) : (
-        <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ fontSize: 10, color: '#334155' }}>SIN DATOS</span>
+        <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 2px', gap: 6 }}>
+          <div style={{ flex: 1, height: 3, borderRadius: 2, background: '#1e293b', overflow: 'hidden' }}>
+            <div style={{
+              width: `${Math.min(100, Math.max(8, 50 + (change1d ?? 0) * 8))}%`,
+              height: '100%',
+              background: color,
+              borderRadius: 2,
+            }} />
+          </div>
+          <span style={{ fontSize: 9, color: '#334155', letterSpacing: '0.05em', flexShrink: 0 }}>30D</span>
         </div>
       )}
     </div>

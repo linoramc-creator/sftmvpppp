@@ -126,10 +126,10 @@ function buildCashFlowChartData(data: QuarterlyPeriod[]): CashFlowData[] {
       if (operating == null && fcf == null && investing == null && financing == null) return null;
       return {
         period: fmtPeriod(q.period),
-        operating: operating ?? 0,
-        investing: investing ?? 0,
-        financing: financing ?? 0,
-        fcf: fcf ?? 0,
+        operating,
+        investing,
+        financing,
+        fcf,
       };
     })
     .filter((d): d is CashFlowData => d !== null);
@@ -147,11 +147,11 @@ function buildFundamentalsChartData(data: QuarterlyPeriod[]): FundamentalsData[]
       if (revenue == null && netIncome == null && totalDebt == null) return null;
       return {
         period: fmtPeriod(q.period),
-        revenue: revenue ?? 0,
-        netIncome: netIncome ?? 0,
-        totalDebt: totalDebt ?? 0,
-        grossMargin: grossMargin ?? 0,
-        netMargin: netMargin ?? 0,
+        revenue,
+        netIncome,
+        totalDebt,
+        grossMargin,
+        netMargin,
       };
     })
     .filter((d): d is FundamentalsData => d !== null);
@@ -1396,7 +1396,17 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
       flush();
       const raw = line.replace(/^##\s+/, "").replace(/[:.]+\s*$/, "").trim();
       const norm = normalizeSectionName(raw);
-      currentSection = canonicalByNorm.get(norm) ?? raw;
+      // Exact match first; then prefix match (handles Gemini drift like "Finanzas (PARTE 1/2)")
+      let canonical = canonicalByNorm.get(norm);
+      if (!canonical) {
+        for (const [knownNorm, knownCanonical] of canonicalByNorm.entries()) {
+          if (norm.startsWith(knownNorm + " ") || norm === knownNorm) {
+            canonical = knownCanonical;
+            break;
+          }
+        }
+      }
+      currentSection = canonical ?? raw;
       i++;
       continue;
     }
