@@ -202,6 +202,9 @@ export async function streamAnalysis({
       if (parsed.__catalystCalendar && onCatalystCalendar) {
         onCatalystCalendar(parsed.__catalystCalendar as CatalystCalendar);
       }
+      if (parsed.__error) {
+        onError(parsed.__error as string);
+      }
     },
   });
 }

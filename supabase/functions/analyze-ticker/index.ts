@@ -119,14 +119,15 @@ type GeminiResult =
 
 async function callGeminiStream(messages: any[], apiKey: string): Promise<GeminiResult> {
   const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-  // Flash first: 10-20s vs 60-90s for Pro. Pro kept as fallback for quality.
-  // Speculative 3.x models at end (most return 404, just waste time).
+  // Pro first for best analysis quality. Flash as fast fallback.
+  // Keepalives in the response stream prevent Supabase's idle timeout
+  // so Pro's 60-90s generation time is no longer a problem.
   const GEMINI_MODELS = [
+    "gemini-2.5-pro",
+    "gemini-2.5-pro-latest",
     "gemini-2.5-flash",
     "gemini-2.5-flash-latest",
     "gemini-2.0-flash",
-    "gemini-2.5-pro",
-    "gemini-2.5-pro-latest",
     "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-3-pro-latest",
@@ -1530,135 +1531,133 @@ interface EnvKeys {
 
 async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Response> {
   const cleanTicker = ticker.trim().toUpperCase();
+  const encoder = new TextEncoder();
 
-  const finnhubData = env.FINNHUB_KEY ? await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY) : null;
+  // Return the SSE Response immediately so Supabase's 150s idle timeout never fires.
+  // All data gathering and Gemini streaming happen inside the ReadableStream callback.
+  const stream = new ReadableStream({
+    async start(controller) {
+      // Send SSE keepalive comments every 5s — resets Supabase's idle timer
+      // so gemini-2.5-pro (60-90s generation) can complete without being killed.
+      const keepalive = setInterval(() => {
+        try { controller.enqueue(encoder.encode(": keepalive\n\n")); } catch (_) {}
+      }, 5_000);
 
-  const companyName = finnhubData?.profile?.name ?? cleanTicker;
-  const sector = finnhubData?.profile?.finnhubIndustry ?? "";
-  const peers = finnhubData?.peers ?? [];
+      try {
+        // Step 1: Finnhub profile (sequential — companyName/sector/peers needed for Tavily queries)
+        const finnhubData = env.FINNHUB_KEY ? await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY) : null;
+        const companyName = finnhubData?.profile?.name ?? cleanTicker;
+        const sector      = finnhubData?.profile?.finnhubIndustry ?? "";
+        const peers       = finnhubData?.peers ?? [];
 
-  const [
-    finnhubQuarterly,
-    fmpQuarterly,
-    twelveDataQuarterly,
-    peerData,
-    polymarketContext,
-    fredContext,
-    fmpContext,
-    twelveDataContext,
-    technicalContext,
-    geoContext,
-    tickerNews,
-    sectorNews,
-    earningsSearch,
-    competitiveSearch,
-    risksCatalystsSearch,
-    catalystCalendar,
-  ] = await Promise.all([
-    env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
-    env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
-    env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
-    env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
-    fetchPolymarketData(cleanTicker, companyName),
-    fetchFredData(env.FRED_KEY),
-    fetchFmpData(cleanTicker, env.FMP_KEY),
-    fetchTwelveData(cleanTicker, env.TWELVE_KEY),
-    fetchTechnicalIndicators(cleanTicker, env.TWELVE_KEY),
-    env.TAVILY_KEY
-      ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions 2025 2026`, env.TAVILY_KEY, 3, 60, undefined, 180)
-      : Promise.resolve(null),
-    env.TAVILY_KEY
-      ? fetchTavilySearch(`${companyName} ${cleanTicker} news latest 2025 2026`, env.TAVILY_KEY, 4, 7, "news", 150)
-      : Promise.resolve(null),
-    env.TAVILY_KEY && sector
-      ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, env.TAVILY_KEY, 3, 14, "news", 130)
-      : Promise.resolve(null),
-    env.TAVILY_KEY
-      ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, env.TAVILY_KEY, 3, undefined, undefined, 140)
-      : Promise.resolve(null),
-    env.TAVILY_KEY && peers.length > 0
-      ? fetchTavilySearch(`${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`, env.TAVILY_KEY, 2, undefined, undefined, 120)
-      : Promise.resolve(null),
-    env.TAVILY_KEY
-      ? fetchTavilySearch(`${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
-      : Promise.resolve(null),
-    fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
-  ]);
+        // Step 2: All remaining data in parallel
+        const [
+          finnhubQuarterly,
+          fmpQuarterly,
+          twelveDataQuarterly,
+          peerData,
+          polymarketContext,
+          fredContext,
+          fmpContext,
+          twelveDataContext,
+          technicalContext,
+          geoContext,
+          tickerNews,
+          sectorNews,
+          earningsSearch,
+          competitiveSearch,
+          risksCatalystsSearch,
+          catalystCalendar,
+        ] = await Promise.all([
+          env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
+          env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
+          env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
+          env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
+          fetchPolymarketData(cleanTicker, companyName),
+          fetchFredData(env.FRED_KEY),
+          fetchFmpData(cleanTicker, env.FMP_KEY),
+          fetchTwelveData(cleanTicker, env.TWELVE_KEY),
+          fetchTechnicalIndicators(cleanTicker, env.TWELVE_KEY),
+          env.TAVILY_KEY
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions 2025 2026`, env.TAVILY_KEY, 3, 60, undefined, 180)
+            : Promise.resolve(null),
+          env.TAVILY_KEY
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} news latest 2025 2026`, env.TAVILY_KEY, 4, 7, "news", 150)
+            : Promise.resolve(null),
+          env.TAVILY_KEY && sector
+            ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, env.TAVILY_KEY, 3, 14, "news", 130)
+            : Promise.resolve(null),
+          env.TAVILY_KEY
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, env.TAVILY_KEY, 3, undefined, undefined, 140)
+            : Promise.resolve(null),
+          env.TAVILY_KEY && peers.length > 0
+            ? fetchTavilySearch(`${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`, env.TAVILY_KEY, 2, undefined, undefined, 120)
+            : Promise.resolve(null),
+          env.TAVILY_KEY
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
+            : Promise.resolve(null),
+          fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
+        ]);
 
-  let quarterlyHistory = mergeQuarterlyData(
-    finnhubQuarterly    as any[],
-    fmpQuarterly        as any[],
-    twelveDataQuarterly as any[],
-  );
+        // Step 3: Merge quarterly data from all structured sources
+        let quarterlyHistory = mergeQuarterlyData(
+          finnhubQuarterly    as any[],
+          fmpQuarterly        as any[],
+          twelveDataQuarterly as any[],
+        );
 
-  // Trigger AI fallback ONLY when structured sources are clearly insufficient. Previously
-  // triggered on any N/D field, which made the AI inject low-quality data on top of mostly
-  // good FMP/TwelveData results. Now: only if we have <4 quarters OR if the latest quarter
-  // is missing all 3 critical fields (revenue, netIncome, operatingCF).
-  const isQuarterCritical = (q: any): boolean => {
-    const critical = ["revenue", "netIncome", "operatingCF"];
-    return critical.every(f => q[f] === "N/D" || q[f] == null);
-  };
-  // Stricter threshold: AI fallback costs ~25s (Tavily + Gemini extra call).
-  // Only trigger when we have zero usable quarters from structured sources.
-  const needsAiFallback =
-    quarterlyHistory.length === 0;
+        // AI fallback only when all structured sources returned nothing
+        let aiFallback: any[] = [];
+        if (quarterlyHistory.length === 0 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
+          console.log(`Quarterly AI fallback triggered (0 structured quarters).`);
+          aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
+          if (aiFallback.length > 0) {
+            quarterlyHistory = mergeQuarterlyData(
+              finnhubQuarterly    as any[],
+              fmpQuarterly        as any[],
+              twelveDataQuarterly as any[],
+              aiFallback,
+            );
+            console.log(`AI fallback: ${aiFallback.length} quarters added. Total: ${quarterlyHistory.length}`);
+          }
+        }
 
-  let aiFallback: any[] = [];
-  if (needsAiFallback && env.TAVILY_KEY && env.GEMINI_API_KEY) {
-    console.log(`Quarterly AI fallback triggered: ${quarterlyHistory.length} quarters, latest critical=${quarterlyHistory[0] ? isQuarterCritical(quarterlyHistory[0]) : "n/a"}.`);
-    aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
-    if (aiFallback.length > 0) {
-      quarterlyHistory = mergeQuarterlyData(
-        finnhubQuarterly    as any[],
-        fmpQuarterly        as any[],
-        twelveDataQuarterly as any[],
-        aiFallback,
-      );
-      console.log(`AI fallback added ${aiFallback.length} quarters. Final merged: ${quarterlyHistory.length}`);
-    }
-  }
+        // Step 4: Emit quarterly data event so frontend can render tables immediately
+        const quarterlyDebug = {
+          hasFinnhub:     !!env.FINNHUB_KEY,
+          hasFmp:         !!env.FMP_KEY,
+          hasTwelveData:  !!env.TWELVE_KEY,
+          hasTavily:      !!env.TAVILY_KEY,
+          finnhubRows:    (finnhubQuarterly as any[]).length,
+          fmpRows:        (fmpQuarterly as any[]).length,
+          twelveDataRows: (twelveDataQuarterly as any[]).length,
+          aiFallbackRows: aiFallback.length,
+          mergedRows:     quarterlyHistory.length,
+        };
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug, __catalystCalendar: catalystCalendar })}\n\n`
+        ));
 
-  const dataContext = buildTickerDataContext(
-    finnhubData,
-    peerData,
-    quarterlyHistory,
-    geoContext,
-    sectorNews,
-    tickerNews,
-    earningsSearch,
-    competitiveSearch,
-    risksCatalystsSearch,
-    polymarketContext,
-    fredContext,
-    fmpContext,
-    twelveDataContext,
-    technicalContext,
-  );
+        // Step 5: Build Gemini prompt
+        const dataContext = buildTickerDataContext(
+          finnhubData, peerData, quarterlyHistory, geoContext, sectorNews, tickerNews,
+          earningsSearch, competitiveSearch, risksCatalystsSearch, polymarketContext,
+          fredContext, fmpContext, twelveDataContext, technicalContext,
+        );
 
-  console.log("Ticker data loaded:", {
-    ticker: cleanTicker,
-    finnhub_quote: !!finnhubData?.quote?.c,
-    finnhub_metrics: !!finnhubData?.metrics,
-    quarterly_history: quarterlyHistory.length,
-    quarterly_finnhub: (finnhubQuarterly as any[]).length,
-    quarterly_fmp: (fmpQuarterly as any[]).length,
-    quarterly_twelve_data: (twelveDataQuarterly as any[]).length,
-    quarterly_ai_fallback: aiFallback.length,
-    peer_data: (peerData as any[]).length,
-    tavily_ticker_news: tickerNews?.results?.length ?? 0,
-    polymarket_ok: !!polymarketContext,
-    fred_ok: !!fredContext,
-    fmp_ok: !!fmpContext,
-    twelve_data_ok: !!twelveDataContext,
-    technical_ok: !!technicalContext,
-  });
+        console.log("Ticker data loaded:", {
+          ticker: cleanTicker,
+          finnhub_quote: !!finnhubData?.quote?.c,
+          quarterly_history: quarterlyHistory.length,
+          quarterly_fmp: (fmpQuarterly as any[]).length,
+          quarterly_twelve_data: (twelveDataQuarterly as any[]).length,
+        });
 
-  const messages = [
-    { role: "system", content: buildTickerSystemPrompt() },
-    {
-      role: "user",
-      content: `${dataContext}
+        const messages = [
+          { role: "system", content: buildTickerSystemPrompt() },
+          {
+            role: "user",
+            content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
@@ -1671,48 +1670,41 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
 - En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Incluye el enlace. Si no hay datos, omite la sección.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
-    },
-  ];
+          },
+        ];
 
-  const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
-  if (!gemini.ok) return jsonError(gemini.error, gemini.status);
-  console.log(`Streaming ticker analysis with model: ${gemini.model}`);
+        // Step 6: Call Gemini (Pro by default — keepalives above allow unlimited generation time)
+        const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
+        if (!gemini.ok) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: gemini.error })}\n\n`));
+          return;
+        }
+        console.log(`Streaming ticker analysis with model: ${gemini.model}`);
 
-  if (!gemini.response.body) return jsonError("Gemini returned empty response body", 500);
+        if (!gemini.response.body) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "Gemini returned empty response body" })}\n\n`));
+          return;
+        }
 
-  // Combined stream: quarterly JSON event first, then Gemini SSE
-  const encoder = new TextEncoder();
-  const quarterlyDebug = {
-    hasFinnhub:     !!env.FINNHUB_KEY,
-    hasFmp:         !!env.FMP_KEY,
-    hasTwelveData:  !!env.TWELVE_KEY,
-    hasTavily:      !!env.TAVILY_KEY,
-    finnhubRows:    (finnhubQuarterly as any[]).length,
-    fmpRows:        (fmpQuarterly as any[]).length,
-    twelveDataRows: (twelveDataQuarterly as any[]).length,
-    aiFallbackRows: aiFallback.length,
-    mergedRows:     quarterlyHistory.length,
-  };
-  const quarterlyEvent = encoder.encode(`data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug, __catalystCalendar: catalystCalendar })}\n\n`);
-  const geminiReader = gemini.response.body.getReader();
-
-  const combined = new ReadableStream({
-    async start(controller) {
-      controller.enqueue(quarterlyEvent);
-      try {
+        // Step 7: Pipe Gemini SSE output directly
+        const geminiReader = gemini.response.body.getReader();
         while (true) {
           const { done, value } = await geminiReader.read();
           if (done) break;
           controller.enqueue(value);
         }
+      } catch (e: any) {
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: e?.message ?? "Error interno del servidor" })}\n\n`));
+        } catch (_) {}
       } finally {
-        controller.close();
+        clearInterval(keepalive);
+        try { controller.close(); } catch (_) {}
       }
     },
-    cancel() { geminiReader.cancel(); },
   });
 
-  return new Response(combined, {
+  return new Response(stream, {
     headers: {
       ...corsHeaders,
       "Content-Type": "text/event-stream",
@@ -1724,50 +1716,49 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 
 async function handleSectorAnalysis(sector: string, env: EnvKeys): Promise<Response> {
   const cleanSector = sector.trim();
+  const encoder = new TextEncoder();
 
-  const [
-    sectorNews,
-    sectorTrends,
-    topCompanies,
-    sectorETFs,
-    macroNews,
-    regulatoryContext,
-    fredContext,
-  ] = await Promise.all([
-    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector news latest 2025 2026`, env.TAVILY_KEY, 6, 30, "news", 180) : Promise.resolve({ answer: "", results: [] }),
-    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector outlook trends growth forecast 2025 2026`, env.TAVILY_KEY, 5, undefined, undefined, 180) : Promise.resolve({ answer: "", results: [] }),
-    env.TAVILY_KEY ? fetchTavilySearch(`top companies ${cleanSector} sector leaders market cap 2025`, env.TAVILY_KEY, 5, undefined, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
-    env.TAVILY_KEY ? fetchTavilySearch(`best ETF ${cleanSector} sector invest 2025`, env.TAVILY_KEY, 4, undefined, undefined, 140) : Promise.resolve({ answer: "", results: [] }),
-    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector interest rates inflation tariffs macro impact 2025`, env.TAVILY_KEY, 4, 60, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
-    env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector regulation policy geopolitical risk 2025 2026`, env.TAVILY_KEY, 3, 90, undefined, 150) : Promise.resolve({ answer: "", results: [] }),
-    fetchFredData(env.FRED_KEY),
-  ]);
+  const stream = new ReadableStream({
+    async start(controller) {
+      const keepalive = setInterval(() => {
+        try { controller.enqueue(encoder.encode(": keepalive\n\n")); } catch (_) {}
+      }, 5_000);
 
-  const dataContext = buildSectorDataContext(
-    cleanSector,
-    sectorNews,
-    sectorTrends,
-    topCompanies,
-    sectorETFs,
-    macroNews,
-    regulatoryContext,
-    fredContext,
-  );
+      try {
+        const [
+          sectorNews,
+          sectorTrends,
+          topCompanies,
+          sectorETFs,
+          macroNews,
+          regulatoryContext,
+          fredContext,
+        ] = await Promise.all([
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector news latest 2025 2026`, env.TAVILY_KEY, 6, 30, "news", 180) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector outlook trends growth forecast 2025 2026`, env.TAVILY_KEY, 5, undefined, undefined, 180) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`top companies ${cleanSector} sector leaders market cap 2025`, env.TAVILY_KEY, 5, undefined, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`best ETF ${cleanSector} sector invest 2025`, env.TAVILY_KEY, 4, undefined, undefined, 140) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector interest rates inflation tariffs macro impact 2025`, env.TAVILY_KEY, 4, 60, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector regulation policy geopolitical risk 2025 2026`, env.TAVILY_KEY, 3, 90, undefined, 150) : Promise.resolve({ answer: "", results: [] }),
+          fetchFredData(env.FRED_KEY),
+        ]);
 
-  console.log("Sector data loaded:", {
-    sector: cleanSector,
-    tavily_news: (sectorNews as any)?.results?.length ?? 0,
-    tavily_trends: (sectorTrends as any)?.results?.length ?? 0,
-    tavily_companies: (topCompanies as any)?.results?.length ?? 0,
-    tavily_etfs: (sectorETFs as any)?.results?.length ?? 0,
-    fred_ok: !!fredContext,
-  });
+        const dataContext = buildSectorDataContext(
+          cleanSector, sectorNews, sectorTrends, topCompanies,
+          sectorETFs, macroNews, regulatoryContext, fredContext,
+        );
 
-  const messages = [
-    { role: "system", content: buildSectorSystemPrompt(cleanSector) },
-    {
-      role: "user",
-      content: `${dataContext}
+        console.log("Sector data loaded:", {
+          sector: cleanSector,
+          tavily_news: (sectorNews as any)?.results?.length ?? 0,
+          tavily_trends: (sectorTrends as any)?.results?.length ?? 0,
+        });
+
+        const messages = [
+          { role: "system", content: buildSectorSystemPrompt(cleanSector) },
+          {
+            role: "user",
+            content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
 Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones obligatorias.
@@ -1776,16 +1767,39 @@ Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones 
 - Integra los indicadores FRED en el Análisis Macro.
 - Las tablas de empresas y ETFs deben tener datos reales y completos.
 - Si no existe un dato, omite esa fila — nunca uses N/D.`,
+          },
+        ];
+
+        const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
+        if (!gemini.ok) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: gemini.error })}\n\n`));
+          return;
+        }
+        console.log(`Streaming sector analysis with model: ${gemini.model}`);
+
+        if (!gemini.response.body) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "Gemini returned empty response body" })}\n\n`));
+          return;
+        }
+
+        const geminiReader = gemini.response.body.getReader();
+        while (true) {
+          const { done, value } = await geminiReader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+      } catch (e: any) {
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: e?.message ?? "Error interno del servidor" })}\n\n`));
+        } catch (_) {}
+      } finally {
+        clearInterval(keepalive);
+        try { controller.close(); } catch (_) {}
+      }
     },
-  ];
+  });
 
-  const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
-  if (!gemini.ok) return jsonError(gemini.error, gemini.status);
-  console.log(`Streaming sector analysis with model: ${gemini.model}`);
-
-  if (!gemini.response.body) return jsonError("Gemini returned empty response body", 500);
-
-  return new Response(gemini.response.body, {
+  return new Response(stream, {
     headers: {
       ...corsHeaders,
       "Content-Type": "text/event-stream",
