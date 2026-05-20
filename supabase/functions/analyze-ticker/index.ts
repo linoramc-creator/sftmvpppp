@@ -1822,16 +1822,28 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
   const now    = Math.floor(Date.now() / 1000);
   const ago30d = now - 30 * 24 * 3600;
 
-  const allSymbols = ["SPY", "QQQ", ...extraSymbols.filter(s => s !== "SPY" && s !== "QQQ")];
+  // Major asset-class proxies — all ETFs supported by Finnhub free tier
+  const INDICES: Array<{ symbol: string; label: string }> = [
+    { symbol: "SPY",  label: "S&P 500"      },
+    { symbol: "QQQ",  label: "NASDAQ 100"   },
+    { symbol: "DIA",  label: "DOW JONES"    },
+    { symbol: "IWM",  label: "RUSSELL 2000" },
+    { symbol: "VIXY", label: "VIX VOL"      },
+    { symbol: "GLD",  label: "ORO"          },
+    { symbol: "TLT",  label: "BONOS 20Y+"   },
+  ];
+  const indexSymbols = INDICES.map(i => i.symbol);
+  const allSymbols = [...indexSymbols, ...extraSymbols.filter(s => !indexSymbols.includes(s))];
 
-  const [quotesResult, spyCandle, qqqCandle, diaCandle, fred10y, fred2y] = await Promise.allSettled([
+  const [quotesResult, candlesResult, fred10y, fred2y] = await Promise.allSettled([
     Promise.all(allSymbols.map(s =>
       finnhubGet(`/quote?symbol=${s}`, env.FINNHUB_KEY)
         .then(d => d ? { symbol: s, c: d.c as number, dp: d.dp as number } : { symbol: s, c: null, dp: null })
     )),
-    finnhubGet(`/stock/candle?symbol=SPY&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
-    finnhubGet(`/stock/candle?symbol=QQQ&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
-    finnhubGet(`/stock/candle?symbol=DIA&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
+    Promise.all(indexSymbols.map(s =>
+      finnhubGet(`/stock/candle?symbol=${s}&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY)
+        .then(d => ({ symbol: s, data: d }))
+    )),
     env.FRED_KEY
       ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
@@ -1851,9 +1863,15 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
     return first > 0 ? +((last - first) / first * 100).toFixed(2) : null;
   };
 
-  const spy1m = spyCandle.status === "fulfilled" ? calc1m(spyCandle.value) : null;
-  const qqq1m = qqqCandle.status === "fulfilled" ? calc1m(qqqCandle.value) : null;
-  const dia1m = diaCandle.status === "fulfilled" ? calc1m(diaCandle.value) : null;
+  const candleMap: Record<string, { t: number[]; c: number[] } | null> = {};
+  const change1mMap: Record<string, number | null> = {};
+  if (candlesResult.status === "fulfilled") {
+    for (const { symbol, data } of candlesResult.value) {
+      const ok = data && data.s === "ok" && Array.isArray(data.c) && data.c.length > 1;
+      candleMap[symbol]   = ok ? { t: data.t, c: data.c } : null;
+      change1mMap[symbol] = ok ? calc1m(data) : null;
+    }
+  }
 
   const getYield = (result: PromiseSettledResult<any>): number | null => {
     if (result.status !== "fulfilled" || !result.value) return null;
@@ -1873,20 +1891,12 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
   });
 
   return new Response(JSON.stringify({
-    indices: [
-      makeQ("SPY", "S&P 500", spy1m),
-      makeQ("QQQ", "NASDAQ",  qqq1m),
-      makeQ("DIA", "DOW",     dia1m),
-    ],
+    indices: INDICES.map(({ symbol, label }) => makeQ(symbol, label, change1mMap[symbol] ?? null)),
     yield10y,
     yield2y,
     spread,
     stocks: extraSymbols.map(s => makeQ(s, s)),
-    candles: {
-      SPY: spyCandle.status === "fulfilled" && spyCandle.value?.s === "ok" ? { t: spyCandle.value.t, c: spyCandle.value.c } : null,
-      QQQ: qqqCandle.status === "fulfilled" && qqqCandle.value?.s === "ok" ? { t: qqqCandle.value.t, c: qqqCandle.value.c } : null,
-      DIA: diaCandle.status === "fulfilled" && diaCandle.value?.s === "ok" ? { t: diaCandle.value.t, c: diaCandle.value.c } : null,
-    },
+    candles: candleMap,
     ts: Date.now(),
   }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },

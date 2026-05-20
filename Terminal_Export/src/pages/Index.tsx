@@ -692,11 +692,18 @@ const Index = () => {
 
 function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
   return (
-    <div className="space-y-1 lg:sticky lg:top-4">
+    <div className="lg:sticky lg:top-4">
       <div className="flex items-center gap-2 mb-2 px-1">
-        <span style={{ width: 6, height: 6, background: '#22c55e', borderRadius: '50%', display: 'inline-block' }} />
-        <span style={{ fontSize: 10, letterSpacing: '0.15em', color: '#64748b' }}>ÍNDICES GLOBALES</span>
-        <span style={{ marginLeft: 'auto', fontSize: 9, color: '#334155' }}>1 MIN</span>
+        <span style={{
+          width: 6, height: 6, background: '#3b82f6', borderRadius: '50%',
+          display: 'inline-block', boxShadow: '0 0 6px #3b82f6',
+        }} className="animate-pulse" />
+        <span style={{ fontSize: 10, letterSpacing: '0.15em', color: '#94a3b8', fontWeight: 600 }}>
+          ÍNDICES GLOBALES
+        </span>
+        <span style={{ marginLeft: 'auto', fontSize: 8, color: '#475569', letterSpacing: '0.1em' }}>
+          30D · DIARIO
+        </span>
       </div>
       {marketData?.indices.map(idx => (
         <IndexSparkline
@@ -706,7 +713,7 @@ function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
           price={idx.price}
           change1d={idx.change1d}
           change1m={idx.change1m}
-          candle={marketData.candles?.[idx.symbol as 'SPY' | 'QQQ' | 'DIA']}
+          candle={marketData.candles?.[idx.symbol]}
         />
       ))}
     </div>
