@@ -349,9 +349,9 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
     const cashUrl    = `${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`;
     const balanceUrl = `${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`;
     const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
-      fetch(incomeUrl).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
-      fetch(cashUrl).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
-      fetch(balanceUrl).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
+      fetch(incomeUrl, { signal: AbortSignal.timeout(12_000) }).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
+      fetch(cashUrl, { signal: AbortSignal.timeout(12_000) }).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
+      fetch(balanceUrl, { signal: AbortSignal.timeout(12_000) }).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
     ]);
 
     const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
@@ -444,11 +444,11 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
   const base = "https://api.twelvedata.com";
   try {
     const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
-      fetch(`${base}/income_statement?symbol=${t}&period=quarterly&apikey=${key}`)
+      fetch(`${base}/income_statement?symbol=${t}&period=quarterly&apikey=${key}`, { signal: AbortSignal.timeout(12_000) })
         .then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${base}/cash_flow?symbol=${t}&period=quarterly&apikey=${key}`)
+      fetch(`${base}/cash_flow?symbol=${t}&period=quarterly&apikey=${key}`, { signal: AbortSignal.timeout(12_000) })
         .then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${base}/balance_sheet?symbol=${t}&period=quarterly&apikey=${key}`)
+      fetch(`${base}/balance_sheet?symbol=${t}&period=quarterly&apikey=${key}`, { signal: AbortSignal.timeout(12_000) })
         .then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
 
@@ -786,13 +786,13 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
   fillFrom(finnhub);
   fillFrom(aiFallback);
 
-  // Require at least 3 of 7 key fields to be populated — prevents AI-fallback
-  // "phantom" quarters (revenue-only) from polluting the table with empty rows.
+  // Require at least 1 of 7 key fields to be populated — avoids filtering out real
+  // FMP/TwelveData quarters that may only have partial data (root cause of 0Q issue).
   const KEY_FIELDS = ["revenue", "ebitda", "netIncome", "operatingCF", "freeCashFlow", "cash", "equity"];
   return Array.from(merged.values())
     .filter((q: any) => {
       const keyCount = KEY_FIELDS.filter(f => q[f] !== "N/D" && q[f] != null && q[f] !== "").length;
-      return keyCount >= 3;
+      return keyCount >= 1;
     })
     .sort((a: any, b: any) => b.period.localeCompare(a.period))
     .slice(0, 12);
@@ -1264,7 +1264,7 @@ Genera EXACTAMENTE las 8 secciones siguientes, cada una iniciada con "## " (no l
 - ### Perfil de la Empresa: sector, país, exchange, IPO, descripción del negocio (3-4 líneas).
 
 ## Finanzas
-PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
+Incluye una tabla de métricas actuales con EXACTAMENTE estas filas (Métrica | Valor):
 | Métrica | Valor |
 |---|---|
 | Precio Actual | |
@@ -1291,9 +1291,9 @@ PARTE 1 — Tabla métricas actuales (Métrica | Valor) con estas filas:
 
 Si un dato es N/D en Finnhub, búscalo en DATOS TWELVE DATA, FMP, o HISTORIAL TRIMESTRAL. Prioriza datos reales. Nunca inventes.
 
-PARTE 2 — Las tablas de evolución trimestral (P&L, Cash Flow, Balance) se renderizan automáticamente en el informe. NO generes ningún texto ni tabla para este bloque.
+[Las tablas trimestrales históricas se renderizan automáticamente — NO las generes.]
 
-PARTE 3 — Párrafo 4-5 líneas sobre los fundamentales más relevantes.
+Añade un párrafo analítico de 4-5 líneas sobre los fundamentales más relevantes.
 
 ## Valoración
 - ### Análisis de Múltiplos: tabla P/E, P/B, EV/EBITDA, P/S empresa vs media sectorial. Párrafo 4-5 líneas.
@@ -1661,7 +1661,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
 
 INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
-- En ## Finanzas: incluye la tabla de métricas actuales (PARTE 1). Las tablas trimestrales se renderizan automáticamente — NO las generes.
+- En ## Finanzas: incluye la tabla de métricas actuales. Las tablas trimestrales se renderizan automáticamente — NO las generes.
 - En ## Valoración: desarrolla Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
 - En ## Finanzas: para cualquier métrica no disponible en Finnhub, usa DATOS TWELVE DATA o FMP. Si no hay dato en ninguna fuente, OMITE esa fila. CERO N/D permitidos.
 - En ## Sector: usa los datos de peers de Finnhub para la tabla comparativa. Omite columnas sin dato.
@@ -1819,13 +1819,14 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
 
   const allSymbols = ["SPY", "QQQ", ...extraSymbols.filter(s => s !== "SPY" && s !== "QQQ")];
 
-  const [quotesResult, spyCandle, qqqCandle, fred10y, fred2y] = await Promise.allSettled([
+  const [quotesResult, spyCandle, qqqCandle, diaCandle, fred10y, fred2y] = await Promise.allSettled([
     Promise.all(allSymbols.map(s =>
       finnhubGet(`/quote?symbol=${s}`, env.FINNHUB_KEY)
         .then(d => d ? { symbol: s, c: d.c as number, dp: d.dp as number } : { symbol: s, c: null, dp: null })
     )),
     finnhubGet(`/stock/candle?symbol=SPY&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
     finnhubGet(`/stock/candle?symbol=QQQ&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
+    finnhubGet(`/stock/candle?symbol=DIA&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY),
     env.FRED_KEY
       ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
@@ -1847,6 +1848,7 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
 
   const spy1m = spyCandle.status === "fulfilled" ? calc1m(spyCandle.value) : null;
   const qqq1m = qqqCandle.status === "fulfilled" ? calc1m(qqqCandle.value) : null;
+  const dia1m = diaCandle.status === "fulfilled" ? calc1m(diaCandle.value) : null;
 
   const getYield = (result: PromiseSettledResult<any>): number | null => {
     if (result.status !== "fulfilled" || !result.value) return null;
@@ -1869,11 +1871,17 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
     indices: [
       makeQ("SPY", "S&P 500", spy1m),
       makeQ("QQQ", "NASDAQ",  qqq1m),
+      makeQ("DIA", "DOW",     dia1m),
     ],
     yield10y,
     yield2y,
     spread,
     stocks: extraSymbols.map(s => makeQ(s, s)),
+    candles: {
+      SPY: spyCandle.status === "fulfilled" && spyCandle.value?.s === "ok" ? { t: spyCandle.value.t, c: spyCandle.value.c } : null,
+      QQQ: qqqCandle.status === "fulfilled" && qqqCandle.value?.s === "ok" ? { t: qqqCandle.value.t, c: qqqCandle.value.c } : null,
+      DIA: diaCandle.status === "fulfilled" && diaCandle.value?.s === "ok" ? { t: diaCandle.value.t, c: diaCandle.value.c } : null,
+    },
     ts: Date.now(),
   }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -1,82 +1,61 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
+import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 
-interface IndexChartProps {
-  symbol?: 'SP:SPX' | 'NASDAQ:COMP' | 'DJ:DJI';
-  height?: number;
+interface CandleSeries { t: number[]; c: number[] }
+
+interface IndexSparklineProps {
+  label: string;
+  symbol: string;
+  price: number | null;
+  change1d: number | null;
+  change1m: number | null;
+  candle: CandleSeries | null | undefined;
 }
 
-export const IndexChartOnly = ({ symbol = 'SP:SPX', height = 350 }: IndexChartProps) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    containerRef.current.innerHTML = '';
-
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.type = "text/javascript";
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      "autosize": true,
-      "symbol": symbol,
-      "interval": "D",
-      "timezone": "Etc/UTC",
-      "theme": "dark",
-      "style": "3",
-      "locale": "es",
-      "hide_top_toolbar": true,
-      "hide_side_toolbar": true,
-      "allow_symbol_change": false,
-      "save_image": false,
-      "calendar": false,
-      "hide_volume": true,
-      "support_host": "https://www.tradingview.com"
-    });
-
-    containerRef.current.appendChild(script);
-  }, [symbol]);
+export function IndexSparkline({ label, symbol, price, change1d, change1m, candle }: IndexSparklineProps) {
+  const data = candle && candle.c.length > 1
+    ? candle.c.map((c) => ({ v: c }))
+    : [];
+  const isPos = (change1d ?? 0) >= 0;
+  const color = isPos ? '#22c55e' : '#ef4444';
+  const fmtPrice = (p: number | null) => p != null ? p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+  const fmtPct = (p: number | null) => p != null ? `${p >= 0 ? '+' : ''}${p.toFixed(2)}%` : '—';
 
   return (
-    <div
-      ref={containerRef}
-      style={{ height: `${height}px`, width: "100%", borderRadius: "8px", overflow: "hidden" }}
-    />
+    <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '8px 12px', marginBottom: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <div>
+          <span style={{ fontSize: 10, letterSpacing: '0.1em', color: '#64748b', textTransform: 'uppercase' }}>{label}</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', fontFamily: 'monospace' }}>{fmtPrice(price)}</span>
+            <span style={{ fontSize: 11, color, fontFamily: 'monospace' }}>{fmtPct(change1d)}</span>
+          </div>
+        </div>
+        {change1m != null && (
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ fontSize: 9, color: '#475569', letterSpacing: '0.05em' }}>1M</span>
+            <div style={{ fontSize: 11, color: (change1m >= 0 ? '#22c55e' : '#ef4444'), fontFamily: 'monospace' }}>{fmtPct(change1m)}</div>
+          </div>
+        )}
+      </div>
+      {data.length > 1 ? (
+        <ResponsiveContainer width="100%" height={40}>
+          <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id={`grad-${symbol}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={color} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <YAxis domain={['dataMin', 'dataMax']} hide />
+            <Area type="monotone" dataKey="v" stroke={color} strokeWidth={1.5} fill={`url(#grad-${symbol})`} dot={false} isAnimationActive={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      ) : (
+        <div style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontSize: 10, color: '#334155' }}>SIN DATOS</span>
+        </div>
+      )}
+    </div>
   );
-};
-
-interface MiniChartProps {
-  symbol: 'SP:SPX' | 'NASDAQ:COMP' | 'DJ:DJI';
 }
-
-export const IndexMiniChart = ({ symbol }: MiniChartProps) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    containerRef.current.innerHTML = '';
-
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-mini-chart.js";
-    script.type = "text/javascript";
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      "symbol": symbol,
-      "width": "100%",
-      "height": "100%",
-      "locale": "es",
-      "dateRange": "12M",
-      "colorTheme": "dark",
-      "isTransparent": true,
-      "autosize": true
-    });
-
-    containerRef.current.appendChild(script);
-  }, [symbol]);
-
-  return (
-    <div
-      ref={containerRef}
-      style={{ height: "120px", width: "100%", minWidth: "200px" }}
-    />
-  );
-};
