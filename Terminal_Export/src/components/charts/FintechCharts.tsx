@@ -1,57 +1,192 @@
 import React from 'react';
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from 'recharts';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, LineChart, Line, Cell, ReferenceLine,
+} from 'recharts';
 
-const formatCurrency = (value: number, currency: string) => {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
-};
-const formatPercent = (value: number) => `${value.toFixed(1)}%`;
-
-export interface CashFlowData { period: string; operating: number | null; investing: number | null; financing: number | null; fcf: number | null; }
-interface CashFlowChartProps { data: CashFlowData[]; currency?: string; }
-
-export const CashFlowChart = ({ data, currency = 'USD' }: CashFlowChartProps) => {
-  return (
-    <div style={{ width: '100%', height: 400, backgroundColor: '#0f172a', padding: '20px', borderRadius: '12px' }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 20, right: 5, left: -10, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
-          <XAxis dataKey="period" stroke="#64748b" tickLine={false} style={{ fontSize: '12px' }} />
-          <YAxis stroke="#64748b" tickLine={false} orientation="right" tickFormatter={(v) => formatCurrency(v, currency)} style={{ fontSize: '12px' }} />
-          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', borderRadius: '8px', color: '#fff' }} formatter={(value: number | null) => value != null ? [formatCurrency(value, currency)] : ['N/D']} />
-          <Legend verticalAlign="top" height={45} wrapperStyle={{ fontSize: '12px' }} />
-          <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1.5} />
-          <Bar dataKey="operating" name="Caja Operativa (CFO)" fill="#22c55e" barSize={18} />
-          <Bar dataKey="investing" name="Caja de Inversión (CFI)" fill="#ef4444" barSize={18} />
-          <Bar dataKey="financing" name="Caja de Financiación (CFF)" fill="#3b82f6" barSize={18} />
-          <Line type="monotone" dataKey="fcf" name="Free Cash Flow (FCF)" stroke="#eab308" strokeWidth={3} dot={{ r: 4 }} />
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
-  );
+// Muted professional color palette
+const C = {
+  bg:          '#0d1520',
+  revenue:     '#3b82f6',
+  ebitda:      '#818cf8',
+  netIncome:   '#64748b',
+  opCF:        '#3b82f6',
+  capex:       '#fb923c',
+  fcf:         '#64748b',
+  totalAssets: '#34d399',
+  cash:        '#3b82f6',
+  totalDebt:   '#f87171',
+  equity:      '#64748b',
+  grossMargin: '#38bdf8',
+  netMargin:   '#a78bfa',
+  posGrowth:   '#3b82f6',
+  negGrowth:   '#f87171',
 };
 
-export interface FundamentalsData { period: string; revenue: number | null; netIncome: number | null; totalDebt: number | null; grossMargin: number | null; netMargin: number | null; }
-interface FundamentalsChartProps { data: FundamentalsData[]; currency?: string; }
-
-export const FundamentalsChart = ({ data, currency = 'USD' }: FundamentalsChartProps) => {
-  return (
-    <div style={{ width: '100%', height: 420, backgroundColor: '#0f172a', padding: '20px', borderRadius: '12px' }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 20, right: -10, left: -10, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
-          <XAxis dataKey="period" stroke="#64748b" tickLine={false} style={{ fontSize: '12px' }} />
-          <YAxis yAxisId="left" orientation="left" stroke="#64748b" tickLine={false} tickFormatter={(v) => formatCurrency(v, currency)} style={{ fontSize: '11px' }} />
-          <YAxis yAxisId="right" orientation="right" stroke="#a855f7" tickLine={false} domain={[0, 100]} tickFormatter={formatPercent} style={{ fontSize: '11px' }} />
-          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', borderRadius: '8px', color: '#fff' }} formatter={(value: number | null, name: string) => value != null ? (name.includes('Margen') ? [formatPercent(value), name] : [formatCurrency(value, currency), name]) : ['N/D', name]} />
-          <Legend verticalAlign="top" height={45} wrapperStyle={{ fontSize: '12px' }} />
-          <ReferenceLine yAxisId="left" y={0} stroke="#475569" />
-          <Bar yAxisId="left" dataKey="revenue" name="Ingresos (Revenue)" fill="#10b981" barSize={20} />
-          <Bar yAxisId="left" dataKey="netIncome" name="Ingreso Neto" fill="#3b82f6" barSize={20} />
-          <Bar yAxisId="left" dataKey="totalDebt" name="Deuda Total" fill="#f97316" barSize={20} />
-          <Line yAxisId="right" type="monotone" dataKey="grossMargin" name="Margen Bruto (%)" stroke="#a855f7" strokeWidth={2.5} dot={{ r: 3 }} />
-          <Line yAxisId="right" type="monotone" dataKey="netMargin" name="Margen Neto (%)" stroke="#ec4899" strokeWidth={2.5} dot={{ r: 3 }} />
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
-  );
+const fmtAxis = (v: number | null): string => {
+  if (v == null) return '';
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(0)}M`;
+  if (abs >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+  return `$${v.toFixed(0)}`;
 };
+
+const fmtPctAxis = (v: number | null): string =>
+  v == null ? '' : `${v.toFixed(0)}%`;
+
+const fmtMoney = (v: number | null): string => {
+  if (v == null) return 'N/D';
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(0)}M`;
+  return `$${v.toFixed(2)}`;
+};
+
+const ttStyle = {
+  backgroundColor: '#0f172a',
+  borderColor: '#1e293b',
+  borderRadius: '4px',
+  color: '#cbd5e1',
+  fontFamily: 'monospace',
+  fontSize: '11px',
+};
+
+const moneyFmt = (v: number | null, name: string): [string, string] =>
+  [fmtMoney(v), name];
+
+const pctFmt = (v: number | null, name: string): [string, string] =>
+  [v == null ? 'N/D' : `${v.toFixed(1)}%`, name];
+
+const Frame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div style={{
+    width: '100%',
+    height: 320,
+    backgroundColor: C.bg,
+    padding: '10px 6px',
+    border: '1px solid #1e293b',
+    borderRadius: 2,
+  }}>
+    <ResponsiveContainer width="100%" height="100%">{children as any}</ResponsiveContainer>
+  </div>
+);
+
+const XA = (dataKey = 'period') =>
+  <XAxis dataKey={dataKey} stroke="#475569" tickLine={false} style={{ fontSize: '10px' }} />;
+const MoneyY =
+  <YAxis stroke="#475569" tickLine={false} tickFormatter={fmtAxis} style={{ fontSize: '10px' }} width={62} />;
+const PctY =
+  <YAxis stroke="#475569" tickLine={false} tickFormatter={fmtPctAxis} style={{ fontSize: '10px' }} width={38} />;
+const Grid = <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />;
+const Leg = <Legend verticalAlign="top" height={26} iconType="square" wrapperStyle={{ fontSize: '10px', letterSpacing: '0.04em' }} />;
+const ZeroLine = <ReferenceLine y={0} stroke="#334155" strokeWidth={1} />;
+
+// ── Income Statement ──────────────────────────────────────────────────
+export interface IncomeData {
+  period: string;
+  revenue: number | null;
+  ebitda: number | null;
+  netIncome: number | null;
+}
+export const IncomeChart = ({ data }: { data: IncomeData[] }) => (
+  <Frame>
+    <BarChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
+      {Grid}{XA()}{MoneyY}
+      <Tooltip contentStyle={ttStyle} formatter={moneyFmt} cursor={{ fill: 'rgba(59,130,246,0.04)' }} />
+      {Leg}
+      <Bar dataKey="revenue"   name="Revenue"    fill={C.revenue}   radius={[2, 2, 0, 0]} />
+      <Bar dataKey="ebitda"    name="EBITDA"     fill={C.ebitda}    radius={[2, 2, 0, 0]} />
+      <Bar dataKey="netIncome" name="Net Income" fill={C.netIncome} radius={[2, 2, 0, 0]} />
+    </BarChart>
+  </Frame>
+);
+
+// ── Cash Flow ─────────────────────────────────────────────────────────
+export interface CashFlowData {
+  period: string;
+  operating: number | null;
+  capex: number | null;
+  fcf: number | null;
+}
+export const CashFlowChart = ({ data }: { data: CashFlowData[] }) => (
+  <Frame>
+    <BarChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
+      {Grid}{XA()}{MoneyY}{ZeroLine}
+      <Tooltip contentStyle={ttStyle} formatter={moneyFmt} cursor={{ fill: 'rgba(59,130,246,0.04)' }} />
+      {Leg}
+      <Bar dataKey="operating" name="Operating CF"   fill={C.opCF}  radius={[2, 2, 0, 0]} />
+      <Bar dataKey="capex"     name="CapEx"          fill={C.capex} radius={[2, 2, 0, 0]} />
+      <Bar dataKey="fcf"       name="Free Cash Flow" fill={C.fcf}   radius={[2, 2, 0, 0]} />
+    </BarChart>
+  </Frame>
+);
+
+// ── Balance Sheet ─────────────────────────────────────────────────────
+export interface BalanceData {
+  period: string;
+  totalAssets: number | null;
+  cash: number | null;
+  totalDebt: number | null;
+  equity: number | null;
+}
+export const BalanceChart = ({ data }: { data: BalanceData[] }) => (
+  <Frame>
+    <BarChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
+      {Grid}{XA()}{MoneyY}
+      <Tooltip contentStyle={ttStyle} formatter={moneyFmt} cursor={{ fill: 'rgba(59,130,246,0.04)' }} />
+      {Leg}
+      <Bar dataKey="totalAssets" name="Total Assets" fill={C.totalAssets} radius={[2, 2, 0, 0]} />
+      <Bar dataKey="cash"        name="Cash"         fill={C.cash}        radius={[2, 2, 0, 0]} />
+      <Bar dataKey="totalDebt"   name="Total Debt"   fill={C.totalDebt}   radius={[2, 2, 0, 0]} />
+      <Bar dataKey="equity"      name="Equity"       fill={C.equity}      radius={[2, 2, 0, 0]} />
+    </BarChart>
+  </Frame>
+);
+
+// ── Margins ───────────────────────────────────────────────────────────
+export interface MarginsData {
+  period: string;
+  grossMargin: number | null;
+  netMargin: number | null;
+}
+export const MarginsChart = ({ data }: { data: MarginsData[] }) => (
+  <Frame>
+    <LineChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
+      {Grid}{XA()}{PctY}{ZeroLine}
+      <Tooltip contentStyle={ttStyle} formatter={pctFmt} cursor={{ stroke: '#334155' }} />
+      {Leg}
+      <Line
+        type="monotone" dataKey="grossMargin" name="Gross Margin"
+        stroke={C.grossMargin} strokeWidth={2}
+        dot={{ r: 3, fill: C.grossMargin, strokeWidth: 0 }}
+        activeDot={{ r: 4 }} connectNulls
+      />
+      <Line
+        type="monotone" dataKey="netMargin" name="Net Margin"
+        stroke={C.netMargin} strokeWidth={2}
+        dot={{ r: 3, fill: C.netMargin, strokeWidth: 0 }}
+        activeDot={{ r: 4 }} connectNulls
+      />
+    </LineChart>
+  </Frame>
+);
+
+// ── Revenue Growth YoY ────────────────────────────────────────────────
+export interface GrowthData {
+  period: string;
+  revenueGrowth: number | null;
+}
+export const GrowthChart = ({ data }: { data: GrowthData[] }) => (
+  <Frame>
+    <BarChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
+      {Grid}{XA()}{PctY}{ZeroLine}
+      <Tooltip contentStyle={ttStyle} formatter={pctFmt} cursor={{ fill: 'rgba(59,130,246,0.04)' }} />
+      <Legend verticalAlign="top" height={26} iconType="square" wrapperStyle={{ fontSize: '10px', letterSpacing: '0.04em' }} />
+      <Bar dataKey="revenueGrowth" name="Revenue Growth YoY" radius={[2, 2, 0, 0]}>
+        {data.map((entry, i) => (
+          <Cell key={i} fill={(entry.revenueGrowth ?? 0) >= 0 ? C.posGrowth : C.negGrowth} />
+        ))}
+      </Bar>
+    </BarChart>
+  </Frame>
+);

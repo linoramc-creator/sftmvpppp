@@ -15,11 +15,7 @@ export interface MarketData {
   yield2y: number | null;
   spread: number | null;
   stocks: MarketQuote[];
-  candles?: {
-    SPY?: { t: number[]; c: number[] } | null;
-    QQQ?: { t: number[]; c: number[] } | null;
-    DIA?: { t: number[]; c: number[] } | null;
-  };
+  candles?: Record<string, { t: number[]; c: number[] } | null>;
   ts: number;
 }
 
