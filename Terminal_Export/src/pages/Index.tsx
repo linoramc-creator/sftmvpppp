@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
-import { TradingViewMiniChart } from "@/components/charts/TradingViewMiniChart";
+import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -167,10 +167,18 @@ function buildMarginsChartData(data: QuarterlyPeriod[]): MarginsData[] {
 }
 
 function buildGrowthChartData(data: QuarterlyPeriod[]): GrowthData[] {
-  return [...data]
-    .reverse()
-    .map((q) => {
-      const revenueGrowth = parsePercent(q.revenueGrowth);
+  const reversed = [...data].reverse(); // oldest → newest
+  return reversed
+    .map((q, idx) => {
+      let revenueGrowth = parsePercent(q.revenueGrowth);
+      // Client-side fallback: compute YoY from revenue when backend returns N/D
+      if (revenueGrowth == null && idx >= 4) {
+        const curr = parseMoney(q.revenue);
+        const prev = parseMoney(reversed[idx - 4].revenue);
+        if (curr != null && prev != null && Math.abs(prev) > 0) {
+          revenueGrowth = ((curr - prev) / Math.abs(prev)) * 100;
+        }
+      }
       if (revenueGrowth == null) return null;
       return { period: fmtPeriod(q.period), revenueGrowth };
     })
@@ -558,9 +566,9 @@ const Index = () => {
           )}
           </div>
 
-          {/* Right column — TradingView index charts */}
+          {/* Right column — index charts */}
           <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
-            <IndexChartsPanel />
+            <IndexChartsPanel marketData={marketData} />
           </aside>
         </div>
       )}
@@ -644,9 +652,9 @@ const Index = () => {
           )}
           </div>
 
-          {/* Right column — TradingView index charts */}
+          {/* Right column — index charts */}
           <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
-            <IndexChartsPanel />
+            <IndexChartsPanel marketData={marketData} />
           </aside>
         </div>
       )}
@@ -690,7 +698,14 @@ const Index = () => {
 
 // ── Index Charts Panel (native Recharts sparklines) ───────────────────
 
-function IndexChartsPanel() {
+const PANEL_INDICES = [
+  { symbol: "SPY",  label: "S&P 500" },
+  { symbol: "VIXY", label: "VIX VOLATILIDAD" },
+  { symbol: "IWM",  label: "RUSSELL 2000" },
+  { symbol: "GLD",  label: "ORO" },
+];
+
+function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
   return (
     <div className="lg:sticky lg:top-4">
       <div className="flex items-center gap-2 mb-2 px-1">
@@ -702,13 +717,24 @@ function IndexChartsPanel() {
           ÍNDICES GLOBALES
         </span>
         <span style={{ marginLeft: 'auto', fontSize: 8, color: '#475569', letterSpacing: '0.1em' }}>
-          LIVE · TRADINGVIEW
+          LIVE · FINNHUB
         </span>
       </div>
-      <TradingViewMiniChart symbol="TVC:SPX"  label="S&P 500" />
-      <TradingViewMiniChart symbol="TVC:VIX"  label="VIX VOLATILIDAD" />
-      <TradingViewMiniChart symbol="TVC:RUT"  label="RUSSELL 2000" />
-      <TradingViewMiniChart symbol="TVC:GOLD" label="ORO" />
+      {PANEL_INDICES.map(({ symbol, label }) => {
+        const quote = marketData?.indices.find(i => i.symbol === symbol) ?? null;
+        const candle = marketData?.candles?.[symbol] ?? null;
+        return (
+          <IndexSparkline
+            key={symbol}
+            label={label}
+            symbol={symbol}
+            price={quote?.price ?? null}
+            change1d={quote?.change1d ?? null}
+            change1m={quote?.change1m ?? null}
+            candle={candle}
+          />
+        );
+      })}
     </div>
   );
 }
