@@ -298,10 +298,10 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
       period: q.period ?? "",
       revenue: fmt(rev, "B"),
       revenueGrowth: revGrowth != null ? `${revGrowth >= 0 ? "+" : ""}${(revGrowth * 100).toFixed(1)}%` : "N/D",
-      grossMargin: rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+      grossMargin: (rev != null && rev !== 0 && grossProfit != null) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
       ebitda: fmt(ebitda, "B"),
       netIncome: fmt(netIncome, "B"),
-      netMargin: rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+      netMargin: (rev != null && rev !== 0 && netIncome != null) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
       eps: eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
       operatingCF: fmt(opCF, "B"),
       freeCashFlow: fmt(fcf, "B"),
@@ -355,10 +355,27 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
     ]);
 
     const incomeList: any[] = Array.isArray(incomeRaw) ? incomeRaw : [];
-    const cfList: any[]     = Array.isArray(cashRaw)    ? cashRaw    : [];
-    const bsList: any[]     = Array.isArray(balanceRaw) ? balanceRaw : [];
+    let cfList: any[]       = Array.isArray(cashRaw)    ? cashRaw    : [];
+    let bsList: any[]       = Array.isArray(balanceRaw) ? balanceRaw : [];
     console.log(`FMP ${ticker} quarter: income=${incomeList.length} cf=${cfList.length} bs=${bsList.length}${!Array.isArray(incomeRaw) ? " incomeErr=" + JSON.stringify(incomeRaw).slice(0, 100) : ""}${!Array.isArray(cashRaw) ? " cfErr=" + JSON.stringify(cashRaw).slice(0, 100) : ""}${!Array.isArray(balanceRaw) ? " bsErr=" + JSON.stringify(balanceRaw).slice(0, 100) : ""}`);
     if (!incomeList.length) return [];
+
+    // If quarterly CF or BS returned empty (common for international/non-US stocks on FMP free
+    // tier), fall back to annual statements. Q4 of each year will get a direct date match;
+    // other quarters get matched via the ±45d fuzzyGet below, giving at least partial coverage.
+    if (cfList.length === 0 || bsList.length === 0) {
+      const [cfAnn, bsAnn] = await Promise.all([
+        cfList.length === 0
+          ? fetch(`${base}/cash-flow-statement/${t}?period=annual&limit=8&apikey=${key}`, { signal: AbortSignal.timeout(10_000) }).then(r => r.ok ? r.json() : []).catch(() => [])
+          : Promise.resolve(cfList),
+        bsList.length === 0
+          ? fetch(`${base}/balance-sheet-statement/${t}?period=annual&limit=8&apikey=${key}`, { signal: AbortSignal.timeout(10_000) }).then(r => r.ok ? r.json() : []).catch(() => [])
+          : Promise.resolve(bsList),
+      ]);
+      if (cfList.length === 0) cfList = Array.isArray(cfAnn) ? cfAnn : [];
+      if (bsList.length === 0) bsList = Array.isArray(bsAnn) ? bsAnn : [];
+      console.log(`FMP ${ticker} annual fallback: cf=${cfList.length} bs=${bsList.length}`);
+    }
 
     const cashByDate = new Map<string, any>(cfList.map((q: any) => [normDate(q.date), q]));
     const balByDate  = new Map<string, any>(bsList.map((q: any) => [normDate(q.date), q]));
@@ -416,14 +433,21 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         ? `${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100) >= 0 ? "+" : ""}${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100).toFixed(1)}%`
         : "N/D";
 
+      // Use strict non-zero checks for percentage computations to avoid divide-by-zero
+      // and false "0%" readings when fields come back as 0 from the API.
+      const grossMarginStr = (rev != null && rev !== 0 && grossProfit != null)
+        ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D";
+      const netMarginStr   = (rev != null && rev !== 0 && netIncome != null)
+        ? `${((netIncome / rev) * 100).toFixed(1)}%`   : "N/D";
+
       return {
         period,
         revenue:      fmt(rev, "B"),
         revenueGrowth: revGrowth,
-        grossMargin:  rev && grossProfit ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+        grossMargin:  grossMarginStr,
         ebitda:       fmt(ebitda, "B"),
         netIncome:    fmt(netIncome, "B"),
-        netMargin:    rev && netIncome ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+        netMargin:    netMarginStr,
         eps:          eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
         operatingCF:  fmt(opCF, "B"),
         freeCashFlow: fmt(fcf, "B"),
@@ -463,9 +487,29 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
 
     const cashList:    any[] = Array.isArray(cashRaw?.cash_flow)        ? cashRaw.cash_flow        : [];
     const balanceList: any[] = Array.isArray(balanceRaw?.balance_sheet) ? balanceRaw.balance_sheet : [];
+    console.log(`TwelveData ${ticker}: cf=${cashList.length} bs=${balanceList.length}`);
 
     const cashByDate = new Map<string, any>(cashList   .map((q: any) => [q.fiscal_date, q]));
     const balByDate  = new Map<string, any>(balanceList.map((q: any) => [q.fiscal_date, q]));
+
+    // Fuzzy date lookup ±30d — European and non-standard fiscal years often have CF/BS dates
+    // that differ from income statement dates by days or weeks.
+    const tdFuzzy = (byDate: Map<string, any>, dateStr: string): any => {
+      if (!dateStr) return {};
+      const direct = byDate.get(dateStr);
+      if (direct) return direct;
+      const target = new Date(dateStr + "T00:00:00Z").getTime();
+      if (isNaN(target)) return {};
+      let best: any = null;
+      let bestDiff = Infinity;
+      for (const [d, obj] of byDate.entries()) {
+        const t2 = new Date(d + "T00:00:00Z").getTime();
+        if (isNaN(t2)) continue;
+        const diff = Math.abs(t2 - target);
+        if (diff <= 30 * 86_400_000 && diff < bestDiff) { bestDiff = diff; best = obj; }
+      }
+      return best ?? {};
+    };
 
     const num = (v: any): number | null => {
       if (v == null || v === "") return null;
@@ -477,8 +521,13 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
 
     return sorted.map((q: any, idx: number) => {
       const date = q.fiscal_date ?? "";
-      const cf = cashByDate.get(date) ?? {};
-      const bs = balByDate.get(date) ?? {};
+      // Use fuzzyGet first; fall back to array-index alignment if no match found
+      const cfFuzzy = tdFuzzy(cashByDate, date);
+      const bsFuzzy = tdFuzzy(balByDate,  date);
+      const cf = (cfFuzzy.operating_activities != null || cfFuzzy.operating_cash_flow != null || cfFuzzy.net_cash_from_operating_activities != null)
+        ? cfFuzzy : (cashList[idx] ?? {});
+      const bs = (bsFuzzy.assets != null || bsFuzzy.total_assets != null || bsFuzzy.cash_and_cash_equivalents != null)
+        ? bsFuzzy : (balanceList[idx] ?? {});
 
       const rev         = num(q.sales);
       const grossProfit = num(q.gross_profit);
@@ -537,10 +586,10 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
         period:        date,
         revenue:       fmt(rev, "B"),
         revenueGrowth: revGrowth,
-        grossMargin:   (rev && grossProfit) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+        grossMargin:   (rev != null && rev !== 0 && grossProfit != null) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
         ebitda:        fmt(ebitda, "B"),
         netIncome:     fmt(netIncome, "B"),
-        netMargin:     (rev && netIncome) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+        netMargin:     (rev != null && rev !== 0 && netIncome != null) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
         eps:           eps != null ? `$${eps.toFixed(2)}` : "N/D",
         operatingCF:   fmt(opCF, "B"),
         freeCashFlow:  fmt(fcf, "B"),
@@ -709,10 +758,10 @@ ${context}`;
         period:        q.period ?? "",
         revenue:       fmt(rev, "B"),
         revenueGrowth: revGrowth,
-        grossMargin:   (rev && grossProfit) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+        grossMargin:   (rev != null && rev !== 0 && grossProfit != null) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
         ebitda:        fmt(ebitda, "B"),
         netIncome:     fmt(netIncome, "B"),
-        netMargin:     (rev && netIncome) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+        netMargin:     (rev != null && rev !== 0 && netIncome != null) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
         eps:           eps != null ? `$${eps.toFixed(2)}` : "N/D",
         operatingCF:   fmt(opCF, "B"),
         freeCashFlow:  fmt(fcf, "B"),
