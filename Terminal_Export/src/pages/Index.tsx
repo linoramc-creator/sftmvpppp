@@ -158,8 +158,21 @@ function buildMarginsChartData(data: QuarterlyPeriod[]): MarginsData[] {
   return [...data]
     .reverse()
     .map((q) => {
-      const grossMargin = parsePercent(q.grossMargin);
-      const netMargin = parsePercent(q.netMargin);
+      let grossMargin = parsePercent(q.grossMargin);
+      let netMargin   = parsePercent(q.netMargin);
+      // Client-side fallback: compute from raw monetary values when backend returns N/D
+      if (netMargin == null) {
+        const rev = parseMoney(q.revenue);
+        const net = parseMoney(q.netIncome);
+        if (rev != null && rev !== 0 && net != null) netMargin = (net / rev) * 100;
+      }
+      if (grossMargin == null) {
+        const rev   = parseMoney(q.revenue);
+        const ebit  = parseMoney(q.ebitda);  // use EBITDA margin as gross proxy only when both missing
+        if (rev != null && rev !== 0 && ebit != null && netMargin == null) {
+          grossMargin = (ebit / rev) * 100;
+        }
+      }
       if (grossMargin == null && netMargin == null) return null;
       return { period: fmtPeriod(q.period), grossMargin, netMargin };
     })
