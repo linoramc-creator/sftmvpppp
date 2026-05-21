@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
-import { IndexSparkline } from "@/components/charts/IndexCharts";
+import { TradingViewMiniChart } from "@/components/charts/TradingViewMiniChart";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -560,7 +560,7 @@ const Index = () => {
 
           {/* Right column — TradingView index charts */}
           <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
-            <IndexChartsPanel marketData={marketData} />
+            <IndexChartsPanel />
           </aside>
         </div>
       )}
@@ -646,7 +646,7 @@ const Index = () => {
 
           {/* Right column — TradingView index charts */}
           <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
-            <IndexChartsPanel marketData={marketData} />
+            <IndexChartsPanel />
           </aside>
         </div>
       )}
@@ -690,7 +690,7 @@ const Index = () => {
 
 // ── Index Charts Panel (native Recharts sparklines) ───────────────────
 
-function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
+function IndexChartsPanel() {
   return (
     <div className="lg:sticky lg:top-4">
       <div className="flex items-center gap-2 mb-2 px-1">
@@ -702,20 +702,13 @@ function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
           ÍNDICES GLOBALES
         </span>
         <span style={{ marginLeft: 'auto', fontSize: 8, color: '#475569', letterSpacing: '0.1em' }}>
-          30D · DIARIO
+          LIVE · TRADINGVIEW
         </span>
       </div>
-      {marketData?.indices.map(idx => (
-        <IndexSparkline
-          key={idx.symbol}
-          label={idx.label}
-          symbol={idx.symbol}
-          price={idx.price}
-          change1d={idx.change1d}
-          change1m={idx.change1m}
-          candle={marketData.candles?.[idx.symbol]}
-        />
-      ))}
+      <TradingViewMiniChart symbol="TVC:SPX"  label="S&P 500" />
+      <TradingViewMiniChart symbol="TVC:VIX"  label="VIX VOLATILIDAD" />
+      <TradingViewMiniChart symbol="TVC:RUT"  label="RUSSELL 2000" />
+      <TradingViewMiniChart symbol="TVC:GOLD" label="ORO" />
     </div>
   );
 }

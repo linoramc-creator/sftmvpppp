@@ -272,7 +272,7 @@ async function fetchQuarterlyFinancials(ticker: string, key: string) {
   const cfByPeriod = new Map<string, any>(cfList.map((q: any) => [q.period, q]));
   const bsByPeriod = new Map<string, any>(bsList.map((q: any) => [q.period, q]));
 
-  return icList.slice(0, 12).map((q: any) => {
+  return icList.slice(0, 16).map((q: any) => {
     const cf = cfByPeriod.get(q.period) ?? {};
     const bs = bsByPeriod.get(q.period) ?? {};
 
@@ -345,9 +345,9 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
   };
 
   try {
-    const incomeUrl  = `${base}/income-statement/${t}?period=quarter&limit=12&apikey=${key}`;
-    const cashUrl    = `${base}/cash-flow-statement/${t}?period=quarter&limit=12&apikey=${key}`;
-    const balanceUrl = `${base}/balance-sheet-statement/${t}?period=quarter&limit=12&apikey=${key}`;
+    const incomeUrl  = `${base}/income-statement/${t}?period=quarter&limit=16&apikey=${key}`;
+    const cashUrl    = `${base}/cash-flow-statement/${t}?period=quarter&limit=16&apikey=${key}`;
+    const balanceUrl = `${base}/balance-sheet-statement/${t}?period=quarter&limit=16&apikey=${key}`;
     const [incomeRaw, cashRaw, balanceRaw] = await Promise.all([
       fetch(incomeUrl, { signal: AbortSignal.timeout(12_000) }).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
       fetch(cashUrl, { signal: AbortSignal.timeout(12_000) }).then(r => r.ok ? r.json() : { __status: r.status }).catch(() => []),
@@ -436,7 +436,7 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
         equity:       fmt(equity, "B"),
         totalAssets:  fmt(totalAssets, "B"),
       };
-    }).filter(q => /^\d{4}-\d{2}-\d{2}$/.test(q.period)).slice(0, 12);
+    }).filter(q => /^\d{4}-\d{2}-\d{2}$/.test(q.period)).slice(0, 16);
   } catch (e) {
     console.log(`FMP ${ticker} threw:`, e);
     return [];
@@ -553,7 +553,7 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
         equity:        fmt(equity, "B"),
         totalAssets:   fmt(totalAssets, "B"),
       };
-    }).slice(0, 12);
+    }).slice(0, 16);
   } catch (_) { return []; }
 }
 
@@ -800,7 +800,7 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
       return keyCount >= 1;
     })
     .sort((a: any, b: any) => b.period.localeCompare(a.period))
-    .slice(0, 12);
+    .slice(0, 16);
 }
 
 // =====================================================
