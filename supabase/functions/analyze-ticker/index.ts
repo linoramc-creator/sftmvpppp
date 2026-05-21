@@ -1819,10 +1819,7 @@ Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones 
 // =====================================================
 
 async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<Response> {
-  const now    = Math.floor(Date.now() / 1000);
-  const ago30d = now - 30 * 24 * 3600;
-
-  // Major asset-class proxies — all ETFs supported by Finnhub free tier
+  // Major asset-class proxies — quotes from Finnhub, candles from Yahoo Finance
   const INDICES: Array<{ symbol: string; label: string }> = [
     { symbol: "SPY",  label: "S&P 500"      },
     { symbol: "QQQ",  label: "NASDAQ 100"   },
@@ -1835,15 +1832,40 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
   const indexSymbols = INDICES.map(i => i.symbol);
   const allSymbols = [...indexSymbols, ...extraSymbols.filter(s => !indexSymbols.includes(s))];
 
+  // Yahoo Finance v8 chart endpoint — free, no key, returns OHLC + timestamps.
+  // Replaces Finnhub /stock/candle which now returns "no_data" for the free tier.
+  // range=3mo gives ~63 daily bars; that's enough for the right-column charts
+  // while keeping the 30D % change calculation accurate.
+  async function fetchYahooCandle(symbol: string): Promise<{ t: number[]; c: number[] } | null> {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=3mo&interval=1d`;
+      const r = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      const res = j?.chart?.result?.[0];
+      const ts = res?.timestamp as number[] | undefined;
+      const closes = res?.indicators?.quote?.[0]?.close as Array<number | null> | undefined;
+      if (!ts || !closes || ts.length === 0 || ts.length !== closes.length) return null;
+      const t: number[] = [];
+      const c: number[] = [];
+      for (let i = 0; i < ts.length; i++) {
+        if (closes[i] != null) { t.push(ts[i]); c.push(closes[i] as number); }
+      }
+      return c.length > 1 ? { t, c } : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   const [quotesResult, candlesResult, fred10y, fred2y] = await Promise.allSettled([
     Promise.all(allSymbols.map(s =>
       finnhubGet(`/quote?symbol=${s}`, env.FINNHUB_KEY)
         .then(d => d ? { symbol: s, c: d.c as number, dp: d.dp as number } : { symbol: s, c: null, dp: null })
     )),
-    Promise.all(indexSymbols.map(s =>
-      finnhubGet(`/stock/candle?symbol=${s}&resolution=D&from=${ago30d}&to=${now}`, env.FINNHUB_KEY)
-        .then(d => ({ symbol: s, data: d }))
-    )),
+    Promise.all(indexSymbols.map(async s => ({ symbol: s, data: await fetchYahooCandle(s) }))),
     env.FRED_KEY
       ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
@@ -1856,20 +1878,26 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
   const quoteMap: Record<string, { c: number | null; dp: number | null }> = {};
   for (const q of quoteList) quoteMap[q.symbol] = q;
 
-  const calc1m = (candle: any): number | null => {
-    if (!candle || candle.s === "no_data" || !Array.isArray(candle.c) || candle.c.length < 2) return null;
-    const first = candle.c[0] as number;
-    const last  = candle.c[candle.c.length - 1] as number;
-    return first > 0 ? +((last - first) / first * 100).toFixed(2) : null;
+  const calc1m = (candle: { t: number[]; c: number[] } | null): number | null => {
+    if (!candle || candle.c.length < 2) return null;
+    // Walk back from the last bar to find the close ~30 days earlier (or oldest available)
+    const last = candle.c[candle.c.length - 1];
+    const lastT = candle.t[candle.t.length - 1];
+    const cutoff = lastT - 30 * 86_400;
+    let baseIdx = 0;
+    for (let i = candle.t.length - 1; i >= 0; i--) {
+      if (candle.t[i] <= cutoff) { baseIdx = i; break; }
+    }
+    const base = candle.c[baseIdx];
+    return base > 0 ? +((last - base) / base * 100).toFixed(2) : null;
   };
 
   const candleMap: Record<string, { t: number[]; c: number[] } | null> = {};
   const change1mMap: Record<string, number | null> = {};
   if (candlesResult.status === "fulfilled") {
     for (const { symbol, data } of candlesResult.value) {
-      const ok = data && data.s === "ok" && Array.isArray(data.c) && data.c.length > 1;
-      candleMap[symbol]   = ok ? { t: data.t, c: data.c } : null;
-      change1mMap[symbol] = ok ? calc1m(data) : null;
+      candleMap[symbol]   = data;
+      change1mMap[symbol] = calc1m(data);
     }
   }
 
