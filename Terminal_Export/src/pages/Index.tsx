@@ -1081,6 +1081,7 @@ function QuarterlyHistorySection({
     let diagnostic = "Esperando datos del backend...";
     if (debug) {
       const problems: string[] = [];
+      if ((debug.yahooRows ?? 0) === 0)               problems.push("YAHOO: 0 filas (ticker no cubierto)");
       if (!debug.hasFinnhub)                          problems.push("FINNHUB no configurada");
       if (!debug.hasFmp)                              problems.push("FMP no configurada");
       if (debug.hasTwelveData === false)              problems.push("TWELVE DATA no configurada");
@@ -1167,7 +1168,7 @@ function QuarterlyHistorySection({
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
         </div>
-        <span className="text-[10px] tracking-widest text-muted-foreground/30">{data.length}Q · FMP + TWELVE DATA + FINNHUB + AI</span>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">{data.length}Q · YAHOO + FMP + TWELVE DATA + FINNHUB + AI</span>
       </div>
 
       {/* Tabs */}

@@ -110,6 +110,265 @@ function n2(v: number | null | undefined): string {
 }
 
 // =====================================================
+// DATA-CLEANING UTILITIES  (anti-empty-charts)
+// Yahoo (and others) return NaN / null / undefined for missing periods and
+// ratios. These helpers guarantee the JSON shape never breaks the frontend
+// charts and that "NaN is not valid JSON" can never be thrown.
+// =====================================================
+
+// Coerce any value to a JSON-safe finite number or null. Strings like "" or
+// "Infinity" and Pandas-style NaN all collapse to null.
+function jsonSafeNum(v: unknown): number | null {
+  if (v == null) return null;
+  const n = typeof v === "string" ? parseFloat(v) : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Forward-fill a numeric series: gaps (null/NaN) take the last valid value.
+// Leading gaps (before the first valid value) are back-filled from the first
+// valid value, so a chart line never starts on a hole. If the whole series is
+// empty it stays all-null (the chart simply renders nothing for that metric).
+function forwardFill(series: (number | null | undefined)[]): (number | null)[] {
+  const out: (number | null)[] = [];
+  let last: number | null = null;
+  for (const raw of series) {
+    const v = jsonSafeNum(raw);
+    if (v != null) { last = v; out.push(v); }
+    else out.push(last);
+  }
+  const firstValid = out.find((v) => v != null) ?? null;
+  for (let i = 0; i < out.length && out[i] == null; i++) out[i] = firstValid;
+  return out;
+}
+
+// Recursively replace every NaN/Infinity inside a value with null so the whole
+// object is guaranteed JSON-serializable.
+function deepJsonSafe<T>(value: T): T {
+  if (typeof value === "number") return (Number.isFinite(value) ? value : null) as unknown as T;
+  if (Array.isArray(value)) return value.map(deepJsonSafe) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = deepJsonSafe(v);
+    return out as T;
+  }
+  return value;
+}
+
+// =====================================================
+// YAHOO FINANCE  (primary fundamentals + history source)
+//   · native fetch — no library (Deno edge runtime)
+//   · in-memory TTL cache to avoid IP rate-limits / blocks
+//   · cookie + crumb auth handled manually (required since 2024)
+// =====================================================
+
+const YF_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+interface YfCacheEntry { ts: number; data: unknown; }
+const YF_CACHE = new Map<string, YfCacheEntry>();
+const YF_TTL_MS = 10 * 60 * 1000; // fundamentals barely move intraday
+
+function yfCacheGet(key: string): unknown | undefined {
+  const e = YF_CACHE.get(key);
+  if (!e) return undefined;
+  if (Date.now() - e.ts > YF_TTL_MS) { YF_CACHE.delete(key); return undefined; }
+  return e.data;
+}
+function yfCacheSet(key: string, data: unknown): void {
+  YF_CACHE.set(key, { ts: Date.now(), data });
+  if (YF_CACHE.size > 250) {
+    let oldestKey: string | null = null;
+    let oldestTs = Infinity;
+    for (const [k, v] of YF_CACHE) if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+    if (oldestKey) YF_CACHE.delete(oldestKey);
+  }
+}
+
+let yfAuth: { cookie: string; crumb: string; ts: number } | null = null;
+const YF_AUTH_TTL = 25 * 60 * 1000;
+
+async function yfGetAuth(): Promise<{ cookie: string; crumb: string } | null> {
+  if (yfAuth && Date.now() - yfAuth.ts < YF_AUTH_TTL) return yfAuth;
+  try {
+    const readCookies = (r: Response | null): string => {
+      if (!r) return "";
+      const multi = (r.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+      if (multi.length) return multi.map((c) => c.split(";")[0]).join("; ");
+      const one = r.headers.get("set-cookie");
+      return one ? one.split(";")[0] : "";
+    };
+
+    let cookie = readCookies(
+      await fetch("https://fc.yahoo.com/", { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(8_000) }).catch(() => null),
+    );
+    if (!cookie) {
+      cookie = readCookies(
+        await fetch("https://finance.yahoo.com/quote/AAPL", { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(8_000) }).catch(() => null),
+      );
+    }
+
+    const r2 = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+      headers: { "User-Agent": YF_UA, ...(cookie ? { Cookie: cookie } : {}) },
+      signal: AbortSignal.timeout(8_000),
+    }).catch(() => null);
+    const crumb = r2 && r2.ok ? (await r2.text()).trim() : "";
+    // Some regions still serve quoteSummary/timeseries without a crumb; only
+    // cache auth when we actually have one, but don't hard-fail without it.
+    if (crumb) { yfAuth = { cookie, crumb, ts: Date.now() }; return yfAuth; }
+    return cookie ? { cookie, crumb: "" } : null;
+  } catch (_) { return null; }
+}
+
+// Daily price history via the public v8 chart endpoint (no crumb required).
+async function fetchYahooChart(
+  symbol: string,
+  range = "3mo",
+  interval = "1d",
+): Promise<{ t: number[]; c: number[] } | null> {
+  const cacheKey = `yf-chart-${symbol}-${range}-${interval}`;
+  const cached = yfCacheGet(cacheKey);
+  if (cached !== undefined) return cached as { t: number[]; c: number[] } | null;
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+    const r = await fetch(url, { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) { yfCacheSet(cacheKey, null); return null; }
+    const j = await r.json();
+    const res = j?.chart?.result?.[0];
+    const ts: number[] | undefined = res?.timestamp;
+    const closes: Array<number | null> | undefined = res?.indicators?.quote?.[0]?.close;
+    if (!ts || !closes || ts.length === 0) { yfCacheSet(cacheKey, null); return null; }
+    // Forward-fill close gaps so the line never breaks, keep timestamps aligned.
+    const filled = forwardFill(closes);
+    const t: number[] = [];
+    const c: number[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      if (filled[i] != null) { t.push(ts[i]); c.push(filled[i] as number); }
+    }
+    const out = c.length > 1 ? { t, c } : null;
+    yfCacheSet(cacheKey, out);
+    return out;
+  } catch (_) { yfCacheSet(cacheKey, null); return null; }
+}
+
+// Quarterly fundamentals via the fundamentals-timeseries endpoint. Returns the
+// raw `timeseries.result` array (one entry per requested metric) or null.
+async function yfFundamentalsTimeseries(symbol: string): Promise<any[] | null> {
+  const cacheKey = `yf-fund-${symbol}`;
+  const cached = yfCacheGet(cacheKey);
+  if (cached !== undefined) return cached as any[] | null;
+
+  const auth = await yfGetAuth();
+  const types = [
+    "quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyGrossProfit",
+    "quarterlyOperatingIncome", "quarterlyEBITDA", "quarterlyNormalizedEBITDA",
+    "quarterlyDilutedEPS", "quarterlyBasicEPS",
+    "quarterlyOperatingCashFlow", "quarterlyFreeCashFlow", "quarterlyCapitalExpenditure",
+    "quarterlyInvestingCashFlow", "quarterlyFinancingCashFlow",
+    "quarterlyCashAndCashEquivalents", "quarterlyCashCashEquivalentsAndShortTermInvestments",
+    "quarterlyTotalDebt", "quarterlyStockholdersEquity", "quarterlyTotalAssets",
+  ];
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 6 * 365 * 24 * 3600; // ~6 years → up to 24 quarters
+  const base = "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries";
+  const url =
+    `${base}/${encodeURIComponent(symbol)}?symbol=${encodeURIComponent(symbol)}` +
+    `&type=${types.join(",")}&period1=${start}&period2=${now}&merge=false` +
+    (auth?.crumb ? `&crumb=${encodeURIComponent(auth.crumb)}` : "");
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": YF_UA, ...(auth?.cookie ? { Cookie: auth.cookie } : {}) },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) { console.log(`Yahoo ${symbol} timeseries HTTP ${r.status}`); yfCacheSet(cacheKey, null); return null; }
+    const j = await r.json();
+    const result = j?.timeseries?.result;
+    const out = Array.isArray(result) ? result : null;
+    yfCacheSet(cacheKey, out);
+    return out;
+  } catch (_) { yfCacheSet(cacheKey, null); return null; }
+}
+
+// Convert Yahoo's timeseries into the same row shape every other source emits,
+// so it slots straight into mergeQuarterlyData() as the highest-priority source.
+async function fetchYahooQuarterlyFinancials(ticker: string): Promise<any[]> {
+  const result = await yfFundamentalsTimeseries(ticker);
+  if (!result) { console.log(`Yahoo ${ticker}: no fundamentals`); return []; }
+
+  // type -> Map<asOfDate, rawNumber|null>
+  const byType = new Map<string, Map<string, number | null>>();
+  for (const series of result) {
+    const type: string | undefined = series?.meta?.type?.[0];
+    if (!type) continue;
+    const arr = series[type];
+    if (!Array.isArray(arr)) continue;
+    const m = new Map<string, number | null>();
+    for (const pt of arr) {
+      if (!pt?.asOfDate) continue;
+      m.set(pt.asOfDate, jsonSafeNum(pt?.reportedValue?.raw));
+    }
+    byType.set(type, m);
+  }
+
+  const dates = new Set<string>();
+  for (const m of byType.values()) for (const d of m.keys()) dates.add(d);
+  const allDates = [...dates].sort((a, b) => b.localeCompare(a)); // newest first
+  const pick = (type: string, date: string) => byType.get(type)?.get(date) ?? null;
+
+  const rows = allDates.map((date, idx) => {
+    const rev         = pick("quarterlyTotalRevenue", date);
+    const grossProfit = pick("quarterlyGrossProfit", date);
+    const ebitda      = pick("quarterlyEBITDA", date) ?? pick("quarterlyNormalizedEBITDA", date);
+    const netIncome   = pick("quarterlyNetIncome", date);
+    const eps         = pick("quarterlyDilutedEPS", date) ?? pick("quarterlyBasicEPS", date);
+
+    const opCF        = pick("quarterlyOperatingCashFlow", date);
+    const capexRaw    = pick("quarterlyCapitalExpenditure", date); // negative outflow
+    const capex       = capexRaw != null ? Math.abs(capexRaw) : null;
+    const fcf         = pick("quarterlyFreeCashFlow", date)
+                      ?? (opCF != null && capexRaw != null ? opCF + capexRaw : null);
+    const investingCF = pick("quarterlyInvestingCashFlow", date);
+    const financingCF = pick("quarterlyFinancingCashFlow", date);
+
+    const cash        = pick("quarterlyCashAndCashEquivalents", date)
+                      ?? pick("quarterlyCashCashEquivalentsAndShortTermInvestments", date);
+    const totalDebt   = pick("quarterlyTotalDebt", date);
+    const equity      = pick("quarterlyStockholdersEquity", date);
+    const totalAssets = pick("quarterlyTotalAssets", date);
+    const netDebt     = (totalDebt != null && cash != null) ? totalDebt - cash : null;
+
+    const prevDate = allDates[idx + 4];
+    const prevRev  = prevDate ? pick("quarterlyTotalRevenue", prevDate) : null;
+    const revGrowth = (rev != null && prevRev != null && Math.abs(prevRev) > 0)
+      ? `${((rev - prevRev) / Math.abs(prevRev) * 100) >= 0 ? "+" : ""}${((rev - prevRev) / Math.abs(prevRev) * 100).toFixed(1)}%`
+      : "N/D";
+
+    return {
+      period:        date,
+      revenue:       fmt(rev, "B"),
+      revenueGrowth: revGrowth,
+      grossMargin:   (rev != null && rev !== 0 && grossProfit != null) ? `${((grossProfit / rev) * 100).toFixed(1)}%` : "N/D",
+      ebitda:        fmt(ebitda, "B"),
+      netIncome:     fmt(netIncome, "B"),
+      netMargin:     (rev != null && rev !== 0 && netIncome != null) ? `${((netIncome / rev) * 100).toFixed(1)}%` : "N/D",
+      eps:           eps != null ? `$${Number(eps).toFixed(2)}` : "N/D",
+      operatingCF:   fmt(opCF, "B"),
+      freeCashFlow:  fmt(fcf, "B"),
+      capex:         capex != null ? fmt(capex, "B") : "N/D",
+      investingCF:   fmt(investingCF, "B"),
+      financingCF:   fmt(financingCF, "B"),
+      cash:          fmt(cash, "B"),
+      totalDebt:     fmt(totalDebt, "B"),
+      netDebt:       fmt(netDebt, "B"),
+      equity:        fmt(equity, "B"),
+      totalAssets:   fmt(totalAssets, "B"),
+    };
+  }).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.period)).slice(0, 16);
+
+  console.log(`Yahoo ${ticker}: ${rows.length} quarters`);
+  return rows;
+}
+
+// =====================================================
 // GEMINI (shared fallback chain)
 // =====================================================
 
@@ -784,7 +1043,7 @@ ${context}`;
   }
 }
 
-function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFallback: any[] = []): any[] {
+function mergeQuarterlyData(yahoo: any[], finnhub: any[], fmp: any[], twelveData: any[], aiFallback: any[] = []): any[] {
   const merged = new Map<string, any>();
   const fields = ["revenueGrowth","grossMargin","ebitda","netIncome","netMargin","eps",
                   "operatingCF","freeCashFlow","capex","investingCF","financingCF",
@@ -834,7 +1093,9 @@ function mergeQuarterlyData(finnhub: any[], fmp: any[], twelveData: any[], aiFal
     }
   };
 
-  // Priority order: FMP > Twelve Data > Finnhub > AI fallback (last resort)
+  // Priority order: Yahoo > FMP > Twelve Data > Finnhub > AI fallback (last resort).
+  // The first source to set a field wins; later sources only fill remaining gaps.
+  fillFrom(yahoo);
   fillFrom(fmp);
   fillFrom(twelveData);
   fillFrom(finnhub);
@@ -1606,6 +1867,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
 
         // Step 2: All remaining data in parallel
         const [
+          yahooQuarterly,
           finnhubQuarterly,
           fmpQuarterly,
           twelveDataQuarterly,
@@ -1623,6 +1885,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           risksCatalystsSearch,
           catalystCalendar,
         ] = await Promise.all([
+          fetchYahooQuarterlyFinancials(cleanTicker),
           env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
           env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
           env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
@@ -1653,8 +1916,9 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
         ]);
 
-        // Step 3: Merge quarterly data from all structured sources
+        // Step 3: Merge quarterly data from all structured sources (Yahoo first)
         let quarterlyHistory = mergeQuarterlyData(
+          yahooQuarterly      as any[],
           finnhubQuarterly    as any[],
           fmpQuarterly        as any[],
           twelveDataQuarterly as any[],
@@ -1667,6 +1931,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
           if (aiFallback.length > 0) {
             quarterlyHistory = mergeQuarterlyData(
+              yahooQuarterly      as any[],
               finnhubQuarterly    as any[],
               fmpQuarterly        as any[],
               twelveDataQuarterly as any[],
@@ -1682,6 +1947,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           hasFmp:         !!env.FMP_KEY,
           hasTwelveData:  !!env.TWELVE_KEY,
           hasTavily:      !!env.TAVILY_KEY,
+          yahooRows:      (yahooQuarterly as any[]).length,
           finnhubRows:    (finnhubQuarterly as any[]).length,
           fmpRows:        (fmpQuarterly as any[]).length,
           twelveDataRows: (twelveDataQuarterly as any[]).length,
@@ -1867,6 +2133,110 @@ Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones 
 // MARKET DATA HANDLER
 // =====================================================
 
+// Dedicated, chart-ready fundamentals endpoint backed by Yahoo Finance.
+// Body: { fundamentals: true, ticker: "AAPL" }
+// Returns a guaranteed-serializable object: parallel forward-filled numeric
+// series (so chart lines never break) plus 3-month daily price history.
+async function handleFundamentals(ticker: string): Promise<Response> {
+  const sym = ticker.trim().toUpperCase();
+
+  const qLabel = (iso: string): string => {
+    const d = new Date(iso + "T00:00:00Z");
+    if (isNaN(d.getTime())) return iso;
+    return `Q${Math.floor(d.getUTCMonth() / 3) + 1}'${String(d.getUTCFullYear()).slice(2)}`;
+  };
+
+  const [tsResult, price] = await Promise.all([
+    yfFundamentalsTimeseries(sym),
+    fetchYahooChart(sym, "3mo", "1d"),
+  ]);
+
+  // Ticker doesn't exist / Yahoo has nothing → explicit not-found, stable shape.
+  if (!tsResult && !price) {
+    return new Response(JSON.stringify({
+      ticker: sym, found: false, periods: [], series: {}, price: null, ts: Date.now(),
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  // type -> Map<asOfDate, raw>
+  const byType = new Map<string, Map<string, number | null>>();
+  for (const series of (tsResult ?? [])) {
+    const type: string | undefined = series?.meta?.type?.[0];
+    if (!type) continue;
+    const arr = series[type];
+    if (!Array.isArray(arr)) continue;
+    const m = new Map<string, number | null>();
+    for (const pt of arr) {
+      if (!pt?.asOfDate) continue;
+      m.set(pt.asOfDate, jsonSafeNum(pt?.reportedValue?.raw));
+    }
+    byType.set(type, m);
+  }
+
+  const dates = new Set<string>();
+  for (const m of byType.values()) for (const d of m.keys()) dates.add(d);
+  // oldest → newest is what charts plot left-to-right
+  const periodsIso = [...dates].sort((a, b) => a.localeCompare(b)).slice(-16);
+  const pick = (type: string, date: string) => byType.get(type)?.get(date) ?? null;
+  const col = (type: string) => periodsIso.map((d) => pick(type, d));
+
+  const revenue   = col("quarterlyTotalRevenue");
+  const grossP    = col("quarterlyGrossProfit");
+  const ebitda    = periodsIso.map((d) => pick("quarterlyEBITDA", d) ?? pick("quarterlyNormalizedEBITDA", d));
+  const netIncome = col("quarterlyNetIncome");
+  const opCF      = col("quarterlyOperatingCashFlow");
+  const capexRaw  = col("quarterlyCapitalExpenditure");
+  const capex     = capexRaw.map((v) => (v != null ? Math.abs(v) : null));
+  const fcf        = periodsIso.map((d, i) => {
+    const direct = pick("quarterlyFreeCashFlow", d);
+    if (direct != null) return direct;
+    const o = opCF[i]; const c = capexRaw[i];
+    return (o != null && c != null) ? o + c : null;
+  });
+  const cash       = periodsIso.map((d) => pick("quarterlyCashAndCashEquivalents", d) ?? pick("quarterlyCashCashEquivalentsAndShortTermInvestments", d));
+  const totalDebt  = col("quarterlyTotalDebt");
+  const equity     = col("quarterlyStockholdersEquity");
+  const totalAssets= col("quarterlyTotalAssets");
+
+  const grossMargin = revenue.map((r, i) => (r != null && r !== 0 && grossP[i] != null) ? (grossP[i]! / r) * 100 : null);
+  const netMargin   = revenue.map((r, i) => (r != null && r !== 0 && netIncome[i] != null) ? (netIncome[i]! / r) * 100 : null);
+  const revenueGrowth = revenue.map((r, i) => {
+    const prev = revenue[i - 4];
+    return (i >= 4 && r != null && prev != null && Math.abs(prev) > 0) ? ((r - prev) / Math.abs(prev)) * 100 : null;
+  });
+
+  // Forward-fill every monetary series so chart lines are continuous; ratios
+  // are NOT forward-filled (a fake flat margin would be misleading) — they stay
+  // null and the chart's connectNulls handles the gaps.
+  const payload = deepJsonSafe({
+    ticker: sym,
+    found: periodsIso.length > 0 || !!price,
+    periods: periodsIso.map(qLabel),
+    periodsIso,
+    series: {
+      revenue:      forwardFill(revenue),
+      ebitda:       forwardFill(ebitda),
+      netIncome:    forwardFill(netIncome),
+      operatingCF:  forwardFill(opCF),
+      capex:        forwardFill(capex),
+      fcf:          forwardFill(fcf),
+      totalAssets:  forwardFill(totalAssets),
+      cash:         forwardFill(cash),
+      totalDebt:    forwardFill(totalDebt),
+      equity:       forwardFill(equity),
+      grossMargin:  grossMargin.map(jsonSafeNum),
+      netMargin:    netMargin.map(jsonSafeNum),
+      revenueGrowth: revenueGrowth.map(jsonSafeNum),
+    },
+    price: price ?? null,
+    ts: Date.now(),
+  });
+
+  return new Response(JSON.stringify(payload), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<Response> {
   // Major asset-class proxies — quotes from Finnhub, candles from Yahoo Finance
   const INDICES: Array<{ symbol: string; label: string }> = [
@@ -1881,40 +2251,14 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
   const indexSymbols = INDICES.map(i => i.symbol);
   const allSymbols = [...indexSymbols, ...extraSymbols.filter(s => !indexSymbols.includes(s))];
 
-  // Yahoo Finance v8 chart endpoint — free, no key, returns OHLC + timestamps.
-  // Replaces Finnhub /stock/candle which now returns "no_data" for the free tier.
-  // range=3mo gives ~63 daily bars; that's enough for the right-column charts
-  // while keeping the 30D % change calculation accurate.
-  async function fetchYahooCandle(symbol: string): Promise<{ t: number[]; c: number[] } | null> {
-    try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=3mo&interval=1d`;
-      const r = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (!r.ok) return null;
-      const j = await r.json();
-      const res = j?.chart?.result?.[0];
-      const ts = res?.timestamp as number[] | undefined;
-      const closes = res?.indicators?.quote?.[0]?.close as Array<number | null> | undefined;
-      if (!ts || !closes || ts.length === 0 || ts.length !== closes.length) return null;
-      const t: number[] = [];
-      const c: number[] = [];
-      for (let i = 0; i < ts.length; i++) {
-        if (closes[i] != null) { t.push(ts[i]); c.push(closes[i] as number); }
-      }
-      return c.length > 1 ? { t, c } : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
+  // Candles come from the shared, cached fetchYahooChart() helper (3-month daily
+  // closes, forward-filled). The 10-min TTL cache shields us from IP rate-limits.
   const [quotesResult, candlesResult, fred10y, fred2y] = await Promise.allSettled([
     Promise.all(allSymbols.map(s =>
       finnhubGet(`/quote?symbol=${s}`, env.FINNHUB_KEY)
         .then(d => d ? { symbol: s, c: d.c as number, dp: d.dp as number } : { symbol: s, c: null, dp: null })
     )),
-    Promise.all(indexSymbols.map(async s => ({ symbol: s, data: await fetchYahooCandle(s) }))),
+    Promise.all(indexSymbols.map(async s => ({ symbol: s, data: await fetchYahooChart(s, "3mo", "1d") }))),
     env.FRED_KEY
       ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
@@ -2008,6 +2352,12 @@ Deno.serve(async (req) => {
         ? (body.symbols as any[]).filter(s => typeof s === "string" && /^[A-Z0-9.^]{1,10}$/.test(s)).slice(0, 6)
         : [];
       return await handleMarketData(env, extraSymbols);
+    }
+
+    // Chart-ready fundamentals from Yahoo Finance — no Gemini needed
+    if (body.fundamentals === true && typeof body.ticker === "string"
+        && body.ticker.trim().length > 0 && body.ticker.trim().length <= 12) {
+      return await handleFundamentals(body.ticker);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
