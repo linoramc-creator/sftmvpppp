@@ -155,11 +155,63 @@ export interface QuarterlyDebug {
   hasFmp:         boolean;
   hasTwelveData?: boolean;
   hasTavily?:     boolean;
+  yahooRows?:     number;
   finnhubRows:    number;
   fmpRows:        number;
   twelveDataRows?: number;
   aiFallbackRows?: number;
   mergedRows:     number;
+}
+
+// Chart-ready fundamentals served by the dedicated Yahoo Finance endpoint
+// (body: { fundamentals: true, ticker }). Every numeric series is forward-filled
+// and JSON-safe (no NaN), so charts can map it directly without guards.
+export interface TickerFundamentals {
+  ticker: string;
+  found: boolean;
+  periods: string[];      // e.g. ["Q1'23", "Q2'23", ...] oldest → newest
+  periodsIso: string[];   // e.g. ["2023-03-31", ...]
+  series: {
+    revenue: (number | null)[];
+    ebitda: (number | null)[];
+    netIncome: (number | null)[];
+    operatingCF: (number | null)[];
+    capex: (number | null)[];
+    fcf: (number | null)[];
+    totalAssets: (number | null)[];
+    cash: (number | null)[];
+    totalDebt: (number | null)[];
+    equity: (number | null)[];
+    grossMargin: (number | null)[];
+    netMargin: (number | null)[];
+    revenueGrowth: (number | null)[];
+  };
+  price: { t: number[]; c: number[] } | null;
+  ts: number;
+}
+
+// Fetches the dedicated, chart-ready fundamentals object. Returns null on network
+// error; returns an object with `found: false` when the ticker doesn't exist —
+// callers should branch on `.found` to show a fallback UI.
+export async function fetchTickerFundamentals(symbol: string): Promise<TickerFundamentals | null> {
+  try {
+    const resp = await fetch(ANALYZE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ fundamentals: true, ticker: symbol }),
+    });
+    if (!resp.ok) {
+      console.warn("[fetchTickerFundamentals] HTTP", resp.status);
+      return null;
+    }
+    return resp.json();
+  } catch (e) {
+    console.warn("[fetchTickerFundamentals] network error:", e);
+    return null;
+  }
 }
 
 export interface CatalystCalendar {
