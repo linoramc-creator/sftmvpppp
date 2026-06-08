@@ -4,6 +4,7 @@ import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPe
 import { useToast } from "@/hooks/use-toast";
 import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
+import { OptionsView } from "@/components/options/OptionsView";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"ticker" | "sector" | "guardados">("ticker");
+  const [navTab, setNavTab] = useState<"ticker" | "sector" | "guardados" | "opciones">("ticker");
 
   const [clock, setClock] = useState("");
 
@@ -441,6 +442,7 @@ const Index = () => {
             <nav className="flex">
               {([
                 { label: "TICKER",    key: "ticker"    },
+                { label: "OPCIONES",  key: "opciones"  },
                 { label: "SECTOR",    key: "sector"    },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
@@ -705,6 +707,9 @@ const Index = () => {
           </div>
         </div>
       )}
+
+      {/* ── OPCIONES tab (isolated, additive — yfinance Python service) ── */}
+      {navTab === "opciones" && <OptionsView />}
     </div>
   );
 };
