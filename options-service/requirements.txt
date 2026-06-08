@@ -1,0 +1,24 @@
+# ── Options service dependencies ───────────────────────────────────────
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# Market data
+yfinance==0.2.51
+pandas==2.2.3
+numpy==2.2.1
+
+# Math (Greeks / aggregations). The BSM core falls back to a numpy-only
+# implementation if scipy is unavailable, but scipy is preferred for speed.
+scipy==1.15.0
+
+# HTTP + resilience
+httpx==0.28.1
+tenacity==9.0.0
+
+# Supabase cache (optional; the service degrades gracefully without it)
+supabase==2.11.0
+
+# Tests
+pytest==8.3.4
