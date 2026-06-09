@@ -4,3 +4,6 @@ dist/
 .env.local
 supabase/.temp/
 .claude/
+__pycache__/
+*.pyc
+.pytest_cache/
