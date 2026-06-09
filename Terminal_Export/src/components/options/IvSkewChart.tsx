@@ -7,7 +7,7 @@ import type { SkewResponse } from "@/types/options";
 import { OPT_COLORS, ttStyle, fmtPctFrac, fmtPrice } from "./theme";
 
 export function IvSkewChart({ data }: { data: SkewResponse }) {
-  const rows = [...data.points]
+  const rows = [...(data.points ?? [])]
     .sort((a, b) => a.strike - b.strike)
     .map((p) => ({
       strike: p.strike,

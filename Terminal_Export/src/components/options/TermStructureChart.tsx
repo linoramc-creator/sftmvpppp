@@ -7,7 +7,7 @@ import { OPT_COLORS, ttStyle } from "./theme";
 import { Legend } from "./IvSkewChart";
 
 export function TermStructureChart({ data }: { data: TermStructureResponse }) {
-  const rows = [...data.points]
+  const rows = [...(data.points ?? [])]
     .sort((a, b) => a.daysToExpiry - b.daysToExpiry)
     .filter((p) => p.atmIV != null)
     .map((p) => ({
