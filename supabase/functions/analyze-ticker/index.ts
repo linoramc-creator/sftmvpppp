@@ -2325,6 +2325,466 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
 }
 
 // =====================================================
+// OPTIONS  (sección "Opciones") — additive & isolated
+//   Pulls option chains from Yahoo and computes EVERY Greek + flow
+//   aggregation analytically (Black-Scholes-Merton) — never by an LLM.
+//   Reuses corsHeaders / YF_UA / yfGetAuth / fetchYahooChart defined above.
+//   Dispatched from the main handler via body.optionsAction.
+//   Verified vs Hull: call 10.4506, delta 0.6368 (S=100,K=100,T=1,r=.05,σ=.2).
+// =====================================================
+
+const OPT_RISK_FREE = parseFloat(Deno.env.get("RISK_FREE_RATE") || "0.0525");
+const OPT_MULT = 100;
+const OPT_MIN_IV = 0.01;
+const OPT_MAX_IV = 5.0;
+
+// erf via Abramowitz-Stegun 7.1.26 (max error ~1.5e-7) — ample for Greeks.
+function oErf(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-ax * ax);
+  return sign * y;
+}
+const O_SQRT2 = Math.sqrt(2);
+const O_INV_SQRT_2PI = 1 / Math.sqrt(2 * Math.PI);
+const oNormCdf = (x: number): number => 0.5 * (1 + oErf(x / O_SQRT2));
+const oNormPdf = (x: number): number => O_INV_SQRT_2PI * Math.exp(-0.5 * x * x);
+
+interface OptGreeks {
+  delta: number | null; gamma: number | null; theta: number | null;
+  vega: number | null; rho: number | null; vanna: number | null; charm: number | null;
+}
+
+// Trader-scaled Greeks: theta & charm per calendar DAY; vega/rho/vanna per 1 vol pt.
+function oGreeks(S: number, K: number, T: number, r: number, q: number, sigma: number, isCall: boolean): OptGreeks {
+  if (!(T > 0) || !(sigma > 0) || !(S > 0) || !(K > 0)) {
+    return { delta: null, gamma: null, theta: null, vega: null, rho: null, vanna: null, charm: null };
+  }
+  const volSqrtT = sigma * Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / volSqrtT;
+  const d2 = d1 - volSqrtT;
+  const dq = Math.exp(-q * T);
+  const dr = Math.exp(-r * T);
+  const sqrtT = Math.sqrt(T);
+  const pdf = oNormPdf(d1);
+
+  const delta = isCall ? dq * oNormCdf(d1) : dq * (oNormCdf(d1) - 1);
+  const gamma = (dq * pdf) / (S * sigma * sqrtT);
+  const vega = S * dq * pdf * sqrtT;
+  const common = -(S * dq * pdf * sigma) / (2 * sqrtT);
+  const thetaYr = isCall
+    ? common - r * K * dr * oNormCdf(d2) + q * S * dq * oNormCdf(d1)
+    : common + r * K * dr * oNormCdf(-d2) - q * S * dq * oNormCdf(-d1);
+  const rhoRaw = isCall ? K * T * dr * oNormCdf(d2) : -K * T * dr * oNormCdf(-d2);
+  const vannaRaw = (-dq * pdf * d2) / sigma;
+  const charmCore = (dq * pdf * (2 * (r - q) * T - d2 * sigma * sqrtT)) / (2 * T * sigma * sqrtT);
+  const charmYr = isCall ? q * dq * oNormCdf(d1) - charmCore : -q * dq * oNormCdf(-d1) - charmCore;
+
+  const c = (v: number): number | null => (Number.isFinite(v) ? v : null);
+  return {
+    delta: c(delta), gamma: c(gamma), theta: c(thetaYr / 365),
+    vega: c(vega * 0.01), rho: c(rhoRaw * 0.01), vanna: c(vannaRaw * 0.01), charm: c(charmYr / 365),
+  };
+}
+
+type OptType = "call" | "put";
+interface OptContract {
+  contractSymbol: string; type: OptType; strike: number;
+  lastPrice: number | null; bid: number | null; ask: number | null; mid: number | null;
+  volume: number | null; openInterest: number | null; impliedVolatility: number | null;
+  inTheMoney: boolean;
+  delta: number | null; gamma: number | null; theta: number | null; vega: number | null;
+  rho: number | null; vanna: number | null; charm: number | null;
+  intrinsic: number | null; extrinsic: number | null;
+}
+
+const oF = (v: unknown): number | null => {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : null;
+};
+const oNum = (v: unknown): number => oF(v) ?? 0;
+const oInt = (v: unknown): number | null => { const n = oF(v); return n === null ? null : Math.trunc(n); };
+const oNowIso = (): string => new Date().toISOString();
+const oIsoFromEpoch = (e: number): string => new Date(e * 1000).toISOString().slice(0, 10);
+
+function oYearFraction(expiry: string): { days: number; T: number } {
+  const exp = Date.parse(`${expiry}T00:00:00Z`);
+  const days = Math.floor((exp - Date.now()) / 86_400_000);
+  let T = Math.max(days, 0) / 365;
+  if (T <= 0) T = 0.5 / 365;
+  return { days, T };
+}
+
+class OptError extends Error { status: number; constructor(m: string, s = 400) { super(m); this.status = s; } }
+
+interface OptYahooResult {
+  spot: number; dividendYield: number; expirationDates: number[];
+  rawCalls: Record<string, unknown>[]; rawPuts: Record<string, unknown>[];
+}
+
+interface OptCacheEntry { ts: number; data: unknown; }
+const OPT_CACHE = new Map<string, OptCacheEntry>();
+const OPT_CACHE_TTL = 4 * 60 * 60 * 1000; // 4h
+function optCacheGet<T>(k: string): T | undefined {
+  const e = OPT_CACHE.get(k);
+  if (!e) return undefined;
+  if (Date.now() - e.ts > OPT_CACHE_TTL) { OPT_CACHE.delete(k); return undefined; }
+  return e.data as T;
+}
+function optCacheSet(k: string, data: unknown): void {
+  OPT_CACHE.set(k, { ts: Date.now(), data });
+  if (OPT_CACHE.size > 200) {
+    let oldest: string | null = null, oldestTs = Infinity;
+    for (const [kk, v] of OPT_CACHE) if (v.ts < oldestTs) { oldestTs = v.ts; oldest = kk; }
+    if (oldest) OPT_CACHE.delete(oldest);
+  }
+}
+
+async function oYahooOptions(ticker: string, dateEpoch?: number): Promise<OptYahooResult> {
+  const auth = await yfGetAuth();
+  const sym = encodeURIComponent(ticker.toUpperCase());
+  let url = `https://query2.finance.yahoo.com/v7/finance/options/${sym}`;
+  const qp: string[] = [];
+  if (dateEpoch) qp.push(`date=${dateEpoch}`);
+  if (auth?.crumb) qp.push(`crumb=${encodeURIComponent(auth.crumb)}`);
+  if (qp.length) url += `?${qp.join("&")}`;
+
+  const r = await fetch(url, {
+    headers: { "User-Agent": YF_UA, ...(auth?.cookie ? { Cookie: auth.cookie } : {}) },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!r.ok) throw new OptError(`Yahoo respondió ${r.status} para ${ticker}`, 502);
+  const j = await r.json();
+  const res = j?.optionChain?.result?.[0];
+  if (!res) throw new OptError(j?.optionChain?.error?.description || `Sin datos de opciones para ${ticker}`, 404);
+  const quote = res.quote ?? {};
+  const spot = oF(quote.regularMarketPrice) ?? oF(quote.postMarketPrice) ?? oF(quote.regularMarketPreviousClose) ?? 0;
+  if (!spot) throw new OptError(`Sin precio spot para ${ticker}`, 404);
+
+  let q = oF(quote.trailingAnnualDividendYield);
+  if (q === null) { const dyPct = oF(quote.dividendYield); q = dyPct === null ? 0 : (dyPct > 1 ? dyPct / 100 : dyPct); }
+  q = Math.max(0, Math.min(q ?? 0, 0.25));
+
+  const opt = res.options?.[0] ?? {};
+  return {
+    spot, dividendYield: q,
+    expirationDates: (res.expirationDates ?? []).map((e: unknown) => Number(e)).filter((e: number) => e > 0),
+    rawCalls: opt.calls ?? [], rawPuts: opt.puts ?? [],
+  };
+}
+
+function oEnrich(rows: Record<string, unknown>[], type: OptType, S: number, T: number, r: number, q: number): OptContract[] {
+  const isCall = type === "call";
+  return rows.map((rec) => {
+    const k = oF(rec.strike);
+    const bid = oF(rec.bid), ask = oF(rec.ask), last = oF(rec.lastPrice);
+    let iv = oF(rec.impliedVolatility);
+    const badIv = iv === null || iv < OPT_MIN_IV || iv > OPT_MAX_IV;
+    if (badIv) iv = null;
+
+    let mid: number | null = null;
+    if (bid !== null && ask !== null && bid > 0 && ask > 0) mid = (bid + ask) / 2;
+    else if (last !== null && last > 0) mid = last;
+
+    let intrinsic: number | null = null;
+    if (k !== null) intrinsic = isCall ? Math.max(S - k, 0) : Math.max(k - S, 0);
+    const extrinsic = mid !== null && intrinsic !== null ? mid - intrinsic : null;
+
+    let itm = rec.inTheMoney as boolean | undefined;
+    if (itm === undefined && k !== null) itm = isCall ? S > k : S < k;
+
+    const g = !badIv && k !== null && iv !== null
+      ? oGreeks(S, k, T, r, q, iv, isCall)
+      : { delta: null, gamma: null, theta: null, vega: null, rho: null, vanna: null, charm: null };
+
+    return {
+      contractSymbol: String(rec.contractSymbol ?? `${type}-${k}`),
+      type, strike: k ?? 0, lastPrice: last, bid, ask, mid,
+      volume: oInt(rec.volume), openInterest: oInt(rec.openInterest),
+      impliedVolatility: iv, inTheMoney: Boolean(itm), ...g, intrinsic, extrinsic,
+    };
+  });
+}
+
+interface OptStrikeRow {
+  strike: number; gex: number; callGex: number; putGex: number; dex: number; vex: number;
+  callOI: number; putOI: number; callVolume: number; putVolume: number;
+}
+function oExposures(calls: OptContract[], puts: OptContract[], spot: number, mult = OPT_MULT) {
+  const set = new Set<number>();
+  calls.forEach((c) => set.add(c.strike)); puts.forEach((p) => set.add(p.strike));
+  const strikes = [...set].sort((a, b) => a - b);
+  const table = new Map<number, OptStrikeRow>();
+  for (const k of strikes) table.set(k, { strike: k, gex: 0, callGex: 0, putGex: 0, dex: 0, vex: 0, callOI: 0, putOI: 0, callVolume: 0, putVolume: 0 });
+  const s2 = spot * spot * 0.01;
+
+  for (const c of calls) {
+    const row = table.get(c.strike)!; const oi = Math.trunc(oNum(c.openInterest));
+    row.callOI += oi; row.callVolume += Math.trunc(oNum(c.volume));
+    if (c.gamma !== null) { const cg = c.gamma * oi * mult * s2; row.callGex += cg; row.gex += cg; }
+    if (c.delta !== null) row.dex += c.delta * oi * mult * spot;
+    if (c.vega !== null) row.vex += c.vega * oi * mult;
+  }
+  for (const p of puts) {
+    const row = table.get(p.strike)!; const oi = Math.trunc(oNum(p.openInterest));
+    row.putOI += oi; row.putVolume += Math.trunc(oNum(p.volume));
+    if (p.gamma !== null) { const pg = -p.gamma * oi * mult * s2; row.putGex += pg; row.gex += pg; }
+    if (p.delta !== null) row.dex += p.delta * oi * mult * spot;
+    if (p.vega !== null) row.vex += -p.vega * oi * mult;
+  }
+  const perStrike = strikes.map((k) => table.get(k)!);
+  return {
+    perStrike,
+    totals: {
+      totalGex: perStrike.reduce((s, r) => s + r.gex, 0),
+      totalDex: perStrike.reduce((s, r) => s + r.dex, 0),
+      totalVex: perStrike.reduce((s, r) => s + r.vex, 0),
+    },
+  };
+}
+function oGammaFlip(perStrike: OptStrikeRow[]): number | null {
+  const pts = [...perStrike].sort((a, b) => a.strike - b.strike);
+  let cum = 0, prevCum: number | null = null, prevStrike = 0;
+  for (const p of pts) {
+    cum += p.gex;
+    if (prevCum !== null && ((prevCum <= 0 && cum > 0) || (prevCum >= 0 && cum < 0))) {
+      if (cum !== prevCum) { const frac = -prevCum / (cum - prevCum); return prevStrike + frac * (p.strike - prevStrike); }
+      return p.strike;
+    }
+    prevCum = cum; prevStrike = p.strike;
+  }
+  return null;
+}
+function oMaxPain(calls: OptContract[], puts: OptContract[]): number | null {
+  const set = new Set<number>(); calls.forEach((c) => set.add(c.strike)); puts.forEach((p) => set.add(p.strike));
+  const strikes = [...set].sort((a, b) => a - b);
+  if (!strikes.length) return null;
+  let bestK: number | null = null, bestVal = Infinity;
+  for (const kt of strikes) {
+    let total = 0;
+    for (const c of calls) if (kt > c.strike) total += (kt - c.strike) * oNum(c.openInterest);
+    for (const p of puts) if (kt < p.strike) total += (p.strike - kt) * oNum(p.openInterest);
+    if (total < bestVal) { bestVal = total; bestK = kt; }
+  }
+  return bestK;
+}
+function oPutCallRatio(calls: OptContract[], puts: OptContract[]) {
+  const cOI = calls.reduce((s, c) => s + oNum(c.openInterest), 0);
+  const pOI = puts.reduce((s, p) => s + oNum(p.openInterest), 0);
+  const cV = calls.reduce((s, c) => s + oNum(c.volume), 0);
+  const pV = puts.reduce((s, p) => s + oNum(p.volume), 0);
+  return { oi: cOI > 0 ? pOI / cOI : null, vol: cV > 0 ? pV / cV : null };
+}
+function oWalls(calls: OptContract[], puts: OptContract[], n = 5) {
+  const cw = calls.filter((c) => oNum(c.openInterest) > 0)
+    .map((c) => ({ strike: c.strike, openInterest: Math.trunc(oNum(c.openInterest)), type: "call" as OptType }))
+    .sort((a, b) => b.openInterest - a.openInterest).slice(0, n);
+  const pw = puts.filter((p) => oNum(p.openInterest) > 0)
+    .map((p) => ({ strike: p.strike, openInterest: Math.trunc(oNum(p.openInterest)), type: "put" as OptType }))
+    .sort((a, b) => b.openInterest - a.openInterest).slice(0, n);
+  return { cw, pw };
+}
+function oAtmIv(calls: OptContract[], puts: OptContract[], spot: number): number | null {
+  const nearest = (rows: OptContract[]): number | null => {
+    const v = rows.map((r) => ({ d: Math.abs(r.strike - spot), iv: r.impliedVolatility }))
+      .filter((x) => x.iv !== null && x.iv > 0).sort((a, b) => a.d - b.d);
+    return v.length ? v[0].iv : null;
+  };
+  const vals = [nearest(calls), nearest(puts)].filter((v): v is number => v !== null);
+  return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+}
+function oStraddleMid(calls: OptContract[], puts: OptContract[], spot: number): number | null {
+  const nm = (rows: OptContract[]): number | null => {
+    const c = rows.map((r) => ({ d: Math.abs(r.strike - spot), m: r.mid }))
+      .filter((x) => x.m !== null && x.m > 0).sort((a, b) => a.d - b.d);
+    return c.length ? c[0].m : null;
+  };
+  const cm = nm(calls), pm = nm(puts);
+  return cm === null || pm === null ? null : cm + pm;
+}
+function oExpectedMove(spot: number, iv: number | null, T: number) {
+  const pct = iv !== null && iv > 0 && T > 0 ? iv * Math.sqrt(T) : null;
+  return { pct, abs: pct !== null ? spot * pct : null };
+}
+function oHvSeries(closes: number[], window = 30): (number | null)[] {
+  const n = closes.length;
+  const out: (number | null)[] = new Array(n).fill(null);
+  if (n < window + 1) return out;
+  const logRet: number[] = [];
+  for (let i = 1; i < n; i++) logRet.push(Math.log(closes[i] / closes[i - 1]));
+  for (let i = window; i < n; i++) {
+    const win = logRet.slice(i - window, i);
+    if (win.length === window && win.every((x) => Number.isFinite(x))) {
+      const mean = win.reduce((s, x) => s + x, 0) / window;
+      const variance = win.reduce((s, x) => s + (x - mean) ** 2, 0) / (window - 1);
+      out[i] = Math.sqrt(variance) * Math.sqrt(252);
+    }
+  }
+  return out;
+}
+
+async function oGetMeta(ticker: string): Promise<OptYahooResult> {
+  const key = `opt-meta:${ticker}`;
+  const cached = optCacheGet<OptYahooResult>(key);
+  const res = cached ?? (await oYahooOptions(ticker));
+  if (!cached) optCacheSet(key, res);
+  return res;
+}
+const oExpiryToEpoch = (dateStr: string, epochs: number[]): number | undefined =>
+  epochs.find((e) => oIsoFromEpoch(e) === dateStr);
+
+async function oBuildChain(ticker: string, expiry: string) {
+  const key = `opt-chain:${ticker}:${expiry}`;
+  const cached = optCacheGet<{ spot: number; q: number; calls: OptContract[]; puts: OptContract[]; days: number; T: number }>(key);
+  if (cached) return cached;
+  const meta = await oGetMeta(ticker);
+  const epoch = oExpiryToEpoch(expiry, meta.expirationDates);
+  const data = await oYahooOptions(ticker, epoch);
+  const { days, T } = oYearFraction(expiry);
+  const r = OPT_RISK_FREE, q = data.dividendYield;
+  const calls = oEnrich(data.rawCalls, "call", data.spot, T, r, q);
+  const puts = oEnrich(data.rawPuts, "put", data.spot, T, r, q);
+  const result = { spot: data.spot, q, calls, puts, days, T };
+  optCacheSet(key, result);
+  return result;
+}
+
+// ── action handlers (shapes mirror src/types/options.ts) ──────────────
+async function oHandleExpiries(ticker: string) {
+  const meta = await oGetMeta(ticker);
+  return { ticker: ticker.toUpperCase(), spot: meta.spot, expiries: meta.expirationDates.map(oIsoFromEpoch), dividendYield: meta.dividendYield, riskFreeRate: OPT_RISK_FREE };
+}
+async function oHandleChain(ticker: string, expiry: string) {
+  const c = await oBuildChain(ticker, expiry);
+  return { ticker: ticker.toUpperCase(), expiry, spot: c.spot, riskFreeRate: OPT_RISK_FREE, dividendYield: c.q, daysToExpiry: c.days, T: c.T, calls: c.calls, puts: c.puts, cached: false, fetchedAt: oNowIso() };
+}
+async function oHandleAggregations(ticker: string, expiry: string) {
+  const c = await oBuildChain(ticker, expiry);
+  const { perStrike, totals } = oExposures(c.calls, c.puts, c.spot);
+  const { cw, pw } = oWalls(c.calls, c.puts);
+  const pcr = oPutCallRatio(c.calls, c.puts);
+  const iv = oAtmIv(c.calls, c.puts, c.spot);
+  const straddle = oStraddleMid(c.calls, c.puts, c.spot);
+  const em = oExpectedMove(c.spot, iv, c.T);
+  return {
+    ticker: ticker.toUpperCase(), expiry, spot: c.spot, perStrike,
+    totalGex: totals.totalGex, totalDex: totals.totalDex, totalVex: totals.totalVex,
+    gammaFlip: oGammaFlip(perStrike), maxPain: oMaxPain(c.calls, c.puts),
+    putCallRatioOI: pcr.oi, putCallRatioVol: pcr.vol,
+    expectedMovePct: em.pct, expectedMoveAbs: em.abs, expectedMoveStraddle: straddle,
+    atmIV: iv, callWalls: cw, putWalls: pw, cached: false, fetchedAt: oNowIso(),
+  };
+}
+async function oHandleSkew(ticker: string, expiry: string) {
+  const c = await oBuildChain(ticker, expiry);
+  const cm = new Map<number, OptContract>(), pm = new Map<number, OptContract>();
+  c.calls.forEach((x) => cm.set(x.strike, x)); c.puts.forEach((x) => pm.set(x.strike, x));
+  const strikes = [...new Set([...cm.keys(), ...pm.keys()])].sort((a, b) => a - b);
+  const points = strikes.map((k) => {
+    const callIV = cm.get(k)?.impliedVolatility ?? null;
+    const putIV = pm.get(k)?.impliedVolatility ?? null;
+    const smile = k >= c.spot ? callIV : putIV;
+    return { strike: k, moneyness: k / c.spot, callIV, putIV, iv: smile };
+  });
+  return { ticker: ticker.toUpperCase(), expiry, spot: c.spot, points, cached: false, fetchedAt: oNowIso() };
+}
+async function oHandleTermStructure(ticker: string, maxExpiries = 8) {
+  const meta = await oGetMeta(ticker);
+  const expiries = meta.expirationDates.slice(0, maxExpiries).map(oIsoFromEpoch);
+  const points = [];
+  for (const expiry of expiries) {
+    try {
+      const c = await oBuildChain(ticker, expiry);
+      const iv = oAtmIv(c.calls, c.puts, c.spot);
+      points.push({ expiry, daysToExpiry: c.days, atmIV: iv, expectedMovePct: oExpectedMove(c.spot, iv, c.T).pct });
+    } catch (_) { /* skip */ }
+  }
+  return { ticker: ticker.toUpperCase(), spot: meta.spot, points, cached: false, fetchedAt: oNowIso() };
+}
+async function oHandleSurface(ticker: string, maxExpiries = 8, mMin = 0.7, mMax = 1.3) {
+  const meta = await oGetMeta(ticker);
+  const expiries = meta.expirationDates.slice(0, maxExpiries).map(oIsoFromEpoch);
+  const points = []; const used: string[] = [];
+  for (const expiry of expiries) {
+    try {
+      const c = await oBuildChain(ticker, expiry);
+      used.push(expiry);
+      const add = (rows: OptContract[], type: OptType) => {
+        for (const r of rows) {
+          const m = r.strike / c.spot;
+          if (r.impliedVolatility === null || m < mMin || m > mMax) continue;
+          if ((type === "call" && m >= 1) || (type === "put" && m < 1)) {
+            points.push({ strike: r.strike, expiry, daysToExpiry: c.days, moneyness: m, iv: r.impliedVolatility, type });
+          }
+        }
+      };
+      add(c.calls, "call"); add(c.puts, "put");
+    } catch (_) { /* skip */ }
+  }
+  return { ticker: ticker.toUpperCase(), spot: meta.spot, expiries: used, points, cached: false, fetchedAt: oNowIso() };
+}
+async function oHandleIvHv(ticker: string, window = 30) {
+  const meta = await oGetMeta(ticker);
+  const hist = await fetchYahooChart(ticker, "1y", "1d");
+  const closes = hist?.c ?? [];
+  const dates = (hist?.t ?? []).map((ts) => new Date(ts * 1000).toISOString().slice(0, 10));
+  const series = oHvSeries(closes, window);
+  const out = dates.map((d, i) => ({ date: d, hv: series[i] ?? null, close: closes[i] ?? null }));
+
+  let currentIV30: number | null = null;
+  try {
+    let best: string | null = null, bestDiff = Infinity;
+    for (const e of meta.expirationDates.map(oIsoFromEpoch)) {
+      const diff = Math.abs(oYearFraction(e).days - 30);
+      if (diff < bestDiff) { bestDiff = diff; best = e; }
+    }
+    if (best) { const c = await oBuildChain(ticker, best); currentIV30 = oAtmIv(c.calls, c.puts, c.spot); }
+  } catch (_) { /* leave null */ }
+
+  let currentHV: number | null = null;
+  for (let i = series.length - 1; i >= 0; i--) { if (series[i] !== null) { currentHV = series[i]; break; } }
+  const variancePremium = currentIV30 !== null && currentHV !== null ? currentIV30 - currentHV : null;
+
+  return {
+    ticker: ticker.toUpperCase(), window, currentIV30, currentHV, variancePremium,
+    series: out, ivRank: null, ivPercentile: null, cached: false, fetchedAt: oNowIso(),
+  };
+}
+
+// Single entrypoint dispatched from the main handler (body.optionsAction).
+async function handleOptions(body: Record<string, any>): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  try {
+    const action = String(body.optionsAction ?? "");
+    const ticker = String(body.ticker ?? "").trim().toUpperCase();
+    const expiry = body.expiry ? String(body.expiry) : "";
+    const window = body.window ? Number(body.window) : 30;
+    if (!ticker || !/^[A-Z0-9.\-^]{1,12}$/.test(ticker)) return json({ error: "Ticker inválido" }, 400);
+    if (["chain", "aggregations", "skew"].includes(action) && !expiry) return json({ error: `La acción '${action}' requiere 'expiry'` }, 400);
+
+    let result: unknown;
+    switch (action) {
+      case "expiries":       result = await oHandleExpiries(ticker); break;
+      case "chain":          result = await oHandleChain(ticker, expiry); break;
+      case "aggregations":   result = await oHandleAggregations(ticker, expiry); break;
+      case "skew":           result = await oHandleSkew(ticker, expiry); break;
+      case "term-structure": result = await oHandleTermStructure(ticker); break;
+      case "surface":        result = await oHandleSurface(ticker); break;
+      case "ivhv":           result = await oHandleIvHv(ticker, window); break;
+      default: return json({ error: `Acción de opciones desconocida: '${action}'` }, 400);
+    }
+    return json(result);
+  } catch (e) {
+    if (e instanceof OptError) return json({ error: e.message }, e.status);
+    console.error("[options] error:", e);
+    return json({ error: (e as Error).message || "Error interno de opciones" }, 500);
+  }
+}
+
+// =====================================================
 // MAIN DISPATCHER
 // =====================================================
 
@@ -2358,6 +2818,11 @@ Deno.serve(async (req) => {
     if (body.fundamentals === true && typeof body.ticker === "string"
         && body.ticker.trim().length > 0 && body.ticker.trim().length <= 12) {
       return await handleFundamentals(body.ticker);
+    }
+
+    // Options analytics (sección "Opciones") — Yahoo + BSM, no Gemini needed
+    if (typeof body.optionsAction === "string" && body.optionsAction.length > 0) {
+      return await handleOptions(body);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");

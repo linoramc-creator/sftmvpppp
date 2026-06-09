@@ -1,9 +1,9 @@
 // Typed client for the Options analytics backend.
 //
-// Backend is a Supabase Edge Function (`options-data`) — the SAME infrastructure
-// the rest of the app uses (analyze-ticker). It pulls option chains from Yahoo
-// and computes every Greek + flow aggregation in code (never by an LLM). No
-// separate Python service or extra URL to configure: it rides on VITE_SUPABASE_URL.
+// Backend lives inside the unified `analyze-ticker` Supabase Edge Function
+// (dispatched by `optionsAction`) — the SAME function as the rest of the app.
+// It pulls option chains from Yahoo and computes every Greek + flow aggregation
+// in code (never by an LLM). No separate service or extra URL to configure.
 
 import type {
   AggregationsResponse,
@@ -17,7 +17,7 @@ import type {
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
 const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
-const OPTIONS_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/options-data` : "";
+const OPTIONS_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/analyze-ticker` : "";
 
 export class OptionsApiError extends Error {
   status?: number;
@@ -55,7 +55,7 @@ async function call<T>(
         Accept: "application/json",
         ...(ANON_KEY ? { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY } : {}),
       },
-      body: JSON.stringify({ action, ...params }),
+      body: JSON.stringify({ optionsAction: action, ...params }),
     });
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") throw e;
