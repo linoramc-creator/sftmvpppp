@@ -6,7 +6,7 @@ import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 import { OptionsSubSection } from "@/components/options/OptionsSubSection";
 import { RiskSubSection } from "@/components/charts/RiskCharts";
-import { EtfSubSection } from "@/components/charts/ETFCharts";
+import { EtfFundamentalsTable, EtfSubSection } from "@/components/charts/ETFCharts";
 import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
 import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import { fetchEtfData } from "@/lib/etf-api";
@@ -1208,6 +1208,7 @@ function EtfReportView({
   const available = ETF_TABS.filter((key) => {
     if (sections[key]) return true;
     if (key === "Resumen Ejecutivo" && !!ticker) return true;
+    if (key === "Valoración" && etfDeep?.found === true) return true;
     if (key === "ETF" && etfDeep?.found === true) return true;
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
@@ -1261,6 +1262,7 @@ function EtfReportView({
           {active && (
             <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
               {active === "Resumen Ejecutivo" && <InstrumentPriceChart ticker={ticker} />}
+              {active === "Valoración" && etfDeep?.found === true && <EtfFundamentalsTable data={etfDeep} />}
               {active === "ETF" && etfDeep?.found === true && <EtfSubSection data={etfDeep} />}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}

@@ -40,6 +40,28 @@ export interface EtfNewsItem {
   datetime: string;
 }
 
+// Point-in-time fundamentals for the Valoración table. All values come from
+// Yahoo quoteSummary modules (summaryDetail / defaultKeyStatistics / price);
+// any metric Yahoo doesn't publish for a fund arrives as null → rendered "—".
+export interface EtfFundamentals {
+  price: number | null;
+  marketCap: number | null;
+  totalAssets: number | null;   // AUM
+  expenseRatio: number | null;  // fraction (0.0009 = 0.09%)
+  navPrice: number | null;
+  peTtm: number | null;
+  pb: number | null;
+  psTtm: number | null;
+  epsTtm: number | null;
+  dividendYield: number | null; // fraction
+  beta: number | null;
+  high52: number | null;
+  low52: number | null;
+  return52w: number | null;     // fraction
+  ytdReturn: number | null;     // fraction
+  avgVolume10d: number | null;
+}
+
 // Which provider in the fallback chain actually delivered each block.
 export type EtfSectorsSource = "yahoo" | "fmp" | null;
 export type EtfCountriesSource = "fmp" | "yahoo-approx" | null;
@@ -51,6 +73,7 @@ export interface EtfResponse {
   name?: string;
   family?: string | null;
   category?: string | null;
+  fundamentals?: EtfFundamentals;
   assetAllocation?: EtfAllocation[];
   sectors?: EtfSector[];
   sectorsSource?: EtfSectorsSource;

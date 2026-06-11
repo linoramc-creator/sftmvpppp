@@ -3,7 +3,7 @@ import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import type { EtfResponse, EtfGeoRisk } from "@/types/etf";
+import type { EtfResponse, EtfFundamentals, EtfGeoRisk } from "@/types/etf";
 import { OPT_COLORS, ttStyle } from "@/components/options/theme";
 
 const DONUT_COLORS = [
@@ -37,6 +37,100 @@ function PctBar({ pct, color, max = 100 }: { pct: number; color: string; max?: n
         <div className="h-full" style={{ width: `${width}%`, background: color }} />
       </div>
       <span className="text-[11px] font-mono text-foreground/80 tabular-nums w-12 text-right">{pct.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+// ── Fundamentals table (Valoración tab) ────────────────────────────────
+// Same metric/value layout as the ticker view. Metrics Yahoo doesn't publish
+// for funds (ROE, margins, D/E...) render as "—" — never crash, never hide
+// the row, so the table shape is identical for every instrument.
+
+const fmtUsd = (v: number | null) =>
+  v == null ? null : `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const fmtBig = (v: number | null) => {
+  if (v == null) return null;
+  const abs = Math.abs(v);
+  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
+  return `$${v.toLocaleString("en-US")}`;
+};
+
+const fmtRatio = (v: number | null) => (v == null ? null : v.toFixed(2));
+
+const fmtFracPct = (v: number | null) =>
+  v == null ? null : `${(v * 100).toFixed(2)}%`;
+
+const fmtVol = (v: number | null) => {
+  if (v == null) return null;
+  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return v.toLocaleString("en-US");
+};
+
+export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
+  const f: EtfFundamentals | undefined = data.fundamentals;
+  const rows: { label: string; value: string | null }[] = [
+    { label: "Precio Actual",          value: fmtUsd(f?.price ?? null) },
+    { label: "Market Cap",             value: fmtBig(f?.marketCap ?? f?.totalAssets ?? null) },
+    { label: "P/E TTM",                value: fmtRatio(f?.peTtm ?? null) },
+    { label: "P/B",                    value: fmtRatio(f?.pb ?? null) },
+    { label: "P/S TTM",                value: fmtRatio(f?.psTtm ?? null) },
+    { label: "ROE TTM",                value: null },
+    { label: "ROA TTM",                value: null },
+    { label: "Gross Margin TTM",       value: null },
+    { label: "Operating Margin TTM",   value: null },
+    { label: "Net Margin TTM",         value: null },
+    { label: "Deuda/Equity",           value: null },
+    { label: "EPS TTM",                value: fmtUsd(f?.epsTtm ?? null) },
+    { label: "Free Cash Flow/Share",   value: null },
+    { label: "Dividend Yield",         value: fmtFracPct(f?.dividendYield ?? null) },
+    { label: "Beta",                   value: fmtRatio(f?.beta ?? null) },
+    { label: "52W High",               value: fmtUsd(f?.high52 ?? null) },
+    { label: "52W Low",                value: fmtUsd(f?.low52 ?? null) },
+    { label: "52W Return",             value: fmtFracPct(f?.return52w ?? null) },
+    { label: "Volumen Promedio 10D",   value: fmtVol(f?.avgVolume10d ?? null) },
+  ];
+
+  return (
+    <div className="mb-4 border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
+        <div className="flex items-center gap-3">
+          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FUNDAMENTALES</span>
+          <span className="text-[10px] text-muted-foreground/40 tracking-widest">SNAPSHOT</span>
+        </div>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">YAHOO FINANCE</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full" style={{ minWidth: 320 }}>
+          <thead>
+            <tr className="border-b border-border bg-secondary/20">
+              <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium" style={{ minWidth: 200 }}>
+                MÉTRICA
+              </th>
+              <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap" style={{ minWidth: 140 }}>
+                VALOR ACTUAL
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-b border-border/20 hover:bg-primary/3 transition-colors">
+                <td className="px-4 py-3 text-[13px] text-foreground/90 font-medium whitespace-nowrap">
+                  {r.label}
+                </td>
+                <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] font-mono ${r.value == null ? "text-muted-foreground/20" : "text-primary font-semibold"}`}>
+                  {r.value ?? "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

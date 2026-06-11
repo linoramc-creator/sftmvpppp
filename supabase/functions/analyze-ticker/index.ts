@@ -2888,7 +2888,7 @@ function eNum(v: unknown): number | null {
 async function eYahooQuoteSummary(ticker: string): Promise<Record<string, any> | null> {
   const auth = await yfGetAuth();
   const sym = encodeURIComponent(ticker.toUpperCase());
-  const modules = "quoteType,fundProfile,topHoldings";
+  const modules = "quoteType,fundProfile,topHoldings,summaryDetail,defaultKeyStatistics,price";
   let url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}`;
   if (auth?.crumb) url += `&crumb=${encodeURIComponent(auth.crumb)}`;
   try {
@@ -3084,6 +3084,32 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
 
   const th = summary.topHoldings ?? {};
   const fp = summary.fundProfile ?? {};
+  const sd = summary.summaryDetail ?? {};
+  const ks = summary.defaultKeyStatistics ?? {};
+  const pr = summary.price ?? {};
+
+  // Fundamentals snapshot for the Valoración table. Yahoo only publishes a
+  // subset of these for funds — every field is nullable and the frontend
+  // renders "—" for the rest (ROE, margins, D/E... don't apply to ETFs).
+  const fundamentals = {
+    price:         eNum(pr.regularMarketPrice) ?? eNum(sd.previousClose),
+    marketCap:     eNum(pr.marketCap),
+    totalAssets:   eNum(sd.totalAssets),
+    expenseRatio:  eNum(fp.feesExpensesInvestment?.annualReportExpenseRatio)
+                ?? eNum(ks.annualReportExpenseRatio),
+    navPrice:      eNum(sd.navPrice) ?? eNum(ks.navPrice),
+    peTtm:         eNum(sd.trailingPE) ?? eNum(ks.trailingPE),
+    pb:            eNum(sd.priceToBook) ?? eNum(ks.priceToBook),
+    psTtm:         eNum(sd.priceToSalesTrailing12Months),
+    epsTtm:        eNum(ks.trailingEps),
+    dividendYield: eNum(sd.yield) ?? eNum(sd.dividendYield),
+    beta:          eNum(sd.beta) ?? eNum(ks.beta3Year),
+    high52:        eNum(sd.fiftyTwoWeekHigh),
+    low52:         eNum(sd.fiftyTwoWeekLow),
+    return52w:     eNum(ks["52WeekChange"]),
+    ytdReturn:     eNum(ks.ytdReturn) ?? eNum(sd.ytdReturn),
+    avgVolume10d:  eNum(sd.averageVolume10days) ?? eNum(sd.averageDailyVolume10Day),
+  };
 
   // Asset-class allocation (some ETFs have no bonds, no cash, etc. — only
   // categories actually present are emitted).
@@ -3173,6 +3199,7 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     name: String(summary.quoteType?.longName ?? summary.quoteType?.shortName ?? ""),
     family: fp.family ? String(fp.family) : null,
     category: fp.categoryName ? String(fp.categoryName) : null,
+    fundamentals,
     assetAllocation,
     sectors: sectors.map(({ sector, pct }) => ({ sector, pct })),
     sectorsSource,
