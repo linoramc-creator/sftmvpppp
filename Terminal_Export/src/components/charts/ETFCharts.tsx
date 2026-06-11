@@ -94,21 +94,28 @@ function SectorBreakdown({ data }: { data: EtfResponse }) {
 function CountryBreakdown({ data }: { data: EtfResponse }) {
   const countries = data.countries ?? null;
   if (!countries || countries.length === 0) {
-    return <EmptyNote text="Desglose regional no disponible (requiere clave FMP en el backend o el proveedor no lo publica para este ETF)." />;
+    return <EmptyNote text="Desglose regional no disponible en ninguna fuente (FMP y Yahoo no publican la cartera por país de este ETF)." />;
   }
   const max = Math.max(...countries.map((c) => c.pct));
   return (
-    <div className="border border-border bg-card">
-      <div className="divide-y divide-border/30">
-        {countries.slice(0, 15).map((c) => (
-          <div key={c.country} className="flex items-center gap-4 px-3 py-1.5">
-            <span className="text-[11px] text-foreground/80 w-44 truncate shrink-0">{c.country}</span>
-            <div className="flex-1">
-              <PctBar pct={c.pct} color={OPT_COLORS.term} max={max} />
+    <div>
+      <div className="border border-border bg-card">
+        <div className="divide-y divide-border/30">
+          {countries.slice(0, 15).map((c) => (
+            <div key={c.country} className="flex items-center gap-4 px-3 py-1.5">
+              <span className="text-[11px] text-foreground/80 w-44 truncate shrink-0">{c.country}</span>
+              <div className="flex-1">
+                <PctBar pct={c.pct} color={OPT_COLORS.term} max={max} />
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
+      {data.countriesSource === "yahoo-approx" && (
+        <div className="text-[9px] text-muted-foreground/40 mt-1 px-1">
+          Aproximado a partir del país de domicilio del top 10 de posiciones (Yahoo), renormalizado — FMP no publica la cartera por país de este ETF.
+        </div>
+      )}
     </div>
   );
 }
@@ -213,7 +220,7 @@ function GeoRiskChart({ risks }: { risks: EtfGeoRisk[] }) {
 function EtfNews({ data }: { data: EtfResponse }) {
   const news = data.news ?? [];
   if (news.length === 0) {
-    return <EmptyNote text="Sin noticias recientes para este ETF (o clave de Finnhub no configurada en el backend)." />;
+    return <EmptyNote text="Sin noticias recientes en ninguna fuente (Finnhub, Yahoo y FMP no devolvieron resultados para este ETF)." />;
   }
   return (
     <div className="border border-border bg-card divide-y divide-border/30">
@@ -247,7 +254,7 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="EXPOSICIÓN POR SECTOR / CLASE DE ACTIVO"
-          subtitle="Pesos publicados por el proveedor del fondo (vía Yahoo Finance)"
+          subtitle={`Pesos publicados por el proveedor del fondo (vía ${data.sectorsSource === "fmp" ? "FMP" : "Yahoo Finance"})`}
         />
         <SectorBreakdown data={data} />
       </div>
@@ -255,7 +262,11 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="DESGLOSE REGIONAL"
-          subtitle="Peso por país de la cartera (vía FMP)"
+          subtitle={
+            data.countriesSource === "yahoo-approx"
+              ? "Peso por país estimado desde el top 10 de posiciones (vía Yahoo)"
+              : "Peso por país de la cartera (vía FMP)"
+          }
         />
         <CountryBreakdown data={data} />
       </div>
@@ -279,7 +290,11 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="NOTICIAS RELEVANTES"
-          subtitle="Últimos 30 días · Finnhub"
+          subtitle={`Últimos 30 días · ${
+            data.newsSource === "yahoo" ? "Yahoo Finance"
+            : data.newsSource === "fmp" ? "FMP"
+            : "Finnhub"
+          }`}
         />
         <EtfNews data={data} />
       </div>

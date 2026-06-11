@@ -2921,7 +2921,101 @@ async function eFmpCountries(ticker: string, fmpKey: string): Promise<{ country:
   } catch (_) { return null; }
 }
 
-async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<{ title: string; url: string; source: string; datetime: string }[]> {
+// FMP sector names → the Yahoo sector ids the risk table is keyed by.
+const ETF_FMP_SECTOR_KEY: Record<string, string> = {
+  "technology": "technology",
+  "information technology": "technology",
+  "financial services": "financial_services",
+  "financials": "financial_services",
+  "consumer cyclical": "consumer_cyclical",
+  "consumer discretionary": "consumer_cyclical",
+  "consumer defensive": "consumer_defensive",
+  "consumer staples": "consumer_defensive",
+  "communication services": "communication_services",
+  "telecommunications": "communication_services",
+  "basic materials": "basic_materials",
+  "materials": "basic_materials",
+  "real estate": "realestate",
+  "energy": "energy",
+  "industrials": "industrials",
+  "healthcare": "healthcare",
+  "health care": "healthcare",
+  "utilities": "utilities",
+};
+
+// Sector weightings fallback when Yahoo's topHoldings has none.
+async function eFmpSectors(ticker: string, fmpKey: string): Promise<{ key: string; sector: string; pct: number }[] | null> {
+  if (!fmpKey) return null;
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/etf-sector-weightings/${encodeURIComponent(ticker)}?apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!Array.isArray(j) || j.length === 0) return null;
+    const out: { key: string; sector: string; pct: number }[] = [];
+    for (const row of j as Record<string, unknown>[]) {
+      const name = String(row.sector ?? "").trim();
+      const pct = parseFloat(String(row.weightPercentage ?? "").replace("%", ""));
+      if (!name || !Number.isFinite(pct) || pct <= 0.05) continue;
+      const key = ETF_FMP_SECTOR_KEY[name.toLowerCase()] ?? name.toLowerCase().replace(/[^a-z]+/g, "_");
+      out.push({ key, sector: ETF_SECTOR_ES[key] ?? name, pct: +pct.toFixed(2) });
+    }
+    out.sort((a, b) => b.pct - a.pct);
+    return out.length ? out : null;
+  } catch (_) { return null; }
+}
+
+// Country of a single holding via Yahoo assetProfile (cached).
+async function eYahooHoldingCountry(symbol: string): Promise<string | null> {
+  const cacheKey = `etf-holding-country-${symbol}`;
+  const cached = yfCacheGet(cacheKey);
+  if (cached !== undefined) return cached as string | null;
+  try {
+    const auth = await yfGetAuth();
+    let url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=assetProfile`;
+    if (auth?.crumb) url += `&crumb=${encodeURIComponent(auth.crumb)}`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": YF_UA, ...(auth?.cookie ? { Cookie: auth.cookie } : {}) },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) { yfCacheSet(cacheKey, null); return null; }
+    const j = await r.json();
+    const country = j?.quoteSummary?.result?.[0]?.assetProfile?.country ?? null;
+    const out = typeof country === "string" && country ? country : null;
+    yfCacheSet(cacheKey, out);
+    return out;
+  } catch (_) { yfCacheSet(cacheKey, null); return null; }
+}
+
+// Country fallback: approximate the regional split from the top-10 holdings'
+// domiciles (Yahoo assetProfile), renormalised over the resolved weight.
+// Clearly labelled as approximate by the caller via countriesSource.
+async function eCountriesFromHoldings(
+  holdings: { symbol: string; name: string; pct: number }[],
+): Promise<{ country: string; pct: number }[] | null> {
+  const usable = holdings.filter((h) => h.symbol && h.pct > 0).slice(0, 10);
+  if (usable.length < 3) return null;
+  const resolved = await Promise.all(usable.map(async (h) => ({
+    pct: h.pct,
+    country: await eYahooHoldingCountry(h.symbol),
+  })));
+  const byCountry = new Map<string, number>();
+  let known = 0;
+  for (const r of resolved) {
+    if (!r.country) continue;
+    known += r.pct;
+    byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + r.pct);
+  }
+  if (known <= 0 || byCountry.size === 0) return null;
+  const out = [...byCountry.entries()]
+    .map(([country, pct]) => ({ country, pct: +((pct / known) * 100).toFixed(2) }))
+    .sort((a, b) => b.pct - a.pct);
+  return out;
+}
+
+type ENewsItem = { title: string; url: string; source: string; datetime: string };
+
+async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<ENewsItem[]> {
   if (!finnhubKey) return [];
   try {
     const to = new Date().toISOString().slice(0, 10);
@@ -2936,6 +3030,41 @@ async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<{ title
       url: String(n.url ?? ""),
       source: String(n.source ?? ""),
       datetime: n.datetime ? new Date(Number(n.datetime) * 1000).toISOString().slice(0, 10) : "",
+    })).filter((n) => n.title && n.url);
+  } catch (_) { return []; }
+}
+
+// News fallback #1: Yahoo Finance search news (public, no crumb required).
+async function eYahooNews(ticker: string): Promise<ENewsItem[]> {
+  try {
+    const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=8&quotesCount=0`;
+    const r = await fetch(url, { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    const news = Array.isArray(j?.news) ? j.news : [];
+    return news.slice(0, 8).map((n: Record<string, unknown>) => ({
+      title: String(n.title ?? ""),
+      url: String(n.link ?? ""),
+      source: String(n.publisher ?? "Yahoo Finance"),
+      datetime: n.providerPublishTime ? new Date(Number(n.providerPublishTime) * 1000).toISOString().slice(0, 10) : "",
+    })).filter((n: ENewsItem) => n.title && n.url);
+  } catch (_) { return []; }
+}
+
+// News fallback #2: FMP stock_news.
+async function eFmpNews(ticker: string, fmpKey: string): Promise<ENewsItem[]> {
+  if (!fmpKey) return [];
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${encodeURIComponent(ticker)}&limit=8&apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (!Array.isArray(j)) return [];
+    return j.slice(0, 8).map((n: Record<string, unknown>) => ({
+      title: String(n.title ?? ""),
+      url: String(n.url ?? ""),
+      source: String(n.site ?? "FMP"),
+      datetime: String(n.publishedDate ?? "").slice(0, 10),
     })).filter((n) => n.title && n.url);
   } catch (_) { return []; }
 }
@@ -2967,8 +3096,9 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     .filter((a) => a.pct > 0.05)
     .map((a) => ({ label: a.label, pct: +a.pct.toFixed(2) }));
 
-  // Sector weightings: array of single-key objects keyed by Yahoo sector id.
-  const sectors: { key: string; sector: string; pct: number }[] = [];
+  // Sector weightings: Yahoo first (single-key objects keyed by sector id),
+  // FMP etf-sector-weightings as fallback.
+  let sectors: { key: string; sector: string; pct: number }[] = [];
   for (const entry of (th.sectorWeightings ?? []) as Record<string, unknown>[]) {
     for (const [key, v] of Object.entries(entry)) {
       const pct = (eNum(v) ?? 0) * 100;
@@ -2976,6 +3106,11 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     }
   }
   sectors.sort((a, b) => b.pct - a.pct);
+  let sectorsSource: "yahoo" | "fmp" | null = sectors.length ? "yahoo" : null;
+  if (sectors.length === 0) {
+    const fmpSectors = await eFmpSectors(ticker, env.FMP_KEY);
+    if (fmpSectors) { sectors = fmpSectors; sectorsSource = "fmp"; }
+  }
 
   const holdings = ((th.holdings ?? []) as Record<string, unknown>[])
     .map((h) => ({
@@ -2986,10 +3121,30 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     .filter((h) => h.symbol || h.name)
     .slice(0, 10);
 
-  const [countries, news] = await Promise.all([
-    eFmpCountries(ticker, env.FMP_KEY),
-    eFinnhubNews(ticker, env.FINNHUB_KEY),
-  ]);
+  // Regional breakdown + news, each with an explicit fallback chain so one
+  // provider having nothing never leaves the block empty (A4).
+  let countriesSource: "fmp" | "yahoo-approx" | null = null;
+  let countries = await eFmpCountries(ticker, env.FMP_KEY);
+  if (countries) {
+    countriesSource = "fmp";
+  } else {
+    countries = await eCountriesFromHoldings(holdings);
+    if (countries) countriesSource = "yahoo-approx";
+  }
+
+  let newsSource: "finnhub" | "yahoo" | "fmp" | null = null;
+  let news = await eFinnhubNews(ticker, env.FINNHUB_KEY);
+  if (news.length) {
+    newsSource = "finnhub";
+  } else {
+    news = await eYahooNews(ticker);
+    if (news.length) {
+      newsSource = "yahoo";
+    } else {
+      news = await eFmpNews(ticker, env.FMP_KEY);
+      if (news.length) newsSource = "fmp";
+    }
+  }
 
   // Geopolitical risk layer: real exposure × fixed heuristic score.
   const geoRisks: { factor: string; kind: "sector" | "país"; exposurePct: number; score: number; contribution: number; note: string }[] = [];
@@ -3020,10 +3175,13 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     category: fp.categoryName ? String(fp.categoryName) : null,
     assetAllocation,
     sectors: sectors.map(({ sector, pct }) => ({ sector, pct })),
+    sectorsSource,
     countries,
+    countriesSource,
     holdings,
     geoRisks: geoRisks.slice(0, 8),
     news,
+    newsSource,
     fetchedAt: new Date().toISOString(),
   });
 }
