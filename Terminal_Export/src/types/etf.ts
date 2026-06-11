@@ -62,6 +62,28 @@ export interface EtfFundamentals {
   avgVolume10d: number | null;
 }
 
+// SECTOR tab (A2): comparable funds in the same theme + objective insights.
+// Peer figures come from FMP/Yahoo; benefits/risks are fixed-threshold rules
+// applied to those figures in backend code — never produced by an LLM.
+export interface EtfPeerRow {
+  symbol: string;
+  name: string | null;
+  price: number | null;
+  expenseRatio: number | null; // fraction
+  totalAssets: number | null;
+  ytdReturn: number | null;    // fraction
+  return52w: number | null;    // fraction
+}
+
+export interface EtfSectorTab {
+  theme: string | null;
+  peers: EtfPeerRow[];
+  benefits: string[];
+  risks: string[];
+  news: EtfNewsItem[];
+  newsSource: "fmp" | "yahoo" | null;
+}
+
 // Which provider in the fallback chain actually delivered each block.
 export type EtfSectorsSource = "yahoo" | "fmp" | null;
 export type EtfCountriesSource = "fmp" | "yahoo-approx" | null;
@@ -83,5 +105,6 @@ export interface EtfResponse {
   geoRisks?: EtfGeoRisk[];
   news?: EtfNewsItem[];
   newsSource?: EtfNewsSource;
+  sectorTab?: EtfSectorTab;
   fetchedAt: string;
 }

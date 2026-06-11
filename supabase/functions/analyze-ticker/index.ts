@@ -3069,6 +3069,159 @@ async function eFmpNews(ticker: string, fmpKey: string): Promise<ENewsItem[]> {
   } catch (_) { return []; }
 }
 
+// =====================================================
+// ETF: SECTOR tab — peer comparison + deterministic insights (A2)
+// =====================================================
+
+// Peer candidates per dominant-sector theme. The list itself is a fixed,
+// auditable table; every figure shown for a peer comes from FMP/Yahoo.
+const ETF_THEME_PEERS: Record<string, { theme: string; query: string; peers: string[] }> = {
+  technology:             { theme: "Tecnología",             query: "technology sector ETF",       peers: ["XLK", "VGT", "QQQ", "SMH", "IYW", "FTEC"] },
+  financial_services:     { theme: "Servicios financieros",  query: "financial sector ETF",        peers: ["XLF", "VFH", "KRE", "KBE", "IYF"] },
+  healthcare:             { theme: "Salud",                  query: "healthcare sector ETF",       peers: ["XLV", "VHT", "IBB", "XBI", "IHI"] },
+  energy:                 { theme: "Energía",                query: "energy sector ETF",           peers: ["XLE", "VDE", "XOP", "OIH", "ICLN"] },
+  consumer_cyclical:      { theme: "Consumo cíclico",        query: "consumer discretionary ETF",  peers: ["XLY", "VCR", "FDIS", "RTH"] },
+  consumer_defensive:     { theme: "Consumo defensivo",      query: "consumer staples ETF",        peers: ["XLP", "VDC", "FSTA"] },
+  industrials:            { theme: "Industriales",           query: "industrials sector ETF",      peers: ["XLI", "VIS", "ITA", "PPA"] },
+  utilities:              { theme: "Utilities",              query: "utilities sector ETF",        peers: ["XLU", "VPU", "IDU"] },
+  realestate:             { theme: "Inmobiliario",           query: "real estate REIT ETF",        peers: ["XLRE", "VNQ", "IYR", "SCHH"] },
+  basic_materials:        { theme: "Materiales básicos",     query: "materials sector ETF",        peers: ["XLB", "VAW", "GDX", "XME"] },
+  communication_services: { theme: "Comunicaciones",         query: "communication services ETF",  peers: ["XLC", "VOX", "FCOM"] },
+};
+const ETF_THEME_BROAD = { theme: "Mercado amplio", query: "broad market index ETF", peers: ["SPY", "VOO", "IVV", "VTI", "QQQ", "IWM"] };
+const ETF_THEME_BONDS = { theme: "Renta fija",     query: "bond market ETF",        peers: ["BND", "AGG", "TLT", "IEF", "LQD", "HYG"] };
+
+function eDetectTheme(
+  sectors: { key: string; pct: number }[],
+  assetAllocation: { label: string; pct: number }[],
+): { theme: string; query: string; peers: string[] } {
+  const bonds = assetAllocation.find((a) => a.label === "Bonos")?.pct ?? 0;
+  if (bonds > 50) return ETF_THEME_BONDS;
+  const top = sectors[0];
+  if (top && top.pct >= 40 && ETF_THEME_PEERS[top.key]) return ETF_THEME_PEERS[top.key];
+  return ETF_THEME_BROAD;
+}
+
+type EPeerRow = {
+  symbol: string;
+  name: string | null;
+  price: number | null;
+  expenseRatio: number | null;
+  totalAssets: number | null;
+  ytdReturn: number | null;
+  return52w: number | null;
+};
+
+// One batch call covers price + name for every peer (FMP is the primary
+// source per the fallback policy; Yahoo enriches with fund-only fields).
+async function eFmpBatchQuote(
+  symbols: string[], fmpKey: string,
+): Promise<Map<string, { name: string | null; price: number | null }>> {
+  const out = new Map<string, { name: string | null; price: number | null }>();
+  if (!fmpKey || symbols.length === 0) return out;
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/quote/${symbols.join(",")}?apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return out;
+    const j = await r.json();
+    if (!Array.isArray(j)) return out;
+    for (const row of j as Record<string, unknown>[]) {
+      const sym = String(row.symbol ?? "");
+      if (!sym) continue;
+      out.set(sym, {
+        name: row.name ? String(row.name) : null,
+        price: eNum(row.price),
+      });
+    }
+  } catch (_) { /* fall through to Yahoo */ }
+  return out;
+}
+
+async function ePeerRows(peers: string[], self: string, fmpKey: string): Promise<EPeerRow[]> {
+  const list = peers.filter((p) => p !== self).slice(0, 6);
+  if (list.length === 0) return [];
+  const fmp = await eFmpBatchQuote(list, fmpKey);
+  const rows = await Promise.all(list.map(async (sym): Promise<EPeerRow> => {
+    const s = await eYahooQuoteSummary(sym);
+    const psd = s?.summaryDetail ?? {};
+    const pks = s?.defaultKeyStatistics ?? {};
+    const ppr = s?.price ?? {};
+    const pfp = s?.fundProfile ?? {};
+    const f = fmp.get(sym);
+    return {
+      symbol: sym,
+      name: (s?.quoteType?.shortName ? String(s.quoteType.shortName) : null)
+         ?? (s?.quoteType?.longName ? String(s.quoteType.longName) : null)
+         ?? f?.name ?? null,
+      price: eNum(ppr.regularMarketPrice) ?? f?.price ?? null,
+      expenseRatio: eNum(pfp.feesExpensesInvestment?.annualReportExpenseRatio)
+                 ?? eNum(pks.annualReportExpenseRatio),
+      totalAssets: eNum(psd.totalAssets),
+      ytdReturn: eNum(pks.ytdReturn),
+      return52w: eNum(pks["52WeekChange"]),
+    };
+  }));
+  return rows.filter((r) => r.price != null || r.name != null);
+}
+
+// Objective sector pros/cons derived only from the figures already fetched —
+// thresholds are fixed and auditable; the LLM never touches these strings.
+function eSectorInsights(args: {
+  fundamentals: { expenseRatio: number | null; totalAssets: number | null; dividendYield: number | null; return52w: number | null };
+  sectors: { key: string; sector: string; pct: number }[];
+  holdings: { pct: number }[];
+  countries: { country: string; pct: number }[];
+}): { benefits: string[]; risks: string[] } {
+  const { fundamentals: f, sectors, holdings, countries } = args;
+  const benefits: string[] = [];
+  const risks: string[] = [];
+  const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+
+  if (f.expenseRatio != null && f.expenseRatio <= 0.002) {
+    benefits.push(`Comisiones competitivas: ratio de gastos del ${pct(f.expenseRatio)} anual.`);
+  }
+  if (f.totalAssets != null && f.totalAssets >= 1e9) {
+    benefits.push(`Liquidez elevada: $${(f.totalAssets / 1e9).toFixed(1)}B en activos gestionados.`);
+  }
+  if (f.dividendYield != null && f.dividendYield >= 0.02) {
+    benefits.push(`Genera rentas: rentabilidad por dividendo del ${pct(f.dividendYield)}.`);
+  }
+  if (sectors.length >= 8) {
+    benefits.push(`Diversificación amplia: exposición a ${sectors.length} sectores.`);
+  }
+  if (f.return52w != null && f.return52w > 0) {
+    benefits.push(`Momentum positivo: +${(f.return52w * 100).toFixed(1)}% en las últimas 52 semanas.`);
+  }
+
+  for (const s of sectors.slice(0, 3)) {
+    const risk = ETF_SECTOR_RISK[s.key];
+    if (risk && risk.score >= 45 && s.pct >= 15) {
+      risks.push(`${s.sector} (${s.pct.toFixed(1)}% de la cartera): ${risk.note}.`);
+    }
+  }
+  const top10 = holdings.reduce((sum, h) => sum + h.pct, 0);
+  if (top10 > 50) {
+    risks.push(`Concentración: el top 10 de posiciones pesa el ${top10.toFixed(1)}% del fondo.`);
+  }
+  if (sectors[0] && sectors[0].pct >= 60) {
+    risks.push(`Cartera mono-sector: ${sectors[0].pct.toFixed(1)}% en ${sectors[0].sector}.`);
+  }
+  if (f.expenseRatio != null && f.expenseRatio > 0.005) {
+    risks.push(`Comisiones altas: ratio de gastos del ${pct(f.expenseRatio)} anual.`);
+  }
+  if (f.return52w != null && f.return52w < 0) {
+    risks.push(`Retorno negativo: ${(f.return52w * 100).toFixed(1)}% en las últimas 52 semanas.`);
+  }
+  for (const c of countries) {
+    const risk = ETF_COUNTRY_RISK[c.country];
+    if (risk && risk.score >= 65 && c.pct >= 5) {
+      risks.push(`${c.country} (${c.pct.toFixed(1)}% de la cartera): ${risk.note}.`);
+    }
+  }
+
+  return { benefits: benefits.slice(0, 5), risks: risks.slice(0, 5) };
+}
+
 async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
   const json = (b: unknown, status = 200) =>
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -3193,6 +3346,33 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
   }
   geoRisks.sort((a, b) => b.contribution - a.contribution);
 
+  // SECTOR tab (A2): theme detection → peer comparison → deterministic
+  // insights → theme news (FMP stock_news on the peers, Yahoo search fallback).
+  const themeCfg = eDetectTheme(sectors, assetAllocation);
+  const sectorPeers = await ePeerRows(themeCfg.peers, ticker, env.FMP_KEY);
+  let sectorNewsSource: "fmp" | "yahoo" | null = null;
+  let sectorNews: ENewsItem[] = [];
+  const peerSyms = sectorPeers.map((p) => p.symbol);
+  if (peerSyms.length) {
+    sectorNews = await eFmpNews(peerSyms.join(","), env.FMP_KEY);
+    if (sectorNews.length) sectorNewsSource = "fmp";
+  }
+  if (!sectorNews.length) {
+    sectorNews = await eYahooNews(themeCfg.query);
+    if (sectorNews.length) sectorNewsSource = "yahoo";
+  }
+  const insights = eSectorInsights({
+    fundamentals: {
+      expenseRatio: fundamentals.expenseRatio,
+      totalAssets: fundamentals.totalAssets,
+      dividendYield: fundamentals.dividendYield,
+      return52w: fundamentals.return52w,
+    },
+    sectors,
+    holdings,
+    countries: countries ?? [],
+  });
+
   return json({
     ticker,
     found: true,
@@ -3209,6 +3389,14 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     geoRisks: geoRisks.slice(0, 8),
     news,
     newsSource,
+    sectorTab: {
+      theme: themeCfg.theme,
+      peers: sectorPeers,
+      benefits: insights.benefits,
+      risks: insights.risks,
+      news: sectorNews,
+      newsSource: sectorNewsSource,
+    },
     fetchedAt: new Date().toISOString(),
   });
 }

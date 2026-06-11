@@ -6,7 +6,7 @@ import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 import { OptionsSubSection } from "@/components/options/OptionsSubSection";
 import { RiskSubSection } from "@/components/charts/RiskCharts";
-import { EtfFundamentalsTable, EtfSubSection } from "@/components/charts/ETFCharts";
+import { EtfFundamentalsTable, EtfSectorSubSection, EtfSubSection } from "@/components/charts/ETFCharts";
 import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
 import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import { fetchEtfData } from "@/lib/etf-api";
@@ -56,6 +56,7 @@ const ETF_SECTION_CONFIG: Record<string, { label: string; category: string }> = 
   "Resumen Ejecutivo": { label: "RESUMEN EJECUTIVO", category: "EXECUTIVE SUMMARY"  },
   "Valoración":        { label: "VALORACIÓN",        category: "VALUATION"          },
   "ETF":               { label: "ETF",               category: "FUND DEEP DIVE"     },
+  "Sector":            { label: "SECTOR",            category: "SECTOR & COMPS"     },
   "Opciones":          { label: "OPCIONES",          category: "OPTIONS FLOW"       },
   "Riesgo":            { label: "RIESGO",            category: "RISK ANALYTICS"     },
   "Noticias":          { label: "NOTICIAS",          category: "MARKET NEWS"        },
@@ -1210,6 +1211,7 @@ function EtfReportView({
     if (key === "Resumen Ejecutivo" && !!ticker) return true;
     if (key === "Valoración" && etfDeep?.found === true) return true;
     if (key === "ETF" && etfDeep?.found === true) return true;
+    if (key === "Sector" && etfDeep?.found === true) return true;
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
     if (key === "Señales Técnicas" && !!ticker) return true;
@@ -1264,6 +1266,7 @@ function EtfReportView({
               {active === "Resumen Ejecutivo" && <InstrumentPriceChart ticker={ticker} />}
               {active === "Valoración" && etfDeep?.found === true && <EtfFundamentalsTable data={etfDeep} />}
               {active === "ETF" && etfDeep?.found === true && <EtfSubSection data={etfDeep} />}
+              {active === "Sector" && etfDeep?.found === true && <EtfSectorSubSection data={etfDeep} />}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}

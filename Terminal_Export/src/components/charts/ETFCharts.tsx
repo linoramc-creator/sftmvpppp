@@ -3,7 +3,7 @@ import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import type { EtfResponse, EtfFundamentals, EtfGeoRisk } from "@/types/etf";
+import type { EtfResponse, EtfFundamentals, EtfGeoRisk, EtfNewsItem } from "@/types/etf";
 import { OPT_COLORS, ttStyle } from "@/components/options/theme";
 
 const DONUT_COLORS = [
@@ -311,14 +311,10 @@ function GeoRiskChart({ risks }: { risks: EtfGeoRisk[] }) {
 
 // ── News feed ──────────────────────────────────────────────────────────
 
-function EtfNews({ data }: { data: EtfResponse }) {
-  const news = data.news ?? [];
-  if (news.length === 0) {
-    return <EmptyNote text="Sin noticias recientes en ninguna fuente (Finnhub, Yahoo y FMP no devolvieron resultados para este ETF)." />;
-  }
+function NewsList({ items }: { items: EtfNewsItem[] }) {
   return (
     <div className="border border-border bg-card divide-y divide-border/30">
-      {news.map((n) => (
+      {items.map((n) => (
         <a
           key={n.url}
           href={n.url} target="_blank" rel="noopener noreferrer"
@@ -328,6 +324,135 @@ function EtfNews({ data }: { data: EtfResponse }) {
           <div className="text-[9px] text-muted-foreground/40 mt-0.5 font-mono">{n.source} · {n.datetime}</div>
         </a>
       ))}
+    </div>
+  );
+}
+
+function EtfNews({ data }: { data: EtfResponse }) {
+  const news = data.news ?? [];
+  if (news.length === 0) {
+    return <EmptyNote text="Sin noticias recientes en ninguna fuente (Finnhub, Yahoo y FMP no devolvieron resultados para este ETF)." />;
+  }
+  return <NewsList items={news} />;
+}
+
+// ── SECTOR tab (A2): peer table + objective insights + theme news ──────
+
+const fmtFracPctSigned = (v: number | null) =>
+  v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+
+export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
+  const tab = data.sectorTab;
+  if (!tab) {
+    return <EmptyNote text="Análisis sectorial no disponible (backend sin datos de tema/peers para este ETF)." />;
+  }
+  const peers = tab.peers ?? [];
+  const benefits = tab.benefits ?? [];
+  const risks = tab.risks ?? [];
+  const news = tab.news ?? [];
+
+  return (
+    <div className="space-y-6">
+      {tab.theme && (
+        <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono">
+          <span className="text-muted-foreground/50">TEMA DETECTADO</span>
+          <span className="text-primary/70 border border-primary/25 px-1.5 py-0.5">{tab.theme}</span>
+        </div>
+      )}
+
+      <div>
+        <SectionTitle
+          title="ETFs COMPARABLES DEL MISMO TEMA"
+          subtitle="Fondos líquidos de la misma temática · precios y métricas vía FMP + Yahoo Finance"
+        />
+        {peers.length === 0 ? (
+          <EmptyNote text="Sin datos de ETFs comparables (FMP y Yahoo no devolvieron resultados para los peers del tema)." />
+        ) : (
+          <div className="border border-border bg-card overflow-x-auto">
+            <table className="w-full font-mono min-w-max" style={{ fontSize: "12px" }}>
+              <thead>
+                <tr className="border-b border-border bg-secondary/40">
+                  <th className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/50 font-normal">TICKER</th>
+                  <th className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/50 font-normal">NOMBRE</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">PRECIO</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">GASTOS</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">AUM</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">RET. YTD</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">RET. 52W</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/30">
+                {peers.map((p) => (
+                  <tr key={p.symbol} className="hover:bg-primary/3 transition-colors">
+                    <td className="px-3 py-1.5 text-primary font-semibold">{p.symbol}</td>
+                    <td className="px-3 py-1.5 text-foreground/75 max-w-[220px] truncate" style={{ fontFamily: "var(--font-sans)" }}>{p.name ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/80">{fmtUsd(p.price) ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/65">{fmtFracPct(p.expenseRatio) ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/65">{fmtBig(p.totalAssets) ?? "—"}</td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums ${p.ytdReturn == null ? "text-muted-foreground/20" : p.ytdReturn >= 0 ? "text-primary" : "text-destructive"}`}>
+                      {fmtFracPctSigned(p.ytdReturn)}
+                    </td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums ${p.return52w == null ? "text-muted-foreground/20" : p.return52w >= 0 ? "text-primary" : "text-destructive"}`}>
+                      {fmtFracPctSigned(p.return52w)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <div>
+          <SectionTitle
+            title="BENEFICIOS OBJETIVOS"
+            subtitle="Reglas fijas sobre datos reales del fondo · cálculo determinista, no generado por IA"
+          />
+          {benefits.length === 0 ? (
+            <EmptyNote text="Ningún criterio objetivo de beneficio se cumple con los datos disponibles." />
+          ) : (
+            <div className="border border-border bg-card px-3 py-2 space-y-2">
+              {benefits.map((b) => (
+                <div key={b} className="flex items-start gap-2.5">
+                  <span className="text-primary text-[11px] leading-none select-none shrink-0" style={{ marginTop: 3 }}>●</span>
+                  <span className="text-[12px] text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>{b}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <SectionTitle
+            title="RIESGOS OBJETIVOS"
+            subtitle="Exposición real × heurísticas fijas de riesgo · cálculo determinista, no generado por IA"
+          />
+          {risks.length === 0 ? (
+            <EmptyNote text="Ningún criterio objetivo de riesgo se cumple con los datos disponibles." />
+          ) : (
+            <div className="border border-border bg-card px-3 py-2 space-y-2">
+              {risks.map((r) => (
+                <div key={r} className="flex items-start gap-2.5">
+                  <span className="text-destructive text-[11px] leading-none select-none shrink-0" style={{ marginTop: 3 }}>●</span>
+                  <span className="text-[12px] text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>{r}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <SectionTitle
+          title="NOTICIAS DEL SECTOR"
+          subtitle={`Últimos 30 días · ${tab.newsSource === "fmp" ? "FMP" : tab.newsSource === "yahoo" ? "Yahoo Finance" : "sin fuente"}`}
+        />
+        {news.length === 0 ? (
+          <EmptyNote text="Sin noticias del sector en ninguna fuente (FMP y Yahoo no devolvieron resultados)." />
+        ) : (
+          <NewsList items={news} />
+        )}
+      </div>
     </div>
   );
 }
