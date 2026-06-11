@@ -3139,6 +3139,119 @@ function rOilBeta(tickerDays: RDay[], brentDays: RDay[]) {
   return { points, beta, alpha, r2, days: n };
 }
 
+// =====================================================
+// TECHNICAL SERIES (sección "Señales Técnicas") — deterministic, no LLM
+// =====================================================
+// SMA / RSI / MACD computed in code from Yahoo daily closes so the charts
+// always match auditable arithmetic; the AI narrative is rendered separately.
+
+function tSma(values: number[], n: number): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= n) sum -= values[i - n];
+    if (i >= n - 1) out[i] = sum / n;
+  }
+  return out;
+}
+
+function tEma(values: number[], n: number): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  if (values.length < n) return out;
+  const k = 2 / (n + 1);
+  let ema = values.slice(0, n).reduce((s, v) => s + v, 0) / n;
+  out[n - 1] = ema;
+  for (let i = n; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+    out[i] = ema;
+  }
+  return out;
+}
+
+// Wilder's RSI(14).
+function tRsi(values: number[], n = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  if (values.length <= n) return out;
+  let gain = 0, loss = 0;
+  for (let i = 1; i <= n; i++) {
+    const d = values[i] - values[i - 1];
+    if (d >= 0) gain += d; else loss -= d;
+  }
+  let avgGain = gain / n, avgLoss = loss / n;
+  const rsiAt = () => avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  out[n] = rsiAt();
+  for (let i = n + 1; i < values.length; i++) {
+    const d = values[i] - values[i - 1];
+    avgGain = (avgGain * (n - 1) + Math.max(0, d)) / n;
+    avgLoss = (avgLoss * (n - 1) + Math.max(0, -d)) / n;
+    out[i] = rsiAt();
+  }
+  return out;
+}
+
+async function handleTechnicals(tickerRaw: string): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const ticker = tickerRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9.\-^=]{1,12}$/.test(ticker)) return json({ error: "Ticker inválido" }, 400);
+
+  // 2y of history so SMA200 is defined across the whole 1y display window.
+  const hist = await fetchYahooChart(ticker, "2y", "1d");
+  if (!hist || hist.c.length < 30) return json({ error: `Sin histórico de precios para ${ticker}` }, 404);
+
+  const days = rDays(hist);
+  const closes = days.map((d) => d.close);
+  const sma50 = tSma(closes, 50);
+  const sma200 = tSma(closes, 200);
+  const rsi = tRsi(closes, 14);
+  const ema12 = tEma(closes, 12), ema26 = tEma(closes, 26);
+  const macdLine = closes.map((_, i) =>
+    ema12[i] !== null && ema26[i] !== null ? (ema12[i] as number) - (ema26[i] as number) : null);
+  const macdVals = macdLine.filter((v): v is number => v !== null);
+  const signalTail = tEma(macdVals, 9);
+  // Re-align the signal EMA (computed on the compacted MACD array) to dates.
+  const signal: (number | null)[] = new Array(closes.length).fill(null);
+  let mi = 0;
+  for (let i = 0; i < closes.length; i++) {
+    if (macdLine[i] === null) continue;
+    signal[i] = signalTail[mi] ?? null;
+    mi++;
+  }
+
+  const keep = Math.min(252, days.length);
+  const start = days.length - keep;
+  const round = (v: number | null, dp = 4) => v === null ? null : +v.toFixed(dp);
+  const series = [];
+  for (let i = start; i < days.length; i++) {
+    const m = macdLine[i], s = signal[i];
+    series.push({
+      date: days[i].date,
+      close: round(closes[i], 4),
+      sma50: round(sma50[i], 4),
+      sma200: round(sma200[i], 4),
+      rsi: round(rsi[i], 2),
+      macd: round(m, 4),
+      macdSignal: round(s, 4),
+      macdHist: m !== null && s !== null ? +(m - s).toFixed(4) : null,
+    });
+  }
+  const lastIdx = days.length - 1;
+  return json({
+    ticker,
+    series,
+    current: {
+      close: round(closes[lastIdx], 4),
+      sma50: round(sma50[lastIdx], 4),
+      sma200: round(sma200[lastIdx], 4),
+      rsi: round(rsi[lastIdx], 2),
+      macd: round(macdLine[lastIdx], 4),
+      macdSignal: round(signal[lastIdx], 4),
+    },
+    fetchedAt: new Date().toISOString(),
+  });
+}
+
 async function handleRisk(tickerRaw: string): Promise<Response> {
   const json = (b: unknown, status = 200) =>
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -3214,6 +3327,11 @@ Deno.serve(async (req) => {
     // ETF deep analysis (sección "ETF") — Yahoo + FMP + Finnhub, no Gemini
     if (body.etf === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
       return await handleEtf(body.ticker, env);
+    }
+
+    // Technical series (sección "Señales Técnicas") — SMA/RSI/MACD in code, no Gemini
+    if (body.technicals === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
+      return await handleTechnicals(body.ticker);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");

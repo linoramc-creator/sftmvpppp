@@ -7,6 +7,7 @@ import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, ty
 import { OptionsSubSection } from "@/components/options/OptionsSubSection";
 import { RiskSubSection } from "@/components/charts/RiskCharts";
 import { EtfSubSection } from "@/components/charts/ETFCharts";
+import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
 import { fetchEtfData } from "@/lib/etf-api";
 import type { EtfResponse } from "@/types/etf";
 
@@ -902,6 +903,7 @@ function ReportView({
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
     if (key === "ETF" && etfData?.found === true) return true;
+    if (key === "Señales Técnicas" && !!ticker) return true;
     return false;
   });
 
@@ -956,6 +958,7 @@ function ReportView({
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "ETF" && etfData?.found === true && <EtfSubSection data={etfData} />}
+              {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
               {sections[active] && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />
