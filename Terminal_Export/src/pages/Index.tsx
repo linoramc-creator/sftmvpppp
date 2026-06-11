@@ -1706,12 +1706,25 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
       currentElements.push(<hr key={i} />);
     } else if (line.match(/^[-*] /)) {
       const text = line.slice(2);
-      const { icon, cls } = getBulletIcon(text);
+      // Risk bullets: the textual "Nivel/Severidad: **ALTO**" label is
+      // stripped from the copy — the (larger) coloured dot alone encodes the
+      // level; tooltip + aria-label keep it accessible.
+      const level = extractRiskLevel(text);
+      const display = level ? stripRiskLabel(text) : text;
+      const { icon, cls } = level
+        ? { icon: "●", cls: `${RISK_DOT_CLS[level]} text-[15px]` }
+        : getBulletIcon(text);
       currentElements.push(
         <li key={i} className="ml-1 mb-6 list-none flex items-start gap-2.5">
-          <span className={`select-none shrink-0 leading-none ${cls}`} style={{ marginTop: "3px" }}>{icon}</span>
+          <span
+            className={`select-none shrink-0 leading-none ${cls}`}
+            style={{ marginTop: level ? "1px" : "3px" }}
+            title={level ? `Nivel de riesgo: ${level}` : undefined}
+            aria-label={level ? `Nivel de riesgo: ${level}` : undefined}
+            role={level ? "img" : undefined}
+          >{icon}</span>
           <span className="flex-1 text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)", fontSize: "15px" }}>
-            {renderInline(text)}
+            {renderInline(display)}
           </span>
         </li>
       );
@@ -1832,6 +1845,31 @@ function renderTable(tableLines: string[], baseKey: number) {
       </table>
     </div>
   );
+}
+
+// ── Risk-level extraction (B3: dot encodes the level, no text label) ───
+
+type RiskLevel = "ALTO" | "MEDIO" | "BAJO";
+
+const RISK_DOT_CLS: Record<RiskLevel, string> = {
+  ALTO:  "text-destructive",
+  MEDIO: "text-amber-400",
+  BAJO:  "text-primary",
+};
+
+const RISK_LABEL_RE = /\s*[.,;:·—-]*\s*(?:Nivel|Severidad)\s*:?\s*\*\*\s*(ALTO|ALTA|MEDIO|MEDIA|BAJO|BAJA)\s*\*\*\s*\.?/gi;
+
+function extractRiskLevel(text: string): RiskLevel | null {
+  const m = /(?:Nivel|Severidad)\s*:?\s*\*\*\s*(ALTO|ALTA|MEDIO|MEDIA|BAJO|BAJA)\s*\*\*/i.exec(text);
+  if (!m) return null;
+  const raw = m[1].toUpperCase();
+  if (raw === "ALTO" || raw === "ALTA") return "ALTO";
+  if (raw === "MEDIO" || raw === "MEDIA") return "MEDIO";
+  return "BAJO";
+}
+
+function stripRiskLabel(text: string): string {
+  return text.replace(RISK_LABEL_RE, "").trim();
 }
 
 // ── Sentiment detection for bullet icons ──────────────────────────────
