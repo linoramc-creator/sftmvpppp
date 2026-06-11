@@ -1114,47 +1114,8 @@ function mergeQuarterlyData(yahoo: any[], finnhub: any[], fmp: any[], twelveData
 }
 
 // =====================================================
-// TICKER: POLYMARKET / FMP / TWELVE DATA
+// TICKER: FMP / TWELVE DATA
 // =====================================================
-
-async function fetchPolymarketData(ticker: string, companyName: string): Promise<string> {
-  try {
-    const terms = [companyName.split(" ").slice(0, 2).join(" "), ticker].filter(Boolean);
-    let markets: any[] = [];
-
-    for (const q of terms) {
-      const res = await fetch(
-        `https://gamma-api.polymarket.com/markets?q=${encodeURIComponent(q)}&limit=6&active=true&closed=false`,
-        { headers: { "Accept": "application/json" } }
-      ).catch(() => null);
-      if (!res?.ok) continue;
-      const data = await res.json().catch(() => []);
-      if (Array.isArray(data) && data.length > 0) { markets = data; break; }
-    }
-
-    const relevant = markets
-      .filter((m: any) => !m.closed && m.outcomePrices && m.question)
-      .sort((a: any, b: any) => (b.volume ?? 0) - (a.volume ?? 0))
-      .slice(0, 3);
-
-    if (!relevant.length) return "";
-
-    const lines = ["--- MERCADOS DE PREDICCION ACTIVOS (POLYMARKET) ---"];
-    for (const m of relevant) {
-      try {
-        const outcomes: string[] = JSON.parse(m.outcomes || "[]");
-        const prices: string[] = JSON.parse(m.outcomePrices || "[]");
-        const vol = m.volume ? `$${(m.volume / 1000).toFixed(0)}K vol` : "";
-        const priceStr = outcomes.map((o, i) => `${o}: ${(parseFloat(prices[i] ?? "0") * 100).toFixed(0)}%`).join(" / ");
-        const slug = m.slug ?? m.conditionId ?? "";
-        const url = slug ? ` — https://polymarket.com/event/${slug}` : "";
-        lines.push(`- "${m.question}"${url}`);
-        lines.push(`  ${priceStr}${vol ? `  (${vol})` : ""}`);
-      } catch (_) { /* skip */ }
-    }
-    return lines.length > 1 ? lines.join("\n") : "";
-  } catch (_) { return ""; }
-}
 
 async function fetchFmpData(ticker: string, key: string): Promise<string> {
   if (!key) return "";
@@ -1344,7 +1305,6 @@ function buildTickerDataContext(
   earningsSearch: any,
   competitiveSearch: any,
   risksCatalystsSearch: any,
-  polymarketContext: string,
   fredContext: string,
   fmpContext: string,
   twelveDataContext: string,
@@ -1550,7 +1510,6 @@ function buildTickerDataContext(
   if (fmpContext) lines.push("", fmpContext);
   if (twelveDataContext) lines.push("", twelveDataContext);
   if (technicalContext) lines.push("", technicalContext);
-  if (polymarketContext) lines.push("", polymarketContext);
 
   lines.push("", "=== FIN DATOS ===");
   return lines.join("\n");
@@ -1560,7 +1519,7 @@ function buildTickerSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
   return `Eres un analista financiero institucional senior. Fecha: ${today}.
 
-Genera EXACTAMENTE las 8 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
+Genera EXACTAMENTE las 7 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
 ## Resumen Ejecutivo
 ## Finanzas
 ## Valoración
@@ -1568,7 +1527,6 @@ Genera EXACTAMENTE las 8 secciones siguientes, cada una iniciada con "## " (no l
 ## Noticias
 ## Señales Técnicas
 ## Institucional
-## Mercados de Predicción
 
 == CONTENIDO POR SECCION ==
 
@@ -1665,9 +1623,6 @@ Usa los INDICADORES TÉCNICOS (TWELVE DATA) y el precio actual / rango 52W de Fi
 - ### Actividad Insider: resume los datos de ACTIVIDAD INSIDER (FMP) — compras/ventas recientes.
 - ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales y sentimiento general.
 
-## Mercados de Predicción
-Solo si existen datos en POLYMARKET: escribe 3-5 líneas mencionando los mercados de predicción activos más relevantes, sus probabilidades actuales y volumen. Para cada mercado, incluye el enlace del contexto en formato [ver en Polymarket](url). Explica qué implican esas probabilidades para el inversor. Si no hay datos de Polymarket, omite esta sección completamente.
-
 REGLAS DE FORMATO:
 - Markdown estricto. Sin emojis.
 - TODOS los números: exactamente 2 decimales (21.28, no 21.2848; 40.84%, no 40.839999%).
@@ -1682,7 +1637,7 @@ REGLAS DE FORMATO:
   - NUNCA omitas una FILA ENTERA de la tabla "Métrica | Valor" — todas las métricas de la lista DEBEN aparecer. Si te falta el dato, pon "—" en la columna Valor.
   - Solo está permitido omitir una fila ENTERA si TODAS las celdas de esa fila serían "—".
   - Antes de poner "—", SIEMPRE busca en las 4 fuentes: Finnhub (metrics, profile), Twelve Data (statistics_metrics), FMP, y HISTORIAL TRIMESTRAL.
-- TABLAS COMPLETAS: las 8 secciones son OBLIGATORIAS, no las puedes omitir aunque tengas pocos datos. Si una sección tiene poco contenido, escribe lo que sepas; nunca dejes una sección vacía.
+- TABLAS COMPLETAS: las 7 secciones son OBLIGATORIAS, no las puedes omitir aunque tengas pocos datos. Si una sección tiene poco contenido, escribe lo que sepas; nunca dejes una sección vacía.
 - No cortes frases a medias.`;
 }
 
@@ -1872,7 +1827,6 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           fmpQuarterly,
           twelveDataQuarterly,
           peerData,
-          polymarketContext,
           fredContext,
           fmpContext,
           twelveDataContext,
@@ -1890,7 +1844,6 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
           env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
           env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
-          fetchPolymarketData(cleanTicker, companyName),
           fetchFredData(env.FRED_KEY),
           fetchFmpData(cleanTicker, env.FMP_KEY),
           fetchTwelveData(cleanTicker, env.TWELVE_KEY),
@@ -1961,7 +1914,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
         // Step 5: Build Gemini prompt
         const dataContext = buildTickerDataContext(
           finnhubData, peerData, quarterlyHistory, geoContext, sectorNews, tickerNews,
-          earningsSearch, competitiveSearch, risksCatalystsSearch, polymarketContext,
+          earningsSearch, competitiveSearch, risksCatalystsSearch,
           fredContext, fmpContext, twelveDataContext, technicalContext,
         );
 
@@ -1980,7 +1933,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
             content: `${dataContext}
 
 INSTRUCCIÓN FINAL:
-Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
+Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secciones obligatorias.
 - En ## Finanzas: incluye la tabla de métricas actuales. Las tablas trimestrales se renderizan automáticamente — NO las generes.
 - En ## Valoración: desarrolla Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
 - En ## Finanzas: para cualquier métrica no disponible en Finnhub, usa DATOS TWELVE DATA o FMP. Si no hay dato en ninguna fuente, OMITE esa fila. CERO N/D permitidos.
@@ -1988,7 +1941,6 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 - En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
 - En ## Institucional: usa los datos estructurados de FMP como fuente principal.
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
-- En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Incluye el enlace. Si no hay datos, omite la sección.
 - Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
           },
         ];

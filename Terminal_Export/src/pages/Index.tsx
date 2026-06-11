@@ -48,7 +48,6 @@ const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Riesgo":                 { label: "RIESGO",                 category: "RISK ANALYTICS"         },
   "ETF":                    { label: "ETF",                    category: "FUND DEEP DIVE"         },
   "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
-  "Mercados de Predicción": { label: "MERCADOS DE PREDICCIÓN", category: "POLYMARKET"             },
 };
 
 const SECTOR_SECTION_CONFIG: Record<string, { label: string; category: string }> = {
