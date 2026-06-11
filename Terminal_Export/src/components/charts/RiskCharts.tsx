@@ -141,6 +141,44 @@ function RefugeChart({ data }: { data: NonNullable<RiskResponse["refuge"]> }) {
 
 // ── 3. Régimen de mercado VIX (histograma calma vs pánico) ────────────
 
+const VIX_THRESHOLD = 25;
+
+// Compact VIX level strip: where the 25 threshold actually sat over the last
+// two years — the "regime band" that contextualises the histogram below.
+function VixLevelStrip({ series }: { series: { date: string; vix: number }[] }) {
+  const maxVix = Math.max(...series.map((p) => p.vix), VIX_THRESHOLD + 5);
+  return (
+    <div style={{ ...chartBox, height: 120, marginBottom: 8 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={series} margin={{ top: 6, right: 12, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="vixStripGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={OPT_COLORS.term} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={OPT_COLORS.term} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+          <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={56} style={{ fontSize: "9px" }} />
+          <YAxis stroke={OPT_COLORS.axis} tickLine={false} width={30} domain={[0, Math.ceil(maxVix / 10) * 10]} style={{ fontSize: "9px" }} />
+          <Tooltip
+            contentStyle={ttStyle}
+            formatter={(v: number) => [v.toFixed(1), "VIX"]}
+            labelFormatter={(s) => fmtDate(s as string)}
+            cursor={{ stroke: OPT_COLORS.gridStrong }}
+          />
+          <ReferenceLine
+            y={VIX_THRESHOLD}
+            stroke={OPT_COLORS.flip}
+            strokeDasharray="5 3"
+            label={{ value: `Umbral pánico ${VIX_THRESHOLD}`, position: "insideTopRight", fill: OPT_COLORS.flip, fontSize: 9 }}
+          />
+          <Area type="monotone" dataKey="vix" stroke={OPT_COLORS.term} strokeWidth={1.5} fill="url(#vixStripGrad)" dot={false} isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function VixRegimeChart({ data }: { data: NonNullable<RiskResponse["vixRegime"]> }) {
   // Trim all-zero tail bins so the X axis stays focused on real data.
   const first = data.bins.findIndex((b) => b.calm > 0 || b.panic > 0);
@@ -149,31 +187,79 @@ function VixRegimeChart({ data }: { data: NonNullable<RiskResponse["vixRegime"]>
     if (data.bins[i].calm > 0 || data.bins[i].panic > 0) { last = i; break; }
   }
   const bins = first >= 0 && last >= first ? data.bins.slice(first, last + 1) : data.bins;
+  const vixSeries = data.vixSeries ?? [];
+  const fmtMean = (v: number | null) => (v != null ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%` : "—");
+  const fmtStd = (v: number | null) => (v != null ? `${v.toFixed(2)}%` : "—");
+
   return (
     <div>
       <div className="flex gap-4 mb-1.5 flex-wrap">
         <StatChip label="Días calma (VIX≤25)" value={`${data.calmDays}`} tone="pos" />
         <StatChip label="Días pánico (VIX>25)" value={`${data.panicDays}`} tone="neg" />
-        <StatChip label="Media calma" value={data.calmMean != null ? `${data.calmMean >= 0 ? "+" : ""}${data.calmMean.toFixed(2)}%` : "—"} />
-        <StatChip label="Media pánico" value={data.panicMean != null ? `${data.panicMean >= 0 ? "+" : ""}${data.panicMean.toFixed(2)}%` : "—"} />
+        <StatChip label="μ calma" value={fmtMean(data.calmMean)} />
+        <StatChip label="μ pánico" value={fmtMean(data.panicMean)} />
+        <StatChip label="σ calma" value={fmtStd(data.calmStd)} />
+        <StatChip label="σ pánico" value={fmtStd(data.panicStd)} />
       </div>
-      <div style={chartBox}>
+
+      {vixSeries.length > 1 && <VixLevelStrip series={vixSeries} />}
+
+      <div style={{ ...chartBox, height: 300 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={bins} margin={{ top: 8, right: 12, left: 0, bottom: 4 }} barGap={0} barCategoryGap="10%">
+          <BarChart data={bins} margin={{ top: 8, right: 12, left: 8, bottom: 18 }} barGap={0} barCategoryGap="10%">
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
-            <XAxis dataKey="ret" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => `${v}%`} minTickGap={24} style={{ fontSize: "10px" }} />
-            <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => `${v.toFixed(0)}%`} width={38} style={{ fontSize: "10px" }} />
+            <XAxis
+              dataKey="ret" type="number" domain={["dataMin", "dataMax"]}
+              stroke={OPT_COLORS.axis} tickLine={false}
+              tickFormatter={(v: number) => `${v}%`} style={{ fontSize: "10px" }}
+              label={{ value: "Retorno diario (%)", position: "insideBottom", offset: -10, fill: OPT_COLORS.axis, fontSize: 10 }}
+            />
+            <YAxis
+              stroke={OPT_COLORS.axis} tickLine={false}
+              tickFormatter={(v: number) => `${v.toFixed(0)}%`} width={40} style={{ fontSize: "10px" }}
+              label={{ value: "% de sesiones", angle: -90, position: "insideLeft", offset: 8, fill: OPT_COLORS.axis, fontSize: 10 }}
+            />
             <Tooltip
               contentStyle={ttStyle}
-              formatter={(v: number, name) => [`${v.toFixed(1)}% de los días`, name === "calm" ? "Calma (VIX≤25)" : "Pánico (VIX>25)"]}
-              labelFormatter={(k) => `Retorno diario ≈ ${k}%`}
+              formatter={(v: number, name) => [`${v.toFixed(1)}% de las sesiones`, name === "calm" ? "Calma (VIX≤25)" : "Pánico (VIX>25)"]}
+              labelFormatter={(k) => `Retorno diario ≈ ${Number(k) >= 0 ? "+" : ""}${k}%`}
               cursor={{ fill: "rgba(148,163,184,0.06)" }}
             />
             <ReferenceLine x={0} stroke={OPT_COLORS.gridStrong} strokeDasharray="4 3" />
+            {data.calmMean != null && (
+              <ReferenceLine
+                x={data.calmMean}
+                stroke={OPT_COLORS.call}
+                strokeDasharray="5 3"
+                label={{ value: "μ calma", position: "top", fill: OPT_COLORS.call, fontSize: 9 }}
+              />
+            )}
+            {data.panicMean != null && (
+              <ReferenceLine
+                x={data.panicMean}
+                stroke={OPT_COLORS.put}
+                strokeDasharray="5 3"
+                label={{ value: "μ pánico", position: "top", fill: OPT_COLORS.put, fontSize: 9 }}
+              />
+            )}
             <Bar dataKey="calm" fill={OPT_COLORS.call} fillOpacity={0.8} isAnimationActive={false} />
             <Bar dataKey="panic" fill={OPT_COLORS.put} fillOpacity={0.8} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+      <div className="flex flex-wrap gap-3 mt-1.5 px-1">
+        <span className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60 font-mono">
+          <span className="inline-block w-3 h-2" style={{ background: OPT_COLORS.call, opacity: 0.8 }} />
+          Calma (VIX ≤ 25)
+        </span>
+        <span className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60 font-mono">
+          <span className="inline-block w-3 h-2" style={{ background: OPT_COLORS.put, opacity: 0.8 }} />
+          Pánico (VIX &gt; 25)
+        </span>
+        <span className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60 font-mono">
+          <span className="inline-block w-3 border-t border-dashed" style={{ borderColor: OPT_COLORS.flip }} />
+          Umbral VIX 25
+        </span>
       </div>
     </div>
   );

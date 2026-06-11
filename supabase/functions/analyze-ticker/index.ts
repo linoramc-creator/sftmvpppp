@@ -3307,9 +3307,18 @@ function rVixRegime(tickerDays: RDay[], vixDays: RDay[]) {
     return { mean, std };
   };
   const cs = stats(calm), ps = stats(panic);
+
+  // Compact VIX level series (decimated) so the UI can draw the regime band
+  // with the 25 threshold above the histogram.
+  const vStep = Math.max(1, Math.ceil(vixDays.length / 160));
+  const vixSeries = vixDays
+    .filter((_, i) => i % vStep === 0 || i === vixDays.length - 1)
+    .map((d) => ({ date: d.date, vix: +d.close.toFixed(2) }));
+
   return {
     bins, calmDays: calm.length, panicDays: panic.length,
     calmMean: cs.mean, calmStd: cs.std, panicMean: ps.mean, panicStd: ps.std,
+    vixSeries,
   };
 }
 
