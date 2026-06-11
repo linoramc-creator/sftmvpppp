@@ -42,6 +42,8 @@ export interface RiskResponse {
     calmStd: number | null;
     panicMean: number | null;
     panicStd: number | null;
+    /** Decimated VIX closes (2y) for the regime band; absent on older backends. */
+    vixSeries?: { date: string; vix: number }[];
   } | null;
   oilBeta: {
     points: OilPoint[];

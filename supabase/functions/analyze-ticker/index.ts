@@ -1114,47 +1114,8 @@ function mergeQuarterlyData(yahoo: any[], finnhub: any[], fmp: any[], twelveData
 }
 
 // =====================================================
-// TICKER: POLYMARKET / FMP / TWELVE DATA
+// TICKER: FMP / TWELVE DATA
 // =====================================================
-
-async function fetchPolymarketData(ticker: string, companyName: string): Promise<string> {
-  try {
-    const terms = [companyName.split(" ").slice(0, 2).join(" "), ticker].filter(Boolean);
-    let markets: any[] = [];
-
-    for (const q of terms) {
-      const res = await fetch(
-        `https://gamma-api.polymarket.com/markets?q=${encodeURIComponent(q)}&limit=6&active=true&closed=false`,
-        { headers: { "Accept": "application/json" } }
-      ).catch(() => null);
-      if (!res?.ok) continue;
-      const data = await res.json().catch(() => []);
-      if (Array.isArray(data) && data.length > 0) { markets = data; break; }
-    }
-
-    const relevant = markets
-      .filter((m: any) => !m.closed && m.outcomePrices && m.question)
-      .sort((a: any, b: any) => (b.volume ?? 0) - (a.volume ?? 0))
-      .slice(0, 3);
-
-    if (!relevant.length) return "";
-
-    const lines = ["--- MERCADOS DE PREDICCION ACTIVOS (POLYMARKET) ---"];
-    for (const m of relevant) {
-      try {
-        const outcomes: string[] = JSON.parse(m.outcomes || "[]");
-        const prices: string[] = JSON.parse(m.outcomePrices || "[]");
-        const vol = m.volume ? `$${(m.volume / 1000).toFixed(0)}K vol` : "";
-        const priceStr = outcomes.map((o, i) => `${o}: ${(parseFloat(prices[i] ?? "0") * 100).toFixed(0)}%`).join(" / ");
-        const slug = m.slug ?? m.conditionId ?? "";
-        const url = slug ? ` — https://polymarket.com/event/${slug}` : "";
-        lines.push(`- "${m.question}"${url}`);
-        lines.push(`  ${priceStr}${vol ? `  (${vol})` : ""}`);
-      } catch (_) { /* skip */ }
-    }
-    return lines.length > 1 ? lines.join("\n") : "";
-  } catch (_) { return ""; }
-}
 
 async function fetchFmpData(ticker: string, key: string): Promise<string> {
   if (!key) return "";
@@ -1344,7 +1305,6 @@ function buildTickerDataContext(
   earningsSearch: any,
   competitiveSearch: any,
   risksCatalystsSearch: any,
-  polymarketContext: string,
   fredContext: string,
   fmpContext: string,
   twelveDataContext: string,
@@ -1550,7 +1510,6 @@ function buildTickerDataContext(
   if (fmpContext) lines.push("", fmpContext);
   if (twelveDataContext) lines.push("", twelveDataContext);
   if (technicalContext) lines.push("", technicalContext);
-  if (polymarketContext) lines.push("", polymarketContext);
 
   lines.push("", "=== FIN DATOS ===");
   return lines.join("\n");
@@ -1560,7 +1519,7 @@ function buildTickerSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
   return `Eres un analista financiero institucional senior. Fecha: ${today}.
 
-Genera EXACTAMENTE las 8 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
+Genera EXACTAMENTE las 7 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
 ## Resumen Ejecutivo
 ## Finanzas
 ## Valoración
@@ -1568,7 +1527,6 @@ Genera EXACTAMENTE las 8 secciones siguientes, cada una iniciada con "## " (no l
 ## Noticias
 ## Señales Técnicas
 ## Institucional
-## Mercados de Predicción
 
 == CONTENIDO POR SECCION ==
 
@@ -1665,9 +1623,6 @@ Usa los INDICADORES TÉCNICOS (TWELVE DATA) y el precio actual / rango 52W de Fi
 - ### Actividad Insider: resume los datos de ACTIVIDAD INSIDER (FMP) — compras/ventas recientes.
 - ### Flujos y Sentimiento: 3-4 líneas sobre flujos institucionales y sentimiento general.
 
-## Mercados de Predicción
-Solo si existen datos en POLYMARKET: escribe 3-5 líneas mencionando los mercados de predicción activos más relevantes, sus probabilidades actuales y volumen. Para cada mercado, incluye el enlace del contexto en formato [ver en Polymarket](url). Explica qué implican esas probabilidades para el inversor. Si no hay datos de Polymarket, omite esta sección completamente.
-
 REGLAS DE FORMATO:
 - Markdown estricto. Sin emojis.
 - TODOS los números: exactamente 2 decimales (21.28, no 21.2848; 40.84%, no 40.839999%).
@@ -1682,7 +1637,7 @@ REGLAS DE FORMATO:
   - NUNCA omitas una FILA ENTERA de la tabla "Métrica | Valor" — todas las métricas de la lista DEBEN aparecer. Si te falta el dato, pon "—" en la columna Valor.
   - Solo está permitido omitir una fila ENTERA si TODAS las celdas de esa fila serían "—".
   - Antes de poner "—", SIEMPRE busca en las 4 fuentes: Finnhub (metrics, profile), Twelve Data (statistics_metrics), FMP, y HISTORIAL TRIMESTRAL.
-- TABLAS COMPLETAS: las 8 secciones son OBLIGATORIAS, no las puedes omitir aunque tengas pocos datos. Si una sección tiene poco contenido, escribe lo que sepas; nunca dejes una sección vacía.
+- TABLAS COMPLETAS: las 7 secciones son OBLIGATORIAS, no las puedes omitir aunque tengas pocos datos. Si una sección tiene poco contenido, escribe lo que sepas; nunca dejes una sección vacía.
 - No cortes frases a medias.`;
 }
 
@@ -1831,6 +1786,79 @@ REGLAS DE FORMATO:
 - No cortes frases a medias.`;
 }
 
+// ETF report prompt: basic valuation only. No quarterly fundamentals, no
+// automatic red flags, no insider activity, no institutional holdings —
+// those blocks don't apply to funds and used to break the ETF view.
+function buildEtfSystemPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `Eres un analista financiero institucional senior especializado en ETFs. Fecha: ${today}.
+
+Genera EXACTAMENTE las 4 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
+## Resumen Ejecutivo
+## Valoración
+## Noticias
+## Señales Técnicas
+
+== CONTENIDO POR SECCION ==
+
+## Resumen Ejecutivo
+- Párrafo 1 (5-7 líneas): qué replica el fondo, gestora, categoría, precio actual y rendimiento reciente.
+- Párrafo 2 (4-5 líneas): posicionamiento del fondo frente a alternativas y tesis de inversión.
+- Párrafo 3 (4-5 líneas): catalizadores y riesgos macro del activo subyacente (tipos, aranceles, geopolítica).
+- ### Perfil del Fondo: gestora, categoría, índice de referencia, fecha de lanzamiento, descripción (3-4 líneas).
+
+## Valoración
+Incluye una tabla de métricas básicas del fondo con estas filas (Métrica | Valor) — usa "—" si el dato no aparece en ninguna fuente:
+| Métrica | Valor |
+|---|---|
+| Precio Actual | |
+| Patrimonio (AUM) | |
+| Expense Ratio (TER) | |
+| Dividend Yield | |
+| Beta | |
+| 52W High | |
+| 52W Low | |
+| 52W Return | |
+| Volumen Promedio 10D | |
+
+PROHIBIDO en esta sección: red flags automáticos, actividad insider, tenencias institucionales, métricas de fundamentales corporativos (P/E del fondo solo si está disponible como dato real de la cartera).
+
+- ### Factores de Riesgo (6-8 viñetas):
+  Formato: "- **Tipo:** descripción con cifras/eventos. Nivel: **ALTO** / **MEDIO** / **BAJO**"
+  Cubre: concentración sectorial/geográfica, divisa, liquidez, tracking error, regulatorio, macro.
+- ### Catalizadores (4-6 viñetas): divide en **Corto plazo (0-3m)**, **Medio plazo (3-12m)**, **Largo plazo (+12m)**.
+
+## Noticias
+- ### Noticias del Fondo y su Temática: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL del contexto si está disponible; si no, "(Fuente)" sin enlace.
+- ### Contexto Macro Relevante: 4-5 líneas integrando indicadores FRED (tipos, inflación, yield 10Y).
+
+## Señales Técnicas
+Usa los INDICADORES TÉCNICOS (TWELVE DATA) y el precio actual / rango 52W.
+
+### Indicadores
+| Indicador | Valor | Señal |
+|---|---|---|
+| Tendencia | [ej. Precio > SMA50 > SMA200] | **BULLISH** / **BEARISH** / **NEUTRO** |
+| RSI (14) | [valor] | **SOBRECOMPRADO** (>70) / **SOBREVENTA** (<30) / **NEUTRO** (30-70) |
+| MACD | [valor] (Signal: [señal]) | **ALCISTA** / **BAJISTA** |
+| SMA 50 | $[valor] | [% precio vs SMA50] |
+| SMA 200 | $[valor] | [% precio vs SMA200] |
+| Soporte Clave | $[nivel] | [fuente] |
+| Resistencia Clave | $[nivel] | [fuente] |
+
+### Análisis Técnico
+2-3 líneas: tendencia dominante, confluencias, niveles críticos.
+
+REGLAS DE FORMATO:
+- Markdown estricto. Sin emojis.
+- TODOS los números con exactamente 2 decimales y unidades ($, %, x, B, M).
+- Señales y niveles de riesgo en **NEGRITAS**: **BULLISH**, **BEARISH**, **NEUTRO**, **ALTO**, **MEDIO**, **BAJO**.
+- Entre cada viñeta deja UNA LÍNEA EN BLANCO.
+- Si un dato no aparece en NINGUNA fuente: escribe "—" (em-dash), nunca "N/D".
+- Las 4 secciones son OBLIGATORIAS. Nunca inventes cifras.
+- No cortes frases a medias.`;
+}
+
 // =====================================================
 // HANDLERS
 // =====================================================
@@ -1844,7 +1872,10 @@ interface EnvKeys {
   TWELVE_KEY: string;
 }
 
-async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Response> {
+// etfMode trims the pipeline for funds: no quarterly fundamentals, no peers
+// table, no FMP insider/institutional context, no catalyst calendar — and an
+// ETF-specific prompt (basic valuation only; red flags & insider never apply).
+async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = false): Promise<Response> {
   const cleanTicker = ticker.trim().toUpperCase();
   const encoder = new TextEncoder();
 
@@ -1872,7 +1903,6 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           fmpQuarterly,
           twelveDataQuarterly,
           peerData,
-          polymarketContext,
           fredContext,
           fmpContext,
           twelveDataContext,
@@ -1885,14 +1915,13 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           risksCatalystsSearch,
           catalystCalendar,
         ] = await Promise.all([
-          fetchYahooQuarterlyFinancials(cleanTicker),
-          env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
-          env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
-          env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
-          env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
-          fetchPolymarketData(cleanTicker, companyName),
+          etfMode ? Promise.resolve([]) : fetchYahooQuarterlyFinancials(cleanTicker),
+          !etfMode && env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
+          !etfMode && env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
+          !etfMode && env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
+          !etfMode && env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
           fetchFredData(env.FRED_KEY),
-          fetchFmpData(cleanTicker, env.FMP_KEY),
+          etfMode ? Promise.resolve("") : fetchFmpData(cleanTicker, env.FMP_KEY),
           fetchTwelveData(cleanTicker, env.TWELVE_KEY),
           fetchTechnicalIndicators(cleanTicker, env.TWELVE_KEY),
           env.TAVILY_KEY
@@ -1904,16 +1933,16 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           env.TAVILY_KEY && sector
             ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, env.TAVILY_KEY, 3, 14, "news", 130)
             : Promise.resolve(null),
-          env.TAVILY_KEY
+          !etfMode && env.TAVILY_KEY
             ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, env.TAVILY_KEY, 3, undefined, undefined, 140)
             : Promise.resolve(null),
-          env.TAVILY_KEY && peers.length > 0
+          !etfMode && env.TAVILY_KEY && peers.length > 0
             ? fetchTavilySearch(`${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`, env.TAVILY_KEY, 2, undefined, undefined, 120)
             : Promise.resolve(null),
           env.TAVILY_KEY
-            ? fetchTavilySearch(`${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} ${etfMode ? "ETF flows holdings outlook" : "risks catalysts growth headwinds"} 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
             : Promise.resolve(null),
-          fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
+          etfMode ? Promise.resolve(null) : fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
         ]);
 
         // Step 3: Merge quarterly data from all structured sources (Yahoo first)
@@ -1926,7 +1955,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
 
         // AI fallback when structured sources returned fewer than 4 quarters
         let aiFallback: any[] = [];
-        if (quarterlyHistory.length < 4 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
+        if (!etfMode && quarterlyHistory.length < 4 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
           console.log(`Quarterly AI fallback triggered (0 structured quarters).`);
           aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
           if (aiFallback.length > 0) {
@@ -1941,27 +1970,30 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           }
         }
 
-        // Step 4: Emit quarterly data event so frontend can render tables immediately
-        const quarterlyDebug = {
-          hasFinnhub:     !!env.FINNHUB_KEY,
-          hasFmp:         !!env.FMP_KEY,
-          hasTwelveData:  !!env.TWELVE_KEY,
-          hasTavily:      !!env.TAVILY_KEY,
-          yahooRows:      (yahooQuarterly as any[]).length,
-          finnhubRows:    (finnhubQuarterly as any[]).length,
-          fmpRows:        (fmpQuarterly as any[]).length,
-          twelveDataRows: (twelveDataQuarterly as any[]).length,
-          aiFallbackRows: aiFallback.length,
-          mergedRows:     quarterlyHistory.length,
-        };
-        controller.enqueue(encoder.encode(
-          `data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug, __catalystCalendar: catalystCalendar })}\n\n`
-        ));
+        // Step 4: Emit quarterly data event so frontend can render tables
+        // immediately. ETF mode has no quarterly fundamentals by design.
+        if (!etfMode) {
+          const quarterlyDebug = {
+            hasFinnhub:     !!env.FINNHUB_KEY,
+            hasFmp:         !!env.FMP_KEY,
+            hasTwelveData:  !!env.TWELVE_KEY,
+            hasTavily:      !!env.TAVILY_KEY,
+            yahooRows:      (yahooQuarterly as any[]).length,
+            finnhubRows:    (finnhubQuarterly as any[]).length,
+            fmpRows:        (fmpQuarterly as any[]).length,
+            twelveDataRows: (twelveDataQuarterly as any[]).length,
+            aiFallbackRows: aiFallback.length,
+            mergedRows:     quarterlyHistory.length,
+          };
+          controller.enqueue(encoder.encode(
+            `data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug, __catalystCalendar: catalystCalendar })}\n\n`
+          ));
+        }
 
         // Step 5: Build Gemini prompt
         const dataContext = buildTickerDataContext(
           finnhubData, peerData, quarterlyHistory, geoContext, sectorNews, tickerNews,
-          earningsSearch, competitiveSearch, risksCatalystsSearch, polymarketContext,
+          earningsSearch, competitiveSearch, risksCatalystsSearch,
           fredContext, fmpContext, twelveDataContext, technicalContext,
         );
 
@@ -1973,14 +2005,16 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           quarterly_twelve_data: (twelveDataQuarterly as any[]).length,
         });
 
-        const messages = [
-          { role: "system", content: buildTickerSystemPrompt() },
-          {
-            role: "user",
-            content: `${dataContext}
-
-INSTRUCCIÓN FINAL:
-Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secciones obligatorias.
+        const finalInstruction = etfMode
+          ? `INSTRUCCIÓN FINAL:
+Genera el informe del ETF ${cleanTicker} (${companyName}) con las 4 secciones obligatorias.
+- En ## Valoración: SOLO la tabla básica de métricas del fondo. PROHIBIDO: red flags automáticos, actividad insider, tenencias institucionales y análisis de fundamentales corporativos (ingresos, márgenes, cash flow) — un ETF no los tiene.
+- Desarrolla ### Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
+- En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
+- En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
+- Si el ticker no existe o no es un fondo, indícalo en el Resumen Ejecutivo.`
+          : `INSTRUCCIÓN FINAL:
+Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secciones obligatorias.
 - En ## Finanzas: incluye la tabla de métricas actuales. Las tablas trimestrales se renderizan automáticamente — NO las generes.
 - En ## Valoración: desarrolla Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
 - En ## Finanzas: para cualquier métrica no disponible en Finnhub, usa DATOS TWELVE DATA o FMP. Si no hay dato en ninguna fuente, OMITE esa fila. CERO N/D permitidos.
@@ -1988,9 +2022,11 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 8 secci
 - En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
 - En ## Institucional: usa los datos estructurados de FMP como fuente principal.
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
-- En ## Mercados de Predicción: solo si hay datos de POLYMARKET. Incluye el enlace. Si no hay datos, omite la sección.
-- Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
-          },
+- Si el ticker no existe, indícalo en el Resumen Ejecutivo.`;
+
+        const messages = [
+          { role: "system", content: etfMode ? buildEtfSystemPrompt() : buildTickerSystemPrompt() },
+          { role: "user", content: `${dataContext}\n\n${finalInstruction}` },
         ];
 
         // Step 6: Call Gemini (Pro by default — keepalives above allow unlimited generation time)
@@ -2885,7 +2921,101 @@ async function eFmpCountries(ticker: string, fmpKey: string): Promise<{ country:
   } catch (_) { return null; }
 }
 
-async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<{ title: string; url: string; source: string; datetime: string }[]> {
+// FMP sector names → the Yahoo sector ids the risk table is keyed by.
+const ETF_FMP_SECTOR_KEY: Record<string, string> = {
+  "technology": "technology",
+  "information technology": "technology",
+  "financial services": "financial_services",
+  "financials": "financial_services",
+  "consumer cyclical": "consumer_cyclical",
+  "consumer discretionary": "consumer_cyclical",
+  "consumer defensive": "consumer_defensive",
+  "consumer staples": "consumer_defensive",
+  "communication services": "communication_services",
+  "telecommunications": "communication_services",
+  "basic materials": "basic_materials",
+  "materials": "basic_materials",
+  "real estate": "realestate",
+  "energy": "energy",
+  "industrials": "industrials",
+  "healthcare": "healthcare",
+  "health care": "healthcare",
+  "utilities": "utilities",
+};
+
+// Sector weightings fallback when Yahoo's topHoldings has none.
+async function eFmpSectors(ticker: string, fmpKey: string): Promise<{ key: string; sector: string; pct: number }[] | null> {
+  if (!fmpKey) return null;
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/etf-sector-weightings/${encodeURIComponent(ticker)}?apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!Array.isArray(j) || j.length === 0) return null;
+    const out: { key: string; sector: string; pct: number }[] = [];
+    for (const row of j as Record<string, unknown>[]) {
+      const name = String(row.sector ?? "").trim();
+      const pct = parseFloat(String(row.weightPercentage ?? "").replace("%", ""));
+      if (!name || !Number.isFinite(pct) || pct <= 0.05) continue;
+      const key = ETF_FMP_SECTOR_KEY[name.toLowerCase()] ?? name.toLowerCase().replace(/[^a-z]+/g, "_");
+      out.push({ key, sector: ETF_SECTOR_ES[key] ?? name, pct: +pct.toFixed(2) });
+    }
+    out.sort((a, b) => b.pct - a.pct);
+    return out.length ? out : null;
+  } catch (_) { return null; }
+}
+
+// Country of a single holding via Yahoo assetProfile (cached).
+async function eYahooHoldingCountry(symbol: string): Promise<string | null> {
+  const cacheKey = `etf-holding-country-${symbol}`;
+  const cached = yfCacheGet(cacheKey);
+  if (cached !== undefined) return cached as string | null;
+  try {
+    const auth = await yfGetAuth();
+    let url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=assetProfile`;
+    if (auth?.crumb) url += `&crumb=${encodeURIComponent(auth.crumb)}`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": YF_UA, ...(auth?.cookie ? { Cookie: auth.cookie } : {}) },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) { yfCacheSet(cacheKey, null); return null; }
+    const j = await r.json();
+    const country = j?.quoteSummary?.result?.[0]?.assetProfile?.country ?? null;
+    const out = typeof country === "string" && country ? country : null;
+    yfCacheSet(cacheKey, out);
+    return out;
+  } catch (_) { yfCacheSet(cacheKey, null); return null; }
+}
+
+// Country fallback: approximate the regional split from the top-10 holdings'
+// domiciles (Yahoo assetProfile), renormalised over the resolved weight.
+// Clearly labelled as approximate by the caller via countriesSource.
+async function eCountriesFromHoldings(
+  holdings: { symbol: string; name: string; pct: number }[],
+): Promise<{ country: string; pct: number }[] | null> {
+  const usable = holdings.filter((h) => h.symbol && h.pct > 0).slice(0, 10);
+  if (usable.length < 3) return null;
+  const resolved = await Promise.all(usable.map(async (h) => ({
+    pct: h.pct,
+    country: await eYahooHoldingCountry(h.symbol),
+  })));
+  const byCountry = new Map<string, number>();
+  let known = 0;
+  for (const r of resolved) {
+    if (!r.country) continue;
+    known += r.pct;
+    byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + r.pct);
+  }
+  if (known <= 0 || byCountry.size === 0) return null;
+  const out = [...byCountry.entries()]
+    .map(([country, pct]) => ({ country, pct: +((pct / known) * 100).toFixed(2) }))
+    .sort((a, b) => b.pct - a.pct);
+  return out;
+}
+
+type ENewsItem = { title: string; url: string; source: string; datetime: string };
+
+async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<ENewsItem[]> {
   if (!finnhubKey) return [];
   try {
     const to = new Date().toISOString().slice(0, 10);
@@ -2900,6 +3030,41 @@ async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<{ title
       url: String(n.url ?? ""),
       source: String(n.source ?? ""),
       datetime: n.datetime ? new Date(Number(n.datetime) * 1000).toISOString().slice(0, 10) : "",
+    })).filter((n) => n.title && n.url);
+  } catch (_) { return []; }
+}
+
+// News fallback #1: Yahoo Finance search news (public, no crumb required).
+async function eYahooNews(ticker: string): Promise<ENewsItem[]> {
+  try {
+    const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=8&quotesCount=0`;
+    const r = await fetch(url, { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    const news = Array.isArray(j?.news) ? j.news : [];
+    return news.slice(0, 8).map((n: Record<string, unknown>) => ({
+      title: String(n.title ?? ""),
+      url: String(n.link ?? ""),
+      source: String(n.publisher ?? "Yahoo Finance"),
+      datetime: n.providerPublishTime ? new Date(Number(n.providerPublishTime) * 1000).toISOString().slice(0, 10) : "",
+    })).filter((n: ENewsItem) => n.title && n.url);
+  } catch (_) { return []; }
+}
+
+// News fallback #2: FMP stock_news.
+async function eFmpNews(ticker: string, fmpKey: string): Promise<ENewsItem[]> {
+  if (!fmpKey) return [];
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${encodeURIComponent(ticker)}&limit=8&apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (!Array.isArray(j)) return [];
+    return j.slice(0, 8).map((n: Record<string, unknown>) => ({
+      title: String(n.title ?? ""),
+      url: String(n.url ?? ""),
+      source: String(n.site ?? "FMP"),
+      datetime: String(n.publishedDate ?? "").slice(0, 10),
     })).filter((n) => n.title && n.url);
   } catch (_) { return []; }
 }
@@ -2931,8 +3096,9 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     .filter((a) => a.pct > 0.05)
     .map((a) => ({ label: a.label, pct: +a.pct.toFixed(2) }));
 
-  // Sector weightings: array of single-key objects keyed by Yahoo sector id.
-  const sectors: { key: string; sector: string; pct: number }[] = [];
+  // Sector weightings: Yahoo first (single-key objects keyed by sector id),
+  // FMP etf-sector-weightings as fallback.
+  let sectors: { key: string; sector: string; pct: number }[] = [];
   for (const entry of (th.sectorWeightings ?? []) as Record<string, unknown>[]) {
     for (const [key, v] of Object.entries(entry)) {
       const pct = (eNum(v) ?? 0) * 100;
@@ -2940,6 +3106,11 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     }
   }
   sectors.sort((a, b) => b.pct - a.pct);
+  let sectorsSource: "yahoo" | "fmp" | null = sectors.length ? "yahoo" : null;
+  if (sectors.length === 0) {
+    const fmpSectors = await eFmpSectors(ticker, env.FMP_KEY);
+    if (fmpSectors) { sectors = fmpSectors; sectorsSource = "fmp"; }
+  }
 
   const holdings = ((th.holdings ?? []) as Record<string, unknown>[])
     .map((h) => ({
@@ -2950,10 +3121,30 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     .filter((h) => h.symbol || h.name)
     .slice(0, 10);
 
-  const [countries, news] = await Promise.all([
-    eFmpCountries(ticker, env.FMP_KEY),
-    eFinnhubNews(ticker, env.FINNHUB_KEY),
-  ]);
+  // Regional breakdown + news, each with an explicit fallback chain so one
+  // provider having nothing never leaves the block empty (A4).
+  let countriesSource: "fmp" | "yahoo-approx" | null = null;
+  let countries = await eFmpCountries(ticker, env.FMP_KEY);
+  if (countries) {
+    countriesSource = "fmp";
+  } else {
+    countries = await eCountriesFromHoldings(holdings);
+    if (countries) countriesSource = "yahoo-approx";
+  }
+
+  let newsSource: "finnhub" | "yahoo" | "fmp" | null = null;
+  let news = await eFinnhubNews(ticker, env.FINNHUB_KEY);
+  if (news.length) {
+    newsSource = "finnhub";
+  } else {
+    news = await eYahooNews(ticker);
+    if (news.length) {
+      newsSource = "yahoo";
+    } else {
+      news = await eFmpNews(ticker, env.FMP_KEY);
+      if (news.length) newsSource = "fmp";
+    }
+  }
 
   // Geopolitical risk layer: real exposure × fixed heuristic score.
   const geoRisks: { factor: string; kind: "sector" | "país"; exposurePct: number; score: number; contribution: number; note: string }[] = [];
@@ -2984,10 +3175,13 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     category: fp.categoryName ? String(fp.categoryName) : null,
     assetAllocation,
     sectors: sectors.map(({ sector, pct }) => ({ sector, pct })),
+    sectorsSource,
     countries,
+    countriesSource,
     holdings,
     geoRisks: geoRisks.slice(0, 8),
     news,
+    newsSource,
     fetchedAt: new Date().toISOString(),
   });
 }
@@ -3113,9 +3307,18 @@ function rVixRegime(tickerDays: RDay[], vixDays: RDay[]) {
     return { mean, std };
   };
   const cs = stats(calm), ps = stats(panic);
+
+  // Compact VIX level series (decimated) so the UI can draw the regime band
+  // with the 25 threshold above the histogram.
+  const vStep = Math.max(1, Math.ceil(vixDays.length / 160));
+  const vixSeries = vixDays
+    .filter((_, i) => i % vStep === 0 || i === vixDays.length - 1)
+    .map((d) => ({ date: d.date, vix: +d.close.toFixed(2) }));
+
   return {
     bins, calmDays: calm.length, panicDays: panic.length,
     calmMean: cs.mean, calmStd: cs.std, panicMean: ps.mean, panicStd: ps.std,
+    vixSeries,
   };
 }
 
@@ -3339,6 +3542,11 @@ Deno.serve(async (req) => {
     // Dispatch by body shape
     if (body.sector && typeof body.sector === "string" && body.sector.trim().length > 0 && body.sector.trim().length <= 80) {
       return await handleSectorAnalysis(body.sector, env);
+    }
+
+    // ETF report (apartado ETF) — trimmed pipeline + ETF prompt
+    if (body.etfReport === true && typeof body.ticker === "string" && body.ticker.trim().length > 0 && body.ticker.trim().length <= 10) {
+      return await handleTickerAnalysis(body.ticker, env, true);
     }
 
     if (body.ticker && typeof body.ticker === "string" && body.ticker.trim().length > 0 && body.ticker.trim().length <= 10) {

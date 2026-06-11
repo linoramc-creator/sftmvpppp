@@ -40,6 +40,11 @@ export interface EtfNewsItem {
   datetime: string;
 }
 
+// Which provider in the fallback chain actually delivered each block.
+export type EtfSectorsSource = "yahoo" | "fmp" | null;
+export type EtfCountriesSource = "fmp" | "yahoo-approx" | null;
+export type EtfNewsSource = "finnhub" | "yahoo" | "fmp" | null;
+
 export interface EtfResponse {
   ticker: string;
   found: boolean;
@@ -48,9 +53,12 @@ export interface EtfResponse {
   category?: string | null;
   assetAllocation?: EtfAllocation[];
   sectors?: EtfSector[];
+  sectorsSource?: EtfSectorsSource;
   countries?: EtfCountry[] | null;
+  countriesSource?: EtfCountriesSource;
   holdings?: EtfHolding[];
   geoRisks?: EtfGeoRisk[];
   news?: EtfNewsItem[];
+  newsSource?: EtfNewsSource;
   fetchedAt: string;
 }
