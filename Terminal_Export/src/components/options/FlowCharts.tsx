@@ -11,7 +11,7 @@ import {
 // ── Open-interest profile (puts mirrored below zero) + spot / max-pain refs ──
 function OiProfile({ data }: { data: AggregationsResponse }) {
   const rows = useMemo(
-    () => [...data.perStrike].sort((a, b) => a.strike - b.strike).map((r) => ({
+    () => [...(data.perStrike ?? [])].sort((a, b) => a.strike - b.strike).map((r) => ({
       strike: r.strike,
       callOI: r.callOI,
       putOI: -r.putOI, // mirror below the axis
@@ -96,13 +96,14 @@ export function FlowCharts({ data }: { data: AggregationsResponse }) {
   );
 }
 
-function WallList({ title, walls, color }: { title: string; walls: { strike: number; openInterest: number }[]; color: string }) {
+function WallList({ title, walls, color }: { title: string; walls?: { strike: number; openInterest: number }[]; color: string }) {
+  const list = walls ?? [];
   return (
     <div className="border border-border bg-card">
       <div className="px-3 py-2 text-[9px] tracking-widest uppercase border-b border-border/50" style={{ color }}>{title}</div>
       <div className="divide-y divide-border/30">
-        {walls.length === 0 && <div className="px-3 py-2 text-[10px] text-muted-foreground/40">—</div>}
-        {walls.map((w) => (
+        {list.length === 0 && <div className="px-3 py-2 text-[10px] text-muted-foreground/40">—</div>}
+        {list.map((w) => (
           <div key={w.strike} className="flex items-center justify-between px-3 py-1.5 text-[11px] font-mono">
             <span className="text-foreground/80">${fmtPrice(w.strike, 0)}</span>
             <span className="text-muted-foreground/70">{fmtNum(w.openInterest)} OI</span>

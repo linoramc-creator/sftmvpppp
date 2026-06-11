@@ -16,6 +16,13 @@ import { FlowCharts } from "./FlowCharts";
 import { fmtPrice } from "./theme";
 
 type TabKey = "chain" | "gex" | "flow" | "skew" | "surface" | "term" | "ivhv";
+type DataKind = "chain" | "agg" | "skew" | "surface" | "term" | "ivhv";
+
+// Which data shape a tab consumes. gex & flow share the aggregations payload.
+function kindOf(tab: TabKey): DataKind {
+  if (tab === "gex" || tab === "flow") return "agg";
+  return tab as DataKind;
+}
 
 const TABS: { key: TabKey; label: string; needsExpiry: boolean }[] = [
   { key: "chain", label: "CADENA", needsExpiry: true },
@@ -58,6 +65,9 @@ export function OptionsView() {
   const [metaError, setMetaError] = useState<string | null>(null);
 
   const [data, setData] = useState<unknown>(null);
+  // Which data shape `data` currently holds — so we never render one tab's
+  // payload into another tab's component during the async gap on tab switch.
+  const [dataKind, setDataKind] = useState<DataKind | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +84,7 @@ export function OptionsView() {
     setMetaError(null);
     setMeta(null);
     setData(null);
+    setDataKind(null);
     setError(null);
     cache.current.clear();
     try {
@@ -101,6 +112,7 @@ export function OptionsView() {
 
     if (cache.current.has(cacheKey)) {
       setData(cache.current.get(cacheKey));
+      setDataKind(kindOf(tab));
       setError(null);
       setLoading(false);
       return;
@@ -126,6 +138,7 @@ export function OptionsView() {
         }
         cache.current.set(cacheKey, d);
         setData(d);
+        setDataKind(kindOf(tab));
       } catch (e) {
         if (e instanceof Error && e.name === "AbortError") return;
         setError(e instanceof OptionsApiError ? e.message : (e as Error).message);
@@ -167,6 +180,7 @@ export function OptionsView() {
         tab === "gex" || tab === "flow" ? `agg:${expiry}` : `${tab}:${def.needsExpiry ? expiry : "-"}`;
       cache.current.set(cacheKey, d);
       setData(d);
+      setDataKind(kindOf(tab));
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
       setError(e instanceof OptionsApiError ? e.message : (e as Error).message);
@@ -279,22 +293,29 @@ export function OptionsView() {
             ))}
           </div>
 
-          {/* Content */}
-          <OptionsErrorBoundary>
-            {loading && (
-              <div className="flex items-center justify-center gap-2 py-20 text-muted-foreground/60">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-[11px] tracking-widest uppercase">Cargando opciones…</span>
-              </div>
-            )}
-            {!loading && error && (
-              <div className="flex items-center gap-2 border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive">
-                <AlertCircle className="h-4 w-4 shrink-0" /> {error}
-              </div>
-            )}
-            {!loading && !error && data != null && (
-              <TabContent tab={tab} data={data} />
-            )}
+          {/* Content — keyed by tab so the error boundary resets on switch.
+              We only render once the loaded data matches the active tab, so a
+              previous tab's payload is never fed into a mismatched component. */}
+          <OptionsErrorBoundary key={tab}>
+            {(() => {
+              const ready = !loading && !error && data != null && dataKind === kindOf(tab);
+              if (loading || (!error && !ready)) {
+                return (
+                  <div className="flex items-center justify-center gap-2 py-20 text-muted-foreground/60">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-[11px] tracking-widest uppercase">Cargando opciones…</span>
+                  </div>
+                );
+              }
+              if (error) {
+                return (
+                  <div className="flex items-center gap-2 border border-destructive/30 bg-destructive/5 px-4 py-3 text-[12px] text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+                  </div>
+                );
+              }
+              return <TabContent tab={tab} data={data} />;
+            })()}
           </OptionsErrorBoundary>
         </>
       )}

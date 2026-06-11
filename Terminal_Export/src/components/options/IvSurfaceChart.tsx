@@ -10,7 +10,7 @@ import { OPT_COLORS, ttStyle, fmtPctFrac, fmtPrice, ivHeatColor } from "./theme"
 // IV encoded as color (height), which reads cleanly in the terminal grid.
 export function IvSurfaceChart({ data }: { data: SurfaceResponse }) {
   const { points, lo, hi } = useMemo(() => {
-    const pts = data.points.map((p) => ({
+    const pts = (data.points ?? []).map((p) => ({
       dte: p.daysToExpiry,
       moneyness: p.moneyness,
       iv: p.iv,

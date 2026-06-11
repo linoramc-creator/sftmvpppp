@@ -13,7 +13,7 @@ const fmtDate = (s: string) => {
 };
 
 export function IvHvChart({ data }: { data: IVHVResponse }) {
-  const rows = data.series
+  const rows = (data.series ?? [])
     .filter((p) => p.hv != null)
     .map((p) => ({ date: p.date, hv: p.hv != null ? p.hv * 100 : null }));
 

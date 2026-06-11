@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ChainResponse, OptionContract } from "@/types/options";
 import { fmtGreek, fmtNum, fmtPctFrac, fmtPrice } from "./theme";
 
@@ -8,12 +8,14 @@ const NUM = (v: number | null, dp = 2) => (v == null ? "—" : fmtPrice(v, dp));
 // trading layout. Greeks come pre-computed from the BSM service.
 export function ChainTable({ data }: { data: ChainResponse }) {
   const [windowed, setWindowed] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const atmRowRef = useRef<HTMLTableRowElement>(null);
 
   const { strikes, callMap, putMap, atmStrike } = useMemo(() => {
     const cm = new Map<number, OptionContract>();
     const pm = new Map<number, OptionContract>();
-    data.calls.forEach((c) => c.strike != null && cm.set(c.strike, c));
-    data.puts.forEach((p) => p.strike != null && pm.set(p.strike, p));
+    (data.calls ?? []).forEach((c) => c.strike != null && cm.set(c.strike, c));
+    (data.puts ?? []).forEach((p) => p.strike != null && pm.set(p.strike, p));
     const all = Array.from(new Set([...cm.keys(), ...pm.keys()])).sort((a, b) => a - b);
     let atm = all[0];
     let best = Infinity;
@@ -31,6 +33,15 @@ export function ChainTable({ data }: { data: ChainResponse }) {
     const hi = Math.min(strikes.length, idx + 21);
     return strikes.slice(lo, hi);
   }, [windowed, strikes, atmStrike]);
+
+  // Center the view on the ATM row — otherwise the table opens at the lowest
+  // (deep-ITM call / deep-OTM put) strikes, which look empty.
+  useEffect(() => {
+    const container = scrollRef.current;
+    const row = atmRowRef.current;
+    if (!container || !row) return;
+    container.scrollTop = Math.max(0, row.offsetTop - container.clientHeight / 2);
+  }, [shown, atmStrike, windowed]);
 
   const callCols = ["OI", "Vol", "IV", "Δ", "Γ", "Θ", "Vega"];
   const putCols = ["Vega", "Θ", "Γ", "Δ", "IV", "Vol", "OI"];
@@ -58,7 +69,7 @@ export function ChainTable({ data }: { data: ChainResponse }) {
         </button>
       </div>
 
-      <div className="overflow-x-auto border border-border" style={{ maxHeight: 540 }}>
+      <div ref={scrollRef} className="overflow-auto border border-border" style={{ maxHeight: 540 }}>
         <table className="w-full font-mono min-w-max" style={{ fontSize: "11px" }}>
           <thead className="sticky top-0 z-10 bg-secondary">
             <tr className="border-b border-border">
@@ -80,7 +91,7 @@ export function ChainTable({ data }: { data: ChainResponse }) {
               const callItm = k < data.spot;
               const putItm = k > data.spot;
               return (
-                <tr key={k} className={isATM ? "bg-primary/10" : "hover:bg-primary/[0.03] transition-colors"}>
+                <tr key={k} ref={isATM ? atmRowRef : undefined} className={isATM ? "bg-primary/10" : "hover:bg-primary/[0.03] transition-colors"}>
                   {callCells(c).map((cell, j) => (
                     <td key={`c-${j}`} className={`px-2 py-1 text-right ${callItm ? "text-foreground/85" : "text-muted-foreground/55"}`}>{cell}</td>
                   ))}

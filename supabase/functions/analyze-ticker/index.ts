@@ -2785,6 +2785,500 @@ async function handleOptions(body: Record<string, any>): Promise<Response> {
 }
 
 // =====================================================
+// ETF DEEP ANALYSIS (sección "ETF") — deterministic, no LLM
+// =====================================================
+// Sector / asset-class / holdings come from Yahoo quoteSummary; country
+// weightings from FMP when configured; news from Finnhub when configured.
+// The geopolitical risk layer is a fixed, auditable heuristic table crossed
+// with real exposure weights — computed here, never by the LLM.
+
+const ETF_SECTOR_ES: Record<string, string> = {
+  realestate: "Inmobiliario",
+  consumer_cyclical: "Consumo cíclico",
+  basic_materials: "Materiales básicos",
+  consumer_defensive: "Consumo defensivo",
+  technology: "Tecnología",
+  communication_services: "Comunicaciones",
+  financial_services: "Servicios financieros",
+  utilities: "Utilities",
+  industrials: "Industriales",
+  energy: "Energía",
+  healthcare: "Salud",
+};
+
+// Sector geopolitical risk heuristics: score 0–100 + rationale.
+const ETF_SECTOR_RISK: Record<string, { score: number; note: string }> = {
+  energy:                 { score: 75, note: "OPEP+, sanciones y conflictos en Oriente Medio / Rusia" },
+  technology:             { score: 70, note: "Restricciones de exportación de semiconductores y cadena de suministro asiática" },
+  basic_materials:        { score: 60, note: "Concentración minera y aranceles a materias primas" },
+  industrials:            { score: 55, note: "Aranceles y fragmentación del comercio global" },
+  consumer_cyclical:      { score: 45, note: "Sensibilidad al ciclo global y a aranceles" },
+  financial_services:     { score: 40, note: "Sensibilidad a tipos de interés y riesgo regulatorio" },
+  communication_services: { score: 35, note: "Riesgo regulatorio y antimonopolio" },
+  healthcare:             { score: 35, note: "Riesgo regulatorio de precios de medicamentos" },
+  realestate:             { score: 30, note: "Sensibilidad a tipos de interés" },
+  utilities:              { score: 25, note: "Defensivo: impacto geopolítico limitado" },
+  consumer_defensive:     { score: 20, note: "Defensivo: impacto geopolítico limitado" },
+};
+
+// Country geopolitical risk heuristics (FMP country names).
+const ETF_COUNTRY_RISK: Record<string, { score: number; note: string }> = {
+  "Russia":         { score: 95, note: "Sanciones y riesgo de confiscación / desliste" },
+  "China":          { score: 85, note: "Tensiones EE.UU.–China, riesgo regulatorio y de desliste" },
+  "Taiwan":         { score: 80, note: "Riesgo de conflicto en el estrecho de Taiwán" },
+  "Hong Kong":      { score: 75, note: "Exposición indirecta al riesgo regulatorio chino" },
+  "Turkey":         { score: 70, note: "Inestabilidad monetaria e institucional" },
+  "Israel":         { score: 70, note: "Conflicto regional en Oriente Medio" },
+  "Saudi Arabia":   { score: 65, note: "Dependencia del crudo y riesgo regional" },
+  "South Africa":   { score: 60, note: "Inestabilidad institucional y de suministro eléctrico" },
+  "Brazil":         { score: 55, note: "Volatilidad política y cambiaria" },
+  "India":          { score: 50, note: "Tensiones fronterizas y proteccionismo" },
+  "Mexico":         { score: 50, note: "Dependencia comercial de EE.UU. y riesgo arancelario" },
+  "South Korea":    { score: 45, note: "Tensión con Corea del Norte; ciclo de semiconductores" },
+  "Japan":          { score: 30, note: "Riesgo bajo; sensibilidad al yen" },
+  "United States":  { score: 15, note: "Riesgo geopolítico doméstico bajo" },
+};
+const ETF_COUNTRY_RISK_DEFAULT = { score: 35, note: "Riesgo geopolítico moderado" };
+
+function eNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (v && typeof v === "object" && "raw" in (v as Record<string, unknown>)) {
+    const raw = (v as Record<string, unknown>).raw;
+    if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  }
+  return null;
+}
+
+async function eYahooQuoteSummary(ticker: string): Promise<Record<string, any> | null> {
+  const auth = await yfGetAuth();
+  const sym = encodeURIComponent(ticker.toUpperCase());
+  const modules = "quoteType,fundProfile,topHoldings";
+  let url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}`;
+  if (auth?.crumb) url += `&crumb=${encodeURIComponent(auth.crumb)}`;
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": YF_UA, ...(auth?.cookie ? { Cookie: auth.cookie } : {}) },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.quoteSummary?.result?.[0] ?? null;
+  } catch (_) { return null; }
+}
+
+async function eFmpCountries(ticker: string, fmpKey: string): Promise<{ country: string; pct: number }[] | null> {
+  if (!fmpKey) return null;
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/etf-country-weightings/${encodeURIComponent(ticker)}?apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!Array.isArray(j) || j.length === 0) return null;
+    const out = j
+      .map((row: Record<string, unknown>) => ({
+        country: String(row.country ?? ""),
+        pct: parseFloat(String(row.weightPercentage ?? "").replace("%", "")),
+      }))
+      .filter((c) => c.country && Number.isFinite(c.pct) && c.pct > 0)
+      .sort((a, b) => b.pct - a.pct);
+    return out.length ? out : null;
+  } catch (_) { return null; }
+}
+
+async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<{ title: string; url: string; source: string; datetime: string }[]> {
+  if (!finnhubKey) return [];
+  try {
+    const to = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+    const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}&token=${finnhubKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (!Array.isArray(j)) return [];
+    return j.slice(0, 8).map((n: Record<string, unknown>) => ({
+      title: String(n.headline ?? ""),
+      url: String(n.url ?? ""),
+      source: String(n.source ?? ""),
+      datetime: n.datetime ? new Date(Number(n.datetime) * 1000).toISOString().slice(0, 10) : "",
+    })).filter((n) => n.title && n.url);
+  } catch (_) { return []; }
+}
+
+async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const ticker = tickerRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9.\-]{1,12}$/.test(ticker)) return json({ error: "Ticker inválido" }, 400);
+
+  const summary = await eYahooQuoteSummary(ticker);
+  const quoteType = String(summary?.quoteType?.quoteType ?? "");
+  const isFund = quoteType === "ETF" || quoteType === "MUTUALFUND";
+  if (!summary || !isFund) {
+    return json({ ticker, found: false, fetchedAt: new Date().toISOString() });
+  }
+
+  const th = summary.topHoldings ?? {};
+  const fp = summary.fundProfile ?? {};
+
+  // Asset-class allocation (some ETFs have no bonds, no cash, etc. — only
+  // categories actually present are emitted).
+  const allocPairs: [string, unknown][] = [
+    ["Acciones", th.stockPosition], ["Bonos", th.bondPosition], ["Efectivo", th.cashPosition],
+    ["Preferentes", th.preferredPosition], ["Convertibles", th.convertiblePosition], ["Otros", th.otherPosition],
+  ];
+  const assetAllocation = allocPairs
+    .map(([label, v]) => ({ label, pct: (eNum(v) ?? 0) * 100 }))
+    .filter((a) => a.pct > 0.05)
+    .map((a) => ({ label: a.label, pct: +a.pct.toFixed(2) }));
+
+  // Sector weightings: array of single-key objects keyed by Yahoo sector id.
+  const sectors: { key: string; sector: string; pct: number }[] = [];
+  for (const entry of (th.sectorWeightings ?? []) as Record<string, unknown>[]) {
+    for (const [key, v] of Object.entries(entry)) {
+      const pct = (eNum(v) ?? 0) * 100;
+      if (pct > 0.05) sectors.push({ key, sector: ETF_SECTOR_ES[key] ?? key, pct: +pct.toFixed(2) });
+    }
+  }
+  sectors.sort((a, b) => b.pct - a.pct);
+
+  const holdings = ((th.holdings ?? []) as Record<string, unknown>[])
+    .map((h) => ({
+      symbol: String(h.symbol ?? ""),
+      name: String(h.holdingName ?? ""),
+      pct: +(((eNum(h.holdingPercent) ?? 0) * 100).toFixed(2)),
+    }))
+    .filter((h) => h.symbol || h.name)
+    .slice(0, 10);
+
+  const [countries, news] = await Promise.all([
+    eFmpCountries(ticker, env.FMP_KEY),
+    eFinnhubNews(ticker, env.FINNHUB_KEY),
+  ]);
+
+  // Geopolitical risk layer: real exposure × fixed heuristic score.
+  const geoRisks: { factor: string; kind: "sector" | "país"; exposurePct: number; score: number; contribution: number; note: string }[] = [];
+  for (const s of sectors.slice(0, 6)) {
+    const risk = ETF_SECTOR_RISK[s.key];
+    if (!risk) continue;
+    geoRisks.push({
+      factor: s.sector, kind: "sector", exposurePct: s.pct, score: risk.score,
+      contribution: +((s.pct * risk.score) / 100).toFixed(2), note: risk.note,
+    });
+  }
+  for (const c of countries ?? []) {
+    if (c.pct < 1) continue;
+    const risk = ETF_COUNTRY_RISK[c.country] ?? ETF_COUNTRY_RISK_DEFAULT;
+    if (risk.score < 50) continue; // only flag genuinely risky geographies
+    geoRisks.push({
+      factor: c.country, kind: "país", exposurePct: +c.pct.toFixed(2), score: risk.score,
+      contribution: +((c.pct * risk.score) / 100).toFixed(2), note: risk.note,
+    });
+  }
+  geoRisks.sort((a, b) => b.contribution - a.contribution);
+
+  return json({
+    ticker,
+    found: true,
+    name: String(summary.quoteType?.longName ?? summary.quoteType?.shortName ?? ""),
+    family: fp.family ? String(fp.family) : null,
+    category: fp.categoryName ? String(fp.categoryName) : null,
+    assetAllocation,
+    sectors: sectors.map(({ sector, pct }) => ({ sector, pct })),
+    countries,
+    holdings,
+    geoRisks: geoRisks.slice(0, 8),
+    news,
+    fetchedAt: new Date().toISOString(),
+  });
+}
+
+// =====================================================
+// RISK ANALYTICS (sección "Riesgo") — deterministic, no LLM
+// =====================================================
+// Every number here is computed in code from Yahoo price series.
+// The LLM never produces these figures.
+
+const RISK_VIX_PANIC = 25; // VIX level splitting "calma" vs "pánico" regimes
+
+interface RDay { date: string; close: number }
+
+function rDays(hist: { t: number[]; c: number[] } | null): RDay[] {
+  if (!hist) return [];
+  const out: RDay[] = [];
+  for (let i = 0; i < hist.t.length; i++) {
+    out.push({ date: new Date(hist.t[i] * 1000).toISOString().slice(0, 10), close: hist.c[i] });
+  }
+  return out;
+}
+
+// Daily simple returns keyed by the date of day t (vs close of t-1).
+function rReturnsByDate(days: RDay[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (let i = 1; i < days.length; i++) {
+    const prev = days[i - 1].close;
+    if (prev > 0) m.set(days[i].date, days[i].close / prev - 1);
+  }
+  return m;
+}
+
+// Inner-join two return series on date (sessions differ across assets).
+function rAlignedReturns(
+  a: Map<string, number>,
+  b: Map<string, number>,
+): { date: string; ra: number; rb: number }[] {
+  const out: { date: string; ra: number; rb: number }[] = [];
+  for (const [date, ra] of a) {
+    const rb = b.get(date);
+    if (rb !== undefined) out.push({ date, ra, rb });
+  }
+  out.sort((x, y) => x.date.localeCompare(y.date));
+  return out;
+}
+
+function rPearson(xs: number[], ys: number[]): number | null {
+  const n = xs.length;
+  if (n < 3) return null;
+  let sx = 0, sy = 0;
+  for (let i = 0; i < n; i++) { sx += xs[i]; sy += ys[i]; }
+  const mx = sx / n, my = sy / n;
+  let cov = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    cov += dx * dy; vx += dx * dx; vy += dy * dy;
+  }
+  if (vx <= 0 || vy <= 0) return null;
+  return cov / Math.sqrt(vx * vy);
+}
+
+// Underwater series: distance from the running all-time high (fraction ≤ 0).
+function rDrawdown(days: RDay[]) {
+  if (days.length < 30) return null;
+  let peak = -Infinity;
+  const points = days.map((d) => {
+    if (d.close > peak) peak = d.close;
+    return { date: d.date, drawdown: peak > 0 ? d.close / peak - 1 : 0 };
+  });
+  let maxDrawdown = 0;
+  for (const p of points) if (p.drawdown < maxDrawdown) maxDrawdown = p.drawdown;
+  // Decimate long histories so the JSON payload stays light.
+  const step = Math.max(1, Math.ceil(points.length / 1200));
+  const slim = points.filter((_, i) => i % step === 0 || i === points.length - 1);
+  return { points: slim, maxDrawdown, current: points[points.length - 1].drawdown };
+}
+
+// "Termómetro de refugio": 60-session rolling correlation vs GLD.
+function rRefuge(tickerDays: RDay[], gldDays: RDay[]) {
+  const aligned = rAlignedReturns(rReturnsByDate(tickerDays), rReturnsByDate(gldDays));
+  const win = 60;
+  if (aligned.length < win + 20) return null;
+  const points: { date: string; corr: number | null }[] = [];
+  for (let i = win; i < aligned.length; i++) {
+    const slice = aligned.slice(i - win, i);
+    points.push({ date: aligned[i].date, corr: rPearson(slice.map((s) => s.ra), slice.map((s) => s.rb)) });
+  }
+  let current: number | null = null;
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (points[i].corr !== null) { current = points[i].corr; break; }
+  }
+  return { points, current };
+}
+
+// Histogram of daily returns split by VIX regime (≤25 calm, >25 panic).
+function rVixRegime(tickerDays: RDay[], vixDays: RDay[]) {
+  const rets = rReturnsByDate(tickerDays);
+  const vixByDate = new Map(vixDays.map((d) => [d.date, d.close]));
+  const calm: number[] = [], panic: number[] = [];
+  for (const [date, r] of rets) {
+    const vix = vixByDate.get(date);
+    if (vix === undefined) continue;
+    (vix > RISK_VIX_PANIC ? panic : calm).push(r * 100);
+  }
+  if (calm.length + panic.length < 60) return null;
+
+  const lo = -8, hi = 8, binStep = 0.5;
+  const clamp = (v: number) => Math.max(lo, Math.min(hi - binStep / 2, v));
+  const bins: { ret: number; calm: number; panic: number }[] = [];
+  for (let b = lo; b < hi - 1e-9; b += binStep) {
+    const inBin = (v: number) => { const c = clamp(v); return c >= b && c < b + binStep; };
+    bins.push({
+      ret: +(b + binStep / 2).toFixed(2),
+      calm: calm.length ? +((100 * calm.filter(inBin).length) / calm.length).toFixed(2) : 0,
+      panic: panic.length ? +((100 * panic.filter(inBin).length) / panic.length).toFixed(2) : 0,
+    });
+  }
+  const stats = (a: number[]) => {
+    if (!a.length) return { mean: null as number | null, std: null as number | null };
+    const mean = a.reduce((s, v) => s + v, 0) / a.length;
+    const std = a.length > 1 ? Math.sqrt(a.reduce((s, v) => s + (v - mean) ** 2, 0) / (a.length - 1)) : null;
+    return { mean, std };
+  };
+  const cs = stats(calm), ps = stats(panic);
+  return {
+    bins, calmDays: calm.length, panicDays: panic.length,
+    calmMean: cs.mean, calmStd: cs.std, panicMean: ps.mean, panicStd: ps.std,
+  };
+}
+
+// OLS beta of the asset's daily returns vs Brent (BZ=F), in % units.
+function rOilBeta(tickerDays: RDay[], brentDays: RDay[]) {
+  const aligned = rAlignedReturns(rReturnsByDate(tickerDays), rReturnsByDate(brentDays));
+  if (aligned.length < 60) return null;
+  const xs = aligned.map((a) => a.rb * 100), ys = aligned.map((a) => a.ra * 100);
+  const n = xs.length;
+  const mx = xs.reduce((s, v) => s + v, 0) / n, my = ys.reduce((s, v) => s + v, 0) / n;
+  let cov = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    cov += dx * dy; vx += dx * dx; vy += dy * dy;
+  }
+  if (vx <= 0) return null;
+  const beta = cov / vx;
+  const alpha = my - beta * mx;
+  const r2 = vy > 0 ? (cov * cov) / (vx * vy) : null;
+  const points = aligned.map((a) => ({ x: +(a.rb * 100).toFixed(3), y: +(a.ra * 100).toFixed(3) }));
+  return { points, beta, alpha, r2, days: n };
+}
+
+// =====================================================
+// TECHNICAL SERIES (sección "Señales Técnicas") — deterministic, no LLM
+// =====================================================
+// SMA / RSI / MACD computed in code from Yahoo daily closes so the charts
+// always match auditable arithmetic; the AI narrative is rendered separately.
+
+function tSma(values: number[], n: number): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= n) sum -= values[i - n];
+    if (i >= n - 1) out[i] = sum / n;
+  }
+  return out;
+}
+
+function tEma(values: number[], n: number): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  if (values.length < n) return out;
+  const k = 2 / (n + 1);
+  let ema = values.slice(0, n).reduce((s, v) => s + v, 0) / n;
+  out[n - 1] = ema;
+  for (let i = n; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+    out[i] = ema;
+  }
+  return out;
+}
+
+// Wilder's RSI(14).
+function tRsi(values: number[], n = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  if (values.length <= n) return out;
+  let gain = 0, loss = 0;
+  for (let i = 1; i <= n; i++) {
+    const d = values[i] - values[i - 1];
+    if (d >= 0) gain += d; else loss -= d;
+  }
+  let avgGain = gain / n, avgLoss = loss / n;
+  const rsiAt = () => avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  out[n] = rsiAt();
+  for (let i = n + 1; i < values.length; i++) {
+    const d = values[i] - values[i - 1];
+    avgGain = (avgGain * (n - 1) + Math.max(0, d)) / n;
+    avgLoss = (avgLoss * (n - 1) + Math.max(0, -d)) / n;
+    out[i] = rsiAt();
+  }
+  return out;
+}
+
+async function handleTechnicals(tickerRaw: string): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const ticker = tickerRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9.\-^=]{1,12}$/.test(ticker)) return json({ error: "Ticker inválido" }, 400);
+
+  // 2y of history so SMA200 is defined across the whole 1y display window.
+  const hist = await fetchYahooChart(ticker, "2y", "1d");
+  if (!hist || hist.c.length < 30) return json({ error: `Sin histórico de precios para ${ticker}` }, 404);
+
+  const days = rDays(hist);
+  const closes = days.map((d) => d.close);
+  const sma50 = tSma(closes, 50);
+  const sma200 = tSma(closes, 200);
+  const rsi = tRsi(closes, 14);
+  const ema12 = tEma(closes, 12), ema26 = tEma(closes, 26);
+  const macdLine = closes.map((_, i) =>
+    ema12[i] !== null && ema26[i] !== null ? (ema12[i] as number) - (ema26[i] as number) : null);
+  const macdVals = macdLine.filter((v): v is number => v !== null);
+  const signalTail = tEma(macdVals, 9);
+  // Re-align the signal EMA (computed on the compacted MACD array) to dates.
+  const signal: (number | null)[] = new Array(closes.length).fill(null);
+  let mi = 0;
+  for (let i = 0; i < closes.length; i++) {
+    if (macdLine[i] === null) continue;
+    signal[i] = signalTail[mi] ?? null;
+    mi++;
+  }
+
+  const keep = Math.min(252, days.length);
+  const start = days.length - keep;
+  const round = (v: number | null, dp = 4) => v === null ? null : +v.toFixed(dp);
+  const series = [];
+  for (let i = start; i < days.length; i++) {
+    const m = macdLine[i], s = signal[i];
+    series.push({
+      date: days[i].date,
+      close: round(closes[i], 4),
+      sma50: round(sma50[i], 4),
+      sma200: round(sma200[i], 4),
+      rsi: round(rsi[i], 2),
+      macd: round(m, 4),
+      macdSignal: round(s, 4),
+      macdHist: m !== null && s !== null ? +(m - s).toFixed(4) : null,
+    });
+  }
+  const lastIdx = days.length - 1;
+  return json({
+    ticker,
+    series,
+    current: {
+      close: round(closes[lastIdx], 4),
+      sma50: round(sma50[lastIdx], 4),
+      sma200: round(sma200[lastIdx], 4),
+      rsi: round(rsi[lastIdx], 2),
+      macd: round(macdLine[lastIdx], 4),
+      macdSignal: round(signal[lastIdx], 4),
+    },
+    fetchedAt: new Date().toISOString(),
+  });
+}
+
+async function handleRisk(tickerRaw: string): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const ticker = tickerRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9.\-^=]{1,12}$/.test(ticker)) return json({ error: "Ticker inválido" }, 400);
+
+  const [hist10y, hist2y, gld, vix, brent] = await Promise.all([
+    fetchYahooChart(ticker, "10y", "1d"),
+    fetchYahooChart(ticker, "2y", "1d"),
+    fetchYahooChart("GLD", "2y", "1d"),
+    fetchYahooChart("^VIX", "2y", "1d"),
+    fetchYahooChart("BZ=F", "1y", "1d"),
+  ]);
+  if (!hist10y && !hist2y) return json({ error: `Sin histórico de precios para ${ticker}` }, 404);
+
+  const d10 = rDays(hist10y), d2 = rDays(hist2y);
+  return json({
+    ticker,
+    drawdown: rDrawdown(d10.length ? d10 : d2),
+    refuge: rRefuge(d2, rDays(gld)),
+    vixRegime: rVixRegime(d2, rDays(vix)),
+    oilBeta: rOilBeta(d2, rDays(brent)),
+    fetchedAt: new Date().toISOString(),
+  });
+}
+
+// =====================================================
 // MAIN DISPATCHER
 // =====================================================
 
@@ -2823,6 +3317,21 @@ Deno.serve(async (req) => {
     // Options analytics (sección "Opciones") — Yahoo + BSM, no Gemini needed
     if (typeof body.optionsAction === "string" && body.optionsAction.length > 0) {
       return await handleOptions(body);
+    }
+
+    // Risk analytics (sección "Riesgo") — Yahoo charts + stats in code, no Gemini
+    if (body.risk === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
+      return await handleRisk(body.ticker);
+    }
+
+    // ETF deep analysis (sección "ETF") — Yahoo + FMP + Finnhub, no Gemini
+    if (body.etf === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
+      return await handleEtf(body.ticker, env);
+    }
+
+    // Technical series (sección "Señales Técnicas") — SMA/RSI/MACD in code, no Gemini
+    if (body.technicals === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
+      return await handleTechnicals(body.ticker);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");

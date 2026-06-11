@@ -18,7 +18,7 @@ export function GexDexChart({ data }: { data: AggregationsResponse }) {
   const [metric, setMetric] = useState<Metric>("gex");
 
   const rows = useMemo(
-    () => [...data.perStrike].sort((a, b) => a.strike - b.strike).map((r) => ({
+    () => [...(data.perStrike ?? [])].sort((a, b) => a.strike - b.strike).map((r) => ({
       strike: r.strike,
       value: r[metric],
     })),

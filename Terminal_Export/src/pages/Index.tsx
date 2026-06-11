@@ -4,7 +4,12 @@ import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPe
 import { useToast } from "@/hooks/use-toast";
 import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
-import { OptionsView } from "@/components/options/OptionsView";
+import { OptionsSubSection } from "@/components/options/OptionsSubSection";
+import { RiskSubSection } from "@/components/charts/RiskCharts";
+import { EtfSubSection } from "@/components/charts/ETFCharts";
+import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
+import { fetchEtfData } from "@/lib/etf-api";
+import type { EtfResponse } from "@/types/etf";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -35,10 +40,13 @@ function persistReports(reports: SavedReport[]): boolean {
 const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Resumen Ejecutivo":      { label: "RESUMEN EJECUTIVO",     category: "EXECUTIVE SUMMARY"     },
   "Finanzas":               { label: "FUNDAMENTALES",          category: "VALUATION & FINANCIALS" },
+  "Opciones":               { label: "OPCIONES",               category: "OPTIONS FLOW"           },
   "Valoración":             { label: "VALORACIÓN",             category: "VALUATION"              },
   "Sector":                 { label: "SECTOR",                 category: "SECTOR & COMPS"         },
   "Noticias":               { label: "NOTICIAS",               category: "MARKET NEWS"            },
   "Señales Técnicas":       { label: "SEÑALES TÉCNICAS",       category: "TECHNICAL ANALYSIS"     },
+  "Riesgo":                 { label: "RIESGO",                 category: "RISK ANALYTICS"         },
+  "ETF":                    { label: "ETF",                    category: "FUND DEEP DIVE"         },
   "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
   "Mercados de Predicción": { label: "MERCADOS DE PREDICCIÓN", category: "POLYMARKET"             },
 };
@@ -232,8 +240,9 @@ const Index = () => {
   const [quarterlyData, setQuarterlyData] = useState<QuarterlyPeriod[]>([]);
   const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
   const [catalystCalendar, setCatalystCalendar] = useState<CatalystCalendar | null>(null);
+  const [etfData, setEtfData]             = useState<EtfResponse | null>(null);
   const [savedReports, setSavedReports]   = useState<SavedReport[]>(loadReports);
-  const [expanded, setExpanded]           = useState<Record<string, boolean>>({});
+  const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
 
   // Sector state
@@ -245,7 +254,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"ticker" | "opciones" | "sector" | "guardados">("ticker");
+  const [navTab, setNavTab] = useState<"ticker" | "sector" | "guardados">("ticker");
 
   const [clock, setClock] = useState("");
 
@@ -286,11 +295,7 @@ const Index = () => {
     try { localStorage.setItem("terminal_stocks_v1", JSON.stringify(stocks)); } catch (_) {}
   };
 
-  const openAllSections = () => {
-    const all: Record<string, boolean> = {};
-    EXPECTED_TABS.forEach((t) => (all[t] = true));
-    setExpanded(all);
-  };
+  const resetSections = () => setActiveSection(EXPECTED_TABS[0]);
 
   const openAllSectorSections = () => {
     const all: Record<string, boolean> = {};
@@ -313,8 +318,15 @@ const Index = () => {
     setQuarterlyData([]);
     setQuarterlyDebug(null);
     setCatalystCalendar(null);
+    setEtfData(null);
     setViewingReport(null);
-    openAllSections();
+    resetSections();
+
+    // ETF profile loads in parallel with the streamed report; the ETF tab
+    // only appears when the ticker turns out to be a fund (found: true).
+    fetchEtfData(clean, controller.signal)
+      .then((d) => setEtfData(d))
+      .catch(() => { /* tab simply stays hidden */ });
 
     let accumulated = "";
     try {
@@ -407,9 +419,6 @@ const Index = () => {
     if (viewingReport?.id === id) setViewingReport(null);
   }, [savedReports, viewingReport]);
 
-  const toggleSection = (key: string) =>
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
-
   const toggleSectorSection = (key: string) =>
     setSectorExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -442,7 +451,6 @@ const Index = () => {
             <nav className="flex">
               {([
                 { label: "TICKER",    key: "ticker"    },
-                { label: "OPCIONES",  key: "opciones"  },
                 { label: "SECTOR",    key: "sector"    },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
@@ -485,9 +493,6 @@ const Index = () => {
         customStocks={customStocks}
         onChangeStocks={saveCustomStocks}
       />
-
-      {/* ── OPCIONES tab (isolated, additive — Supabase options-data fn) ── */}
-      {navTab === "opciones" && <OptionsView />}
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "ticker" && (
@@ -578,8 +583,9 @@ const Index = () => {
               catalystCalendar={activeCatalyst}
               ticker={activeTicker}
               isLoading={isLoading && isLive}
-              expanded={expanded}
-              onToggle={toggleSection}
+              etfData={isLive ? etfData : null}
+              activeSection={activeSection}
+              onSelectSection={setActiveSection}
             />
           )}
           </div>
@@ -701,7 +707,7 @@ const Index = () => {
                 report={report}
                 onView={() => {
                   setViewingReport(report);
-                  openAllSections();
+                  resetSections();
                   setNavTab("ticker");
                 }}
                 onDelete={() => handleDeleteReport(report.id)}
@@ -871,10 +877,10 @@ function MarketTickerBar({
   );
 }
 
-// ── Report View (ticker accordion) ────────────────────────────────────
+// ── Report View (ticker horizontal tabs) ──────────────────────────────
 
 function ReportView({
-  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, expanded, onToggle,
+  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, etfData, activeSection, onSelectSection,
 }: {
   content: string;
   quarterlyData: QuarterlyPeriod[];
@@ -882,14 +888,29 @@ function ReportView({
   catalystCalendar?: CatalystCalendar | null;
   ticker: string;
   isLoading: boolean;
-  expanded: Record<string, boolean>;
-  onToggle: (key: string) => void;
+  etfData?: EtfResponse | null;
+  activeSection: string;
+  onSelectSection: (key: string) => void;
 }) {
   const sections = parseSections(content, EXPECTED_TABS);
   const currentMetrics = extractCurrentMetrics(content);
 
+  // Sections appear progressively while the report streams; a tab shows up
+  // as soon as its content (or structured data) exists. Order never changes.
+  const available = EXPECTED_TABS.filter((key) => {
+    if (sections[key]) return true;
+    if (key === "Finanzas" && quarterlyData.length > 0) return true;
+    if (key === "Opciones" && !!ticker) return true;
+    if (key === "Riesgo" && !!ticker) return true;
+    if (key === "ETF" && etfData?.found === true) return true;
+    if (key === "Señales Técnicas" && !!ticker) return true;
+    return false;
+  });
+
+  const active = available.includes(activeSection) ? activeSection : available[0];
+
   return (
-    <div className="space-y-px">
+    <div>
       {/* Ticker header strip */}
       {ticker && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
@@ -900,51 +921,52 @@ function ReportView({
         </div>
       )}
 
-      {EXPECTED_TABS.map((key) => {
-        const cfg = SECTION_CONFIG[key];
-        const sectionNodes = sections[key];
-        const hasQuarterly = key === "Finanzas" && quarterlyData.length > 0;
-        if (!sectionNodes && !hasQuarterly) return null;
-
-        const isOpen = expanded[key] !== false;
-        const isLastSection = key === EXPECTED_TABS[EXPECTED_TABS.length - 1];
-
-        return (
-          <div key={key} className="border border-border">
-            <button
-              onClick={() => onToggle(key)}
-              className="w-full flex items-center justify-between px-4 py-3 bg-card hover:bg-secondary/50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <ChevronDown
-                  className={`h-3 w-3 text-muted-foreground/50 transition-transform duration-150 ${isOpen ? "" : "-rotate-90"}`}
-                />
-                <span className="text-[11px] tracking-widest text-foreground font-semibold">
-                  {cfg.label}
-                </span>
-              </div>
-              <span className="text-[9px] tracking-widest text-muted-foreground/30 hidden sm:block">
-                {cfg.category}
-              </span>
-            </button>
-
-            {isOpen && (
-              <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
-                {key === "Finanzas" && (
-                  <>
-                    <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
-                    <CatalystCalendarSection data={catalystCalendar ?? null} />
-                  </>
-                )}
-                {sectionNodes && renderElements(sectionNodes)}
-                {isLoading && isLastSection && (
-                  <span className="terminal-cursor text-primary ml-1" />
-                )}
-              </div>
-            )}
+      {available.length > 0 && (
+        <>
+          {/* Horizontal scrollable tab bar (mobile: swipe sideways) */}
+          <div className="border border-border bg-card overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            <div className="flex min-w-max">
+              {available.map((key) => {
+                const cfg = SECTION_CONFIG[key];
+                const isActive = key === active;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => onSelectSection(key)}
+                    className={`px-4 py-2.5 text-[11px] tracking-widest whitespace-nowrap shrink-0 border-b-2 transition-colors font-semibold ${
+                      isActive
+                        ? "text-primary border-primary bg-secondary/30"
+                        : "text-muted-foreground/55 border-transparent hover:text-foreground"
+                    }`}
+                  >
+                    {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        );
-      })}
+
+          {/* Active section content */}
+          {active && (
+            <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
+              {active === "Finanzas" && (
+                <>
+                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
+                  <CatalystCalendarSection data={catalystCalendar ?? null} />
+                </>
+              )}
+              {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
+              {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
+              {active === "ETF" && etfData?.found === true && <EtfSubSection data={etfData} />}
+              {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
+              {sections[active] && renderElements(sections[active])}
+              {isLoading && (
+                <span className="terminal-cursor text-primary ml-1" />
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
