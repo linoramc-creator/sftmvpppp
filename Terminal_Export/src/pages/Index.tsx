@@ -6,6 +6,9 @@ import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 import { OptionsSubSection } from "@/components/options/OptionsSubSection";
 import { RiskSubSection } from "@/components/charts/RiskCharts";
+import { EtfSubSection } from "@/components/charts/ETFCharts";
+import { fetchEtfData } from "@/lib/etf-api";
+import type { EtfResponse } from "@/types/etf";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -42,6 +45,7 @@ const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Noticias":               { label: "NOTICIAS",               category: "MARKET NEWS"            },
   "Señales Técnicas":       { label: "SEÑALES TÉCNICAS",       category: "TECHNICAL ANALYSIS"     },
   "Riesgo":                 { label: "RIESGO",                 category: "RISK ANALYTICS"         },
+  "ETF":                    { label: "ETF",                    category: "FUND DEEP DIVE"         },
   "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
   "Mercados de Predicción": { label: "MERCADOS DE PREDICCIÓN", category: "POLYMARKET"             },
 };
@@ -235,6 +239,7 @@ const Index = () => {
   const [quarterlyData, setQuarterlyData] = useState<QuarterlyPeriod[]>([]);
   const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
   const [catalystCalendar, setCatalystCalendar] = useState<CatalystCalendar | null>(null);
+  const [etfData, setEtfData]             = useState<EtfResponse | null>(null);
   const [savedReports, setSavedReports]   = useState<SavedReport[]>(loadReports);
   const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
@@ -312,8 +317,15 @@ const Index = () => {
     setQuarterlyData([]);
     setQuarterlyDebug(null);
     setCatalystCalendar(null);
+    setEtfData(null);
     setViewingReport(null);
     resetSections();
+
+    // ETF profile loads in parallel with the streamed report; the ETF tab
+    // only appears when the ticker turns out to be a fund (found: true).
+    fetchEtfData(clean, controller.signal)
+      .then((d) => setEtfData(d))
+      .catch(() => { /* tab simply stays hidden */ });
 
     let accumulated = "";
     try {
@@ -570,6 +582,7 @@ const Index = () => {
               catalystCalendar={activeCatalyst}
               ticker={activeTicker}
               isLoading={isLoading && isLive}
+              etfData={isLive ? etfData : null}
               activeSection={activeSection}
               onSelectSection={setActiveSection}
             />
@@ -866,7 +879,7 @@ function MarketTickerBar({
 // ── Report View (ticker horizontal tabs) ──────────────────────────────
 
 function ReportView({
-  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, activeSection, onSelectSection,
+  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, etfData, activeSection, onSelectSection,
 }: {
   content: string;
   quarterlyData: QuarterlyPeriod[];
@@ -874,6 +887,7 @@ function ReportView({
   catalystCalendar?: CatalystCalendar | null;
   ticker: string;
   isLoading: boolean;
+  etfData?: EtfResponse | null;
   activeSection: string;
   onSelectSection: (key: string) => void;
 }) {
@@ -887,6 +901,7 @@ function ReportView({
     if (key === "Finanzas" && quarterlyData.length > 0) return true;
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
+    if (key === "ETF" && etfData?.found === true) return true;
     return false;
   });
 
@@ -940,6 +955,7 @@ function ReportView({
               )}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
+              {active === "ETF" && etfData?.found === true && <EtfSubSection data={etfData} />}
               {sections[active] && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />

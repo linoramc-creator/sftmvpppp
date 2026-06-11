@@ -2785,6 +2785,214 @@ async function handleOptions(body: Record<string, any>): Promise<Response> {
 }
 
 // =====================================================
+// ETF DEEP ANALYSIS (sección "ETF") — deterministic, no LLM
+// =====================================================
+// Sector / asset-class / holdings come from Yahoo quoteSummary; country
+// weightings from FMP when configured; news from Finnhub when configured.
+// The geopolitical risk layer is a fixed, auditable heuristic table crossed
+// with real exposure weights — computed here, never by the LLM.
+
+const ETF_SECTOR_ES: Record<string, string> = {
+  realestate: "Inmobiliario",
+  consumer_cyclical: "Consumo cíclico",
+  basic_materials: "Materiales básicos",
+  consumer_defensive: "Consumo defensivo",
+  technology: "Tecnología",
+  communication_services: "Comunicaciones",
+  financial_services: "Servicios financieros",
+  utilities: "Utilities",
+  industrials: "Industriales",
+  energy: "Energía",
+  healthcare: "Salud",
+};
+
+// Sector geopolitical risk heuristics: score 0–100 + rationale.
+const ETF_SECTOR_RISK: Record<string, { score: number; note: string }> = {
+  energy:                 { score: 75, note: "OPEP+, sanciones y conflictos en Oriente Medio / Rusia" },
+  technology:             { score: 70, note: "Restricciones de exportación de semiconductores y cadena de suministro asiática" },
+  basic_materials:        { score: 60, note: "Concentración minera y aranceles a materias primas" },
+  industrials:            { score: 55, note: "Aranceles y fragmentación del comercio global" },
+  consumer_cyclical:      { score: 45, note: "Sensibilidad al ciclo global y a aranceles" },
+  financial_services:     { score: 40, note: "Sensibilidad a tipos de interés y riesgo regulatorio" },
+  communication_services: { score: 35, note: "Riesgo regulatorio y antimonopolio" },
+  healthcare:             { score: 35, note: "Riesgo regulatorio de precios de medicamentos" },
+  realestate:             { score: 30, note: "Sensibilidad a tipos de interés" },
+  utilities:              { score: 25, note: "Defensivo: impacto geopolítico limitado" },
+  consumer_defensive:     { score: 20, note: "Defensivo: impacto geopolítico limitado" },
+};
+
+// Country geopolitical risk heuristics (FMP country names).
+const ETF_COUNTRY_RISK: Record<string, { score: number; note: string }> = {
+  "Russia":         { score: 95, note: "Sanciones y riesgo de confiscación / desliste" },
+  "China":          { score: 85, note: "Tensiones EE.UU.–China, riesgo regulatorio y de desliste" },
+  "Taiwan":         { score: 80, note: "Riesgo de conflicto en el estrecho de Taiwán" },
+  "Hong Kong":      { score: 75, note: "Exposición indirecta al riesgo regulatorio chino" },
+  "Turkey":         { score: 70, note: "Inestabilidad monetaria e institucional" },
+  "Israel":         { score: 70, note: "Conflicto regional en Oriente Medio" },
+  "Saudi Arabia":   { score: 65, note: "Dependencia del crudo y riesgo regional" },
+  "South Africa":   { score: 60, note: "Inestabilidad institucional y de suministro eléctrico" },
+  "Brazil":         { score: 55, note: "Volatilidad política y cambiaria" },
+  "India":          { score: 50, note: "Tensiones fronterizas y proteccionismo" },
+  "Mexico":         { score: 50, note: "Dependencia comercial de EE.UU. y riesgo arancelario" },
+  "South Korea":    { score: 45, note: "Tensión con Corea del Norte; ciclo de semiconductores" },
+  "Japan":          { score: 30, note: "Riesgo bajo; sensibilidad al yen" },
+  "United States":  { score: 15, note: "Riesgo geopolítico doméstico bajo" },
+};
+const ETF_COUNTRY_RISK_DEFAULT = { score: 35, note: "Riesgo geopolítico moderado" };
+
+function eNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (v && typeof v === "object" && "raw" in (v as Record<string, unknown>)) {
+    const raw = (v as Record<string, unknown>).raw;
+    if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  }
+  return null;
+}
+
+async function eYahooQuoteSummary(ticker: string): Promise<Record<string, any> | null> {
+  const auth = await yfGetAuth();
+  const sym = encodeURIComponent(ticker.toUpperCase());
+  const modules = "quoteType,fundProfile,topHoldings";
+  let url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}`;
+  if (auth?.crumb) url += `&crumb=${encodeURIComponent(auth.crumb)}`;
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": YF_UA, ...(auth?.cookie ? { Cookie: auth.cookie } : {}) },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.quoteSummary?.result?.[0] ?? null;
+  } catch (_) { return null; }
+}
+
+async function eFmpCountries(ticker: string, fmpKey: string): Promise<{ country: string; pct: number }[] | null> {
+  if (!fmpKey) return null;
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/etf-country-weightings/${encodeURIComponent(ticker)}?apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!Array.isArray(j) || j.length === 0) return null;
+    const out = j
+      .map((row: Record<string, unknown>) => ({
+        country: String(row.country ?? ""),
+        pct: parseFloat(String(row.weightPercentage ?? "").replace("%", "")),
+      }))
+      .filter((c) => c.country && Number.isFinite(c.pct) && c.pct > 0)
+      .sort((a, b) => b.pct - a.pct);
+    return out.length ? out : null;
+  } catch (_) { return null; }
+}
+
+async function eFinnhubNews(ticker: string, finnhubKey: string): Promise<{ title: string; url: string; source: string; datetime: string }[]> {
+  if (!finnhubKey) return [];
+  try {
+    const to = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+    const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}&token=${finnhubKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (!Array.isArray(j)) return [];
+    return j.slice(0, 8).map((n: Record<string, unknown>) => ({
+      title: String(n.headline ?? ""),
+      url: String(n.url ?? ""),
+      source: String(n.source ?? ""),
+      datetime: n.datetime ? new Date(Number(n.datetime) * 1000).toISOString().slice(0, 10) : "",
+    })).filter((n) => n.title && n.url);
+  } catch (_) { return []; }
+}
+
+async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const ticker = tickerRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9.\-]{1,12}$/.test(ticker)) return json({ error: "Ticker inválido" }, 400);
+
+  const summary = await eYahooQuoteSummary(ticker);
+  const quoteType = String(summary?.quoteType?.quoteType ?? "");
+  const isFund = quoteType === "ETF" || quoteType === "MUTUALFUND";
+  if (!summary || !isFund) {
+    return json({ ticker, found: false, fetchedAt: new Date().toISOString() });
+  }
+
+  const th = summary.topHoldings ?? {};
+  const fp = summary.fundProfile ?? {};
+
+  // Asset-class allocation (some ETFs have no bonds, no cash, etc. — only
+  // categories actually present are emitted).
+  const allocPairs: [string, unknown][] = [
+    ["Acciones", th.stockPosition], ["Bonos", th.bondPosition], ["Efectivo", th.cashPosition],
+    ["Preferentes", th.preferredPosition], ["Convertibles", th.convertiblePosition], ["Otros", th.otherPosition],
+  ];
+  const assetAllocation = allocPairs
+    .map(([label, v]) => ({ label, pct: (eNum(v) ?? 0) * 100 }))
+    .filter((a) => a.pct > 0.05)
+    .map((a) => ({ label: a.label, pct: +a.pct.toFixed(2) }));
+
+  // Sector weightings: array of single-key objects keyed by Yahoo sector id.
+  const sectors: { key: string; sector: string; pct: number }[] = [];
+  for (const entry of (th.sectorWeightings ?? []) as Record<string, unknown>[]) {
+    for (const [key, v] of Object.entries(entry)) {
+      const pct = (eNum(v) ?? 0) * 100;
+      if (pct > 0.05) sectors.push({ key, sector: ETF_SECTOR_ES[key] ?? key, pct: +pct.toFixed(2) });
+    }
+  }
+  sectors.sort((a, b) => b.pct - a.pct);
+
+  const holdings = ((th.holdings ?? []) as Record<string, unknown>[])
+    .map((h) => ({
+      symbol: String(h.symbol ?? ""),
+      name: String(h.holdingName ?? ""),
+      pct: +(((eNum(h.holdingPercent) ?? 0) * 100).toFixed(2)),
+    }))
+    .filter((h) => h.symbol || h.name)
+    .slice(0, 10);
+
+  const [countries, news] = await Promise.all([
+    eFmpCountries(ticker, env.FMP_KEY),
+    eFinnhubNews(ticker, env.FINNHUB_KEY),
+  ]);
+
+  // Geopolitical risk layer: real exposure × fixed heuristic score.
+  const geoRisks: { factor: string; kind: "sector" | "país"; exposurePct: number; score: number; contribution: number; note: string }[] = [];
+  for (const s of sectors.slice(0, 6)) {
+    const risk = ETF_SECTOR_RISK[s.key];
+    if (!risk) continue;
+    geoRisks.push({
+      factor: s.sector, kind: "sector", exposurePct: s.pct, score: risk.score,
+      contribution: +((s.pct * risk.score) / 100).toFixed(2), note: risk.note,
+    });
+  }
+  for (const c of countries ?? []) {
+    if (c.pct < 1) continue;
+    const risk = ETF_COUNTRY_RISK[c.country] ?? ETF_COUNTRY_RISK_DEFAULT;
+    if (risk.score < 50) continue; // only flag genuinely risky geographies
+    geoRisks.push({
+      factor: c.country, kind: "país", exposurePct: +c.pct.toFixed(2), score: risk.score,
+      contribution: +((c.pct * risk.score) / 100).toFixed(2), note: risk.note,
+    });
+  }
+  geoRisks.sort((a, b) => b.contribution - a.contribution);
+
+  return json({
+    ticker,
+    found: true,
+    name: String(summary.quoteType?.longName ?? summary.quoteType?.shortName ?? ""),
+    family: fp.family ? String(fp.family) : null,
+    category: fp.categoryName ? String(fp.categoryName) : null,
+    assetAllocation,
+    sectors: sectors.map(({ sector, pct }) => ({ sector, pct })),
+    countries,
+    holdings,
+    geoRisks: geoRisks.slice(0, 8),
+    news,
+    fetchedAt: new Date().toISOString(),
+  });
+}
+
+// =====================================================
 // RISK ANALYTICS (sección "Riesgo") — deterministic, no LLM
 // =====================================================
 // Every number here is computed in code from Yahoo price series.
@@ -3001,6 +3209,11 @@ Deno.serve(async (req) => {
     // Risk analytics (sección "Riesgo") — Yahoo charts + stats in code, no Gemini
     if (body.risk === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
       return await handleRisk(body.ticker);
+    }
+
+    // ETF deep analysis (sección "ETF") — Yahoo + FMP + Finnhub, no Gemini
+    if (body.etf === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
+      return await handleEtf(body.ticker, env);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
