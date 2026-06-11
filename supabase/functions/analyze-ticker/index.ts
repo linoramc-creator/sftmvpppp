@@ -2785,6 +2785,179 @@ async function handleOptions(body: Record<string, any>): Promise<Response> {
 }
 
 // =====================================================
+// RISK ANALYTICS (sección "Riesgo") — deterministic, no LLM
+// =====================================================
+// Every number here is computed in code from Yahoo price series.
+// The LLM never produces these figures.
+
+const RISK_VIX_PANIC = 25; // VIX level splitting "calma" vs "pánico" regimes
+
+interface RDay { date: string; close: number }
+
+function rDays(hist: { t: number[]; c: number[] } | null): RDay[] {
+  if (!hist) return [];
+  const out: RDay[] = [];
+  for (let i = 0; i < hist.t.length; i++) {
+    out.push({ date: new Date(hist.t[i] * 1000).toISOString().slice(0, 10), close: hist.c[i] });
+  }
+  return out;
+}
+
+// Daily simple returns keyed by the date of day t (vs close of t-1).
+function rReturnsByDate(days: RDay[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (let i = 1; i < days.length; i++) {
+    const prev = days[i - 1].close;
+    if (prev > 0) m.set(days[i].date, days[i].close / prev - 1);
+  }
+  return m;
+}
+
+// Inner-join two return series on date (sessions differ across assets).
+function rAlignedReturns(
+  a: Map<string, number>,
+  b: Map<string, number>,
+): { date: string; ra: number; rb: number }[] {
+  const out: { date: string; ra: number; rb: number }[] = [];
+  for (const [date, ra] of a) {
+    const rb = b.get(date);
+    if (rb !== undefined) out.push({ date, ra, rb });
+  }
+  out.sort((x, y) => x.date.localeCompare(y.date));
+  return out;
+}
+
+function rPearson(xs: number[], ys: number[]): number | null {
+  const n = xs.length;
+  if (n < 3) return null;
+  let sx = 0, sy = 0;
+  for (let i = 0; i < n; i++) { sx += xs[i]; sy += ys[i]; }
+  const mx = sx / n, my = sy / n;
+  let cov = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    cov += dx * dy; vx += dx * dx; vy += dy * dy;
+  }
+  if (vx <= 0 || vy <= 0) return null;
+  return cov / Math.sqrt(vx * vy);
+}
+
+// Underwater series: distance from the running all-time high (fraction ≤ 0).
+function rDrawdown(days: RDay[]) {
+  if (days.length < 30) return null;
+  let peak = -Infinity;
+  const points = days.map((d) => {
+    if (d.close > peak) peak = d.close;
+    return { date: d.date, drawdown: peak > 0 ? d.close / peak - 1 : 0 };
+  });
+  let maxDrawdown = 0;
+  for (const p of points) if (p.drawdown < maxDrawdown) maxDrawdown = p.drawdown;
+  // Decimate long histories so the JSON payload stays light.
+  const step = Math.max(1, Math.ceil(points.length / 1200));
+  const slim = points.filter((_, i) => i % step === 0 || i === points.length - 1);
+  return { points: slim, maxDrawdown, current: points[points.length - 1].drawdown };
+}
+
+// "Termómetro de refugio": 60-session rolling correlation vs GLD.
+function rRefuge(tickerDays: RDay[], gldDays: RDay[]) {
+  const aligned = rAlignedReturns(rReturnsByDate(tickerDays), rReturnsByDate(gldDays));
+  const win = 60;
+  if (aligned.length < win + 20) return null;
+  const points: { date: string; corr: number | null }[] = [];
+  for (let i = win; i < aligned.length; i++) {
+    const slice = aligned.slice(i - win, i);
+    points.push({ date: aligned[i].date, corr: rPearson(slice.map((s) => s.ra), slice.map((s) => s.rb)) });
+  }
+  let current: number | null = null;
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (points[i].corr !== null) { current = points[i].corr; break; }
+  }
+  return { points, current };
+}
+
+// Histogram of daily returns split by VIX regime (≤25 calm, >25 panic).
+function rVixRegime(tickerDays: RDay[], vixDays: RDay[]) {
+  const rets = rReturnsByDate(tickerDays);
+  const vixByDate = new Map(vixDays.map((d) => [d.date, d.close]));
+  const calm: number[] = [], panic: number[] = [];
+  for (const [date, r] of rets) {
+    const vix = vixByDate.get(date);
+    if (vix === undefined) continue;
+    (vix > RISK_VIX_PANIC ? panic : calm).push(r * 100);
+  }
+  if (calm.length + panic.length < 60) return null;
+
+  const lo = -8, hi = 8, binStep = 0.5;
+  const clamp = (v: number) => Math.max(lo, Math.min(hi - binStep / 2, v));
+  const bins: { ret: number; calm: number; panic: number }[] = [];
+  for (let b = lo; b < hi - 1e-9; b += binStep) {
+    const inBin = (v: number) => { const c = clamp(v); return c >= b && c < b + binStep; };
+    bins.push({
+      ret: +(b + binStep / 2).toFixed(2),
+      calm: calm.length ? +((100 * calm.filter(inBin).length) / calm.length).toFixed(2) : 0,
+      panic: panic.length ? +((100 * panic.filter(inBin).length) / panic.length).toFixed(2) : 0,
+    });
+  }
+  const stats = (a: number[]) => {
+    if (!a.length) return { mean: null as number | null, std: null as number | null };
+    const mean = a.reduce((s, v) => s + v, 0) / a.length;
+    const std = a.length > 1 ? Math.sqrt(a.reduce((s, v) => s + (v - mean) ** 2, 0) / (a.length - 1)) : null;
+    return { mean, std };
+  };
+  const cs = stats(calm), ps = stats(panic);
+  return {
+    bins, calmDays: calm.length, panicDays: panic.length,
+    calmMean: cs.mean, calmStd: cs.std, panicMean: ps.mean, panicStd: ps.std,
+  };
+}
+
+// OLS beta of the asset's daily returns vs Brent (BZ=F), in % units.
+function rOilBeta(tickerDays: RDay[], brentDays: RDay[]) {
+  const aligned = rAlignedReturns(rReturnsByDate(tickerDays), rReturnsByDate(brentDays));
+  if (aligned.length < 60) return null;
+  const xs = aligned.map((a) => a.rb * 100), ys = aligned.map((a) => a.ra * 100);
+  const n = xs.length;
+  const mx = xs.reduce((s, v) => s + v, 0) / n, my = ys.reduce((s, v) => s + v, 0) / n;
+  let cov = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    cov += dx * dy; vx += dx * dx; vy += dy * dy;
+  }
+  if (vx <= 0) return null;
+  const beta = cov / vx;
+  const alpha = my - beta * mx;
+  const r2 = vy > 0 ? (cov * cov) / (vx * vy) : null;
+  const points = aligned.map((a) => ({ x: +(a.rb * 100).toFixed(3), y: +(a.ra * 100).toFixed(3) }));
+  return { points, beta, alpha, r2, days: n };
+}
+
+async function handleRisk(tickerRaw: string): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const ticker = tickerRaw.trim().toUpperCase();
+  if (!/^[A-Z0-9.\-^=]{1,12}$/.test(ticker)) return json({ error: "Ticker inválido" }, 400);
+
+  const [hist10y, hist2y, gld, vix, brent] = await Promise.all([
+    fetchYahooChart(ticker, "10y", "1d"),
+    fetchYahooChart(ticker, "2y", "1d"),
+    fetchYahooChart("GLD", "2y", "1d"),
+    fetchYahooChart("^VIX", "2y", "1d"),
+    fetchYahooChart("BZ=F", "1y", "1d"),
+  ]);
+  if (!hist10y && !hist2y) return json({ error: `Sin histórico de precios para ${ticker}` }, 404);
+
+  const d10 = rDays(hist10y), d2 = rDays(hist2y);
+  return json({
+    ticker,
+    drawdown: rDrawdown(d10.length ? d10 : d2),
+    refuge: rRefuge(d2, rDays(gld)),
+    vixRegime: rVixRegime(d2, rDays(vix)),
+    oilBeta: rOilBeta(d2, rDays(brent)),
+    fetchedAt: new Date().toISOString(),
+  });
+}
+
+// =====================================================
 // MAIN DISPATCHER
 // =====================================================
 
@@ -2823,6 +2996,11 @@ Deno.serve(async (req) => {
     // Options analytics (sección "Opciones") — Yahoo + BSM, no Gemini needed
     if (typeof body.optionsAction === "string" && body.optionsAction.length > 0) {
       return await handleOptions(body);
+    }
+
+    // Risk analytics (sección "Riesgo") — Yahoo charts + stats in code, no Gemini
+    if (body.risk === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
+      return await handleRisk(body.ticker);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");

@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { IndexSparkline } from "@/components/charts/IndexCharts";
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 import { OptionsSubSection } from "@/components/options/OptionsSubSection";
+import { RiskSubSection } from "@/components/charts/RiskCharts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Sector":                 { label: "SECTOR",                 category: "SECTOR & COMPS"         },
   "Noticias":               { label: "NOTICIAS",               category: "MARKET NEWS"            },
   "Señales Técnicas":       { label: "SEÑALES TÉCNICAS",       category: "TECHNICAL ANALYSIS"     },
+  "Riesgo":                 { label: "RIESGO",                 category: "RISK ANALYTICS"         },
   "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
   "Mercados de Predicción": { label: "MERCADOS DE PREDICCIÓN", category: "POLYMARKET"             },
 };
@@ -884,6 +886,7 @@ function ReportView({
     if (sections[key]) return true;
     if (key === "Finanzas" && quarterlyData.length > 0) return true;
     if (key === "Opciones" && !!ticker) return true;
+    if (key === "Riesgo" && !!ticker) return true;
     return false;
   });
 
@@ -936,6 +939,7 @@ function ReportView({
                 </>
               )}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
+              {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {sections[active] && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />
