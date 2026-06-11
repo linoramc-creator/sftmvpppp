@@ -9,6 +9,7 @@ import { RiskSubSection } from "@/components/charts/RiskCharts";
 import { EtfFundamentalsTable, EtfSectorSubSection, EtfSubSection } from "@/components/charts/ETFCharts";
 import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
 import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
+import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
 import type { EtfResponse } from "@/types/etf";
 
@@ -48,6 +49,7 @@ const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Señales Técnicas":       { label: "SEÑALES TÉCNICAS",       category: "TECHNICAL ANALYSIS"     },
   "Riesgo":                 { label: "RIESGO",                 category: "RISK ANALYTICS"         },
   "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
+  "Calendario Macro":       { label: "CALENDARIO MACRO",       category: "MACRO EVENTS"           },
 };
 
 // ETF apartado: basic valuation only — no quarterly fundamentals, no red
@@ -61,6 +63,7 @@ const ETF_SECTION_CONFIG: Record<string, { label: string; category: string }> = 
   "Riesgo":            { label: "RIESGO",            category: "RISK ANALYTICS"     },
   "Noticias":          { label: "NOTICIAS",          category: "MARKET NEWS"        },
   "Señales Técnicas":  { label: "SEÑALES TÉCNICAS",  category: "TECHNICAL ANALYSIS" },
+  "Calendario Macro":  { label: "CALENDARIO MACRO",  category: "MACRO EVENTS"       },
 };
 
 const SECTOR_SECTION_CONFIG: Record<string, { label: string; category: string }> = {
@@ -71,6 +74,7 @@ const SECTOR_SECTION_CONFIG: Record<string, { label: string; category: string }>
   "Análisis Macro":             { label: "ANÁLISIS MACRO",      category: "MACRO CONTEXT"    },
   "Perspectivas y Catalizadores": { label: "PERSPECTIVAS",      category: "OUTLOOK"          },
   "Riesgos del Sector":         { label: "RIESGOS DEL SECTOR",  category: "RISKS"            },
+  "Calendario Macro":           { label: "CALENDARIO MACRO",    category: "MACRO EVENTS"     },
 };
 
 const EXPECTED_TABS    = Object.keys(SECTION_CONFIG);
@@ -1125,6 +1129,7 @@ function ReportView({
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
     if (key === "Señales Técnicas" && !!ticker) return true;
+    if (key === "Calendario Macro" && !!ticker) return true;
     return false;
   });
 
@@ -1180,6 +1185,7 @@ function ReportView({
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
+              {active === "Calendario Macro" && <MacroCalendarSubSection />}
               {sections[active] && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />
@@ -1215,6 +1221,7 @@ function EtfReportView({
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
     if (key === "Señales Técnicas" && !!ticker) return true;
+    if (key === "Calendario Macro" && !!ticker) return true;
     return false;
   });
 
@@ -1270,6 +1277,7 @@ function EtfReportView({
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
+              {active === "Calendario Macro" && <MacroCalendarSubSection />}
               {sections[active] && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />
@@ -1310,7 +1318,10 @@ function SectorReportView({
       {SECTOR_TABS.map((key) => {
         const cfg = SECTOR_SECTION_CONFIG[key];
         const sectionNodes = sections[key];
-        if (!sectionNodes) return null;
+        // "Calendario Macro" has no LLM content — it always renders its own
+        // deterministic data component once a sector report exists.
+        const isMacro = key === "Calendario Macro";
+        if (!sectionNodes && !isMacro) return null;
 
         const isOpen = expanded[key] !== false;
         const isLast = key === SECTOR_TABS[SECTOR_TABS.length - 1];
@@ -1336,6 +1347,7 @@ function SectorReportView({
 
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
+                {isMacro && <MacroCalendarSubSection />}
                 {sectionNodes && renderElements(sectionNodes)}
                 {isLoading && isLast && (
                   <span className="terminal-cursor text-primary ml-1" />

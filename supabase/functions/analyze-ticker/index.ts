@@ -3711,6 +3711,124 @@ async function handleRisk(tickerRaw: string): Promise<Response> {
 }
 
 // =====================================================
+// MACRO CALENDAR (pestaña "Calendario Macro") — FMP → Finnhub, no LLM
+// =====================================================
+
+type MacroEvent = {
+  event: string;
+  date: string;            // "YYYY-MM-DD HH:mm" (provider timezone, usually UTC)
+  country: string;
+  impact: "High" | "Medium" | "Low" | null;
+  actual: number | null;
+  previous: number | null;
+  estimate: number | null;
+  unit: string | null;
+};
+
+// Global macro data barely changes within the hour — cache the whole window.
+let MACRO_CACHE: { ts: number; payload: unknown } | null = null;
+const MACRO_TTL_MS = 30 * 60 * 1000;
+
+function macroNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = parseFloat(v.replace("%", "").replace(/,/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function macroImpact(v: unknown): "High" | "Medium" | "Low" | null {
+  const s = String(v ?? "").toLowerCase();
+  if (s === "high" || s === "3") return "High";
+  if (s === "medium" || s === "2") return "Medium";
+  if (s === "low" || s === "1") return "Low";
+  return null;
+}
+
+async function macroFromFmp(fmpKey: string, from: string, to: string): Promise<MacroEvent[]> {
+  if (!fmpKey) return [];
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/economic_calendar?from=${from}&to=${to}&apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (!Array.isArray(j)) return [];
+    return j.map((e: Record<string, unknown>): MacroEvent => ({
+      event: String(e.event ?? ""),
+      date: String(e.date ?? "").slice(0, 16),
+      country: String(e.country ?? ""),
+      impact: macroImpact(e.impact),
+      actual: macroNum(e.actual),
+      previous: macroNum(e.previous),
+      estimate: macroNum(e.estimate),
+      unit: e.unit ? String(e.unit) : null,
+    })).filter((e) => e.event && e.date);
+  } catch (_) { return []; }
+}
+
+// Fallback: Finnhub economic calendar (premium on most plans — a 403 simply
+// yields [] and the frontend shows its descriptive empty state).
+async function macroFromFinnhub(finnhubKey: string, from: string, to: string): Promise<MacroEvent[]> {
+  if (!finnhubKey) return [];
+  try {
+    const url = `https://finnhub.io/api/v1/calendar/economic?from=${from}&to=${to}&token=${finnhubKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    const list = Array.isArray(j?.economicCalendar) ? j.economicCalendar : [];
+    return list.map((e: Record<string, unknown>): MacroEvent => ({
+      event: String(e.event ?? ""),
+      date: String(e.time ?? "").slice(0, 16),
+      country: String(e.country ?? ""),
+      impact: macroImpact(e.impact),
+      actual: macroNum(e.actual),
+      previous: macroNum(e.prev),
+      estimate: macroNum(e.estimate),
+      unit: e.unit ? String(e.unit) : null,
+    })).filter((e: MacroEvent) => e.event && e.date);
+  } catch (_) { return []; }
+}
+
+async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+  if (MACRO_CACHE && Date.now() - MACRO_CACHE.ts < MACRO_TTL_MS) {
+    return json(MACRO_CACHE.payload);
+  }
+
+  const from = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const to   = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+
+  let source: "fmp" | "finnhub" | null = null;
+  let events = await macroFromFmp(env.FMP_KEY, from, to);
+  if (events.length) {
+    source = "fmp";
+  } else {
+    events = await macroFromFinnhub(env.FINNHUB_KEY, from, to);
+    if (events.length) source = "finnhub";
+  }
+
+  // High/Medium only — Low-impact noise would bury the events that move
+  // markets. Sorted ascending so the frontend can split past/upcoming.
+  const filtered = events
+    .filter((e) => e.impact === "High" || e.impact === "Medium")
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 200);
+
+  const payload = {
+    events: filtered,
+    source,
+    from,
+    to,
+    fetchedAt: new Date().toISOString(),
+  };
+  if (filtered.length) MACRO_CACHE = { ts: Date.now(), payload };
+  return json(payload);
+}
+
+// =====================================================
 // MAIN DISPATCHER
 // =====================================================
 
@@ -3764,6 +3882,11 @@ Deno.serve(async (req) => {
     // Technical series (sección "Señales Técnicas") — SMA/RSI/MACD in code, no Gemini
     if (body.technicals === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
       return await handleTechnicals(body.ticker);
+    }
+
+    // Macro economic calendar (pestaña "Calendario Macro") — FMP → Finnhub, no Gemini
+    if (body.macroCalendar === true) {
+      return await handleMacroCalendar(env);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
