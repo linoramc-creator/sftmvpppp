@@ -234,7 +234,7 @@ const Index = () => {
   const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
   const [catalystCalendar, setCatalystCalendar] = useState<CatalystCalendar | null>(null);
   const [savedReports, setSavedReports]   = useState<SavedReport[]>(loadReports);
-  const [expanded, setExpanded]           = useState<Record<string, boolean>>({});
+  const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
 
   // Sector state
@@ -287,11 +287,7 @@ const Index = () => {
     try { localStorage.setItem("terminal_stocks_v1", JSON.stringify(stocks)); } catch (_) {}
   };
 
-  const openAllSections = () => {
-    const all: Record<string, boolean> = {};
-    EXPECTED_TABS.forEach((t) => (all[t] = true));
-    setExpanded(all);
-  };
+  const resetSections = () => setActiveSection(EXPECTED_TABS[0]);
 
   const openAllSectorSections = () => {
     const all: Record<string, boolean> = {};
@@ -315,7 +311,7 @@ const Index = () => {
     setQuarterlyDebug(null);
     setCatalystCalendar(null);
     setViewingReport(null);
-    openAllSections();
+    resetSections();
 
     let accumulated = "";
     try {
@@ -407,9 +403,6 @@ const Index = () => {
     persistReports(updated);
     if (viewingReport?.id === id) setViewingReport(null);
   }, [savedReports, viewingReport]);
-
-  const toggleSection = (key: string) =>
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const toggleSectorSection = (key: string) =>
     setSectorExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -575,8 +568,8 @@ const Index = () => {
               catalystCalendar={activeCatalyst}
               ticker={activeTicker}
               isLoading={isLoading && isLive}
-              expanded={expanded}
-              onToggle={toggleSection}
+              activeSection={activeSection}
+              onSelectSection={setActiveSection}
             />
           )}
           </div>
@@ -698,7 +691,7 @@ const Index = () => {
                 report={report}
                 onView={() => {
                   setViewingReport(report);
-                  openAllSections();
+                  resetSections();
                   setNavTab("ticker");
                 }}
                 onDelete={() => handleDeleteReport(report.id)}
@@ -868,10 +861,10 @@ function MarketTickerBar({
   );
 }
 
-// ── Report View (ticker accordion) ────────────────────────────────────
+// ── Report View (ticker horizontal tabs) ──────────────────────────────
 
 function ReportView({
-  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, expanded, onToggle,
+  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, activeSection, onSelectSection,
 }: {
   content: string;
   quarterlyData: QuarterlyPeriod[];
@@ -879,14 +872,25 @@ function ReportView({
   catalystCalendar?: CatalystCalendar | null;
   ticker: string;
   isLoading: boolean;
-  expanded: Record<string, boolean>;
-  onToggle: (key: string) => void;
+  activeSection: string;
+  onSelectSection: (key: string) => void;
 }) {
   const sections = parseSections(content, EXPECTED_TABS);
   const currentMetrics = extractCurrentMetrics(content);
 
+  // Sections appear progressively while the report streams; a tab shows up
+  // as soon as its content (or structured data) exists. Order never changes.
+  const available = EXPECTED_TABS.filter((key) => {
+    if (sections[key]) return true;
+    if (key === "Finanzas" && quarterlyData.length > 0) return true;
+    if (key === "Opciones" && !!ticker) return true;
+    return false;
+  });
+
+  const active = available.includes(activeSection) ? activeSection : available[0];
+
   return (
-    <div className="space-y-px">
+    <div>
       {/* Ticker header strip */}
       {ticker && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
@@ -897,53 +901,49 @@ function ReportView({
         </div>
       )}
 
-      {EXPECTED_TABS.map((key) => {
-        const cfg = SECTION_CONFIG[key];
-        const sectionNodes = sections[key];
-        const hasQuarterly = key === "Finanzas" && quarterlyData.length > 0;
-        const hasOptions   = key === "Opciones" && !!ticker;
-        if (!sectionNodes && !hasQuarterly && !hasOptions) return null;
-
-        const isOpen = expanded[key] !== false;
-        const isLastSection = key === EXPECTED_TABS[EXPECTED_TABS.length - 1];
-
-        return (
-          <div key={key} className="border border-border">
-            <button
-              onClick={() => onToggle(key)}
-              className="w-full flex items-center justify-between px-4 py-3 bg-card hover:bg-secondary/50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <ChevronDown
-                  className={`h-3 w-3 text-muted-foreground/50 transition-transform duration-150 ${isOpen ? "" : "-rotate-90"}`}
-                />
-                <span className="text-[11px] tracking-widest text-foreground font-semibold">
-                  {cfg.label}
-                </span>
-              </div>
-              <span className="text-[9px] tracking-widest text-muted-foreground/30 hidden sm:block">
-                {cfg.category}
-              </span>
-            </button>
-
-            {isOpen && (
-              <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
-                {key === "Finanzas" && (
-                  <>
-                    <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
-                    <CatalystCalendarSection data={catalystCalendar ?? null} />
-                  </>
-                )}
-                {key === "Opciones" && <OptionsSubSection ticker={ticker} />}
-                {sectionNodes && renderElements(sectionNodes)}
-                {isLoading && isLastSection && (
-                  <span className="terminal-cursor text-primary ml-1" />
-                )}
-              </div>
-            )}
+      {available.length > 0 && (
+        <>
+          {/* Horizontal scrollable tab bar (mobile: swipe sideways) */}
+          <div className="border border-border bg-card overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            <div className="flex min-w-max">
+              {available.map((key) => {
+                const cfg = SECTION_CONFIG[key];
+                const isActive = key === active;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => onSelectSection(key)}
+                    className={`px-4 py-2.5 text-[11px] tracking-widest whitespace-nowrap shrink-0 border-b-2 transition-colors font-semibold ${
+                      isActive
+                        ? "text-primary border-primary bg-secondary/30"
+                        : "text-muted-foreground/55 border-transparent hover:text-foreground"
+                    }`}
+                  >
+                    {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        );
-      })}
+
+          {/* Active section content */}
+          {active && (
+            <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
+              {active === "Finanzas" && (
+                <>
+                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
+                  <CatalystCalendarSection data={catalystCalendar ?? null} />
+                </>
+              )}
+              {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
+              {sections[active] && renderElements(sections[active])}
+              {isLoading && (
+                <span className="terminal-cursor text-primary ml-1" />
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
