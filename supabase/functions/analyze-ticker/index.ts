@@ -224,10 +224,10 @@ async function fetchYahooChart(
   symbol: string,
   range = "3mo",
   interval = "1d",
-): Promise<{ t: number[]; c: number[] } | null> {
+): Promise<{ t: number[]; c: number[]; o: number[]; h: number[]; l: number[] } | null> {
   const cacheKey = `yf-chart-${symbol}-${range}-${interval}`;
   const cached = yfCacheGet(cacheKey);
-  if (cached !== undefined) return cached as { t: number[]; c: number[] } | null;
+  if (cached !== undefined) return cached as { t: number[]; c: number[]; o: number[]; h: number[]; l: number[] } | null;
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
     const r = await fetch(url, { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(9_000) });
@@ -235,16 +235,30 @@ async function fetchYahooChart(
     const j = await r.json();
     const res = j?.chart?.result?.[0];
     const ts: number[] | undefined = res?.timestamp;
-    const closes: Array<number | null> | undefined = res?.indicators?.quote?.[0]?.close;
+    const quote = res?.indicators?.quote?.[0] ?? {};
+    const closes: Array<number | null> | undefined = quote.close;
     if (!ts || !closes || ts.length === 0) { yfCacheSet(cacheKey, null); return null; }
+    const opens: Array<number | null>  = Array.isArray(quote.open)  ? quote.open  : [];
+    const highs: Array<number | null>  = Array.isArray(quote.high)  ? quote.high  : [];
+    const lows:  Array<number | null>  = Array.isArray(quote.low)   ? quote.low   : [];
     // Forward-fill close gaps so the line never breaks, keep timestamps aligned.
+    // OHLC gaps fall back to the close of the same session (degenerate candle
+    // rather than a crash or a hole).
     const filled = forwardFill(closes);
     const t: number[] = [];
     const c: number[] = [];
+    const o: number[] = [];
+    const h: number[] = [];
+    const l: number[] = [];
     for (let i = 0; i < ts.length; i++) {
-      if (filled[i] != null) { t.push(ts[i]); c.push(filled[i] as number); }
+      const close = filled[i];
+      if (close == null) continue;
+      t.push(ts[i]); c.push(close as number);
+      o.push(opens[i] ?? (close as number));
+      h.push(highs[i] ?? (close as number));
+      l.push(lows[i]  ?? (close as number));
     }
-    const out = c.length > 1 ? { t, c } : null;
+    const out = c.length > 1 ? { t, c, o, h, l } : null;
     yfCacheSet(cacheKey, out);
     return out;
   } catch (_) { yfCacheSet(cacheKey, null); return null; }

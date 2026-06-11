@@ -186,7 +186,8 @@ export interface TickerFundamentals {
     netMargin: (number | null)[];
     revenueGrowth: (number | null)[];
   };
-  price: { t: number[]; c: number[] } | null;
+  // OHLC arrays are optional: older backend deployments only ship closes.
+  price: { t: number[]; c: number[]; o?: number[]; h?: number[]; l?: number[] } | null;
   ts: number;
 }
 
