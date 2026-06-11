@@ -221,6 +221,7 @@ export interface CatalystCalendar {
 
 export async function streamAnalysis({
   ticker,
+  etfReport = false,
   onDelta,
   onDone,
   onError,
@@ -230,6 +231,8 @@ export async function streamAnalysis({
   signal,
 }: {
   ticker: string;
+  /** true → ETF-mode report (basic valuation only, no quarterly/red flags/insider) */
+  etfReport?: boolean;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
@@ -240,7 +243,7 @@ export async function streamAnalysis({
 }) {
   await streamSSE({
     url: ANALYZE_URL,
-    body: { ticker },
+    body: etfReport ? { ticker, etfReport: true } : { ticker },
     onDelta,
     onDone,
     onError,

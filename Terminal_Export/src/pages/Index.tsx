@@ -46,8 +46,19 @@ const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Noticias":               { label: "NOTICIAS",               category: "MARKET NEWS"            },
   "Señales Técnicas":       { label: "SEÑALES TÉCNICAS",       category: "TECHNICAL ANALYSIS"     },
   "Riesgo":                 { label: "RIESGO",                 category: "RISK ANALYTICS"         },
-  "ETF":                    { label: "ETF",                    category: "FUND DEEP DIVE"         },
   "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
+};
+
+// ETF apartado: basic valuation only — no quarterly fundamentals, no red
+// flags, no insider, no institutional (those blocks don't apply to funds).
+const ETF_SECTION_CONFIG: Record<string, { label: string; category: string }> = {
+  "Resumen Ejecutivo": { label: "RESUMEN EJECUTIVO", category: "EXECUTIVE SUMMARY"  },
+  "Valoración":        { label: "VALORACIÓN",        category: "VALUATION"          },
+  "ETF":               { label: "ETF",               category: "FUND DEEP DIVE"     },
+  "Opciones":          { label: "OPCIONES",          category: "OPTIONS FLOW"       },
+  "Riesgo":            { label: "RIESGO",            category: "RISK ANALYTICS"     },
+  "Noticias":          { label: "NOTICIAS",          category: "MARKET NEWS"        },
+  "Señales Técnicas":  { label: "SEÑALES TÉCNICAS",  category: "TECHNICAL ANALYSIS" },
 };
 
 const SECTOR_SECTION_CONFIG: Record<string, { label: string; category: string }> = {
@@ -61,6 +72,7 @@ const SECTOR_SECTION_CONFIG: Record<string, { label: string; category: string }>
 };
 
 const EXPECTED_TABS    = Object.keys(SECTION_CONFIG);
+const ETF_TABS         = Object.keys(ETF_SECTION_CONFIG);
 const SECTOR_TABS      = Object.keys(SECTOR_SECTION_CONFIG);
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -239,10 +251,20 @@ const Index = () => {
   const [quarterlyData, setQuarterlyData] = useState<QuarterlyPeriod[]>([]);
   const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
   const [catalystCalendar, setCatalystCalendar] = useState<CatalystCalendar | null>(null);
-  const [etfData, setEtfData]             = useState<EtfResponse | null>(null);
+  const [tickerIsEtf, setTickerIsEtf]     = useState<string | null>(null);
   const [savedReports, setSavedReports]   = useState<SavedReport[]>(loadReports);
   const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
+
+  // ETF apartado state (independent of the ticker flow)
+  const [etfInput, setEtfInput]               = useState("");
+  const [etfAnalysis, setEtfAnalysis]         = useState("");
+  const [isEtfLoading, setIsEtfLoading]       = useState(false);
+  const [currentEtf, setCurrentEtf]           = useState("");
+  const [etfError, setEtfError]               = useState("");
+  const [etfNotFund, setEtfNotFund]           = useState<string | null>(null);
+  const [etfDeep, setEtfDeep]                 = useState<EtfResponse | null>(null);
+  const [etfActiveSection, setEtfActiveSection] = useState<string>(ETF_TABS[0]);
 
   // Sector state
   const [sectorInput, setSectorInput]         = useState("");
@@ -253,7 +275,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"ticker" | "sector" | "guardados">("ticker");
+  const [navTab, setNavTab] = useState<"ticker" | "etf" | "sector" | "guardados">("ticker");
 
   const [clock, setClock] = useState("");
 
@@ -265,6 +287,7 @@ const Index = () => {
   });
 
   const abortRef       = useRef<AbortController | null>(null);
+  const etfAbortRef    = useRef<AbortController | null>(null);
   const sectorAbortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
 
@@ -317,15 +340,23 @@ const Index = () => {
     setQuarterlyData([]);
     setQuarterlyDebug(null);
     setCatalystCalendar(null);
-    setEtfData(null);
+    setTickerIsEtf(null);
     setViewingReport(null);
     resetSections();
 
-    // ETF profile loads in parallel with the streamed report; the ETF tab
-    // only appears when the ticker turns out to be a fund (found: true).
+    // ETF detection runs in parallel with the stream. The ticker search no
+    // longer analyses funds: when the symbol turns out to be an ETF we abort
+    // the report and point the user to the dedicated ETF apartado.
     fetchEtfData(clean, controller.signal)
-      .then((d) => setEtfData(d))
-      .catch(() => { /* tab simply stays hidden */ });
+      .then((d) => {
+        if (d?.found === true && !controller.signal.aborted) {
+          controller.abort();
+          setIsLoading(false);
+          setAnalysis("");
+          setTickerIsEtf(clean);
+        }
+      })
+      .catch(() => { /* detection failure → treat as a regular ticker */ });
 
     let accumulated = "";
     try {
@@ -350,6 +381,71 @@ const Index = () => {
       setError(msg);
     }
   }, [ticker, toast]);
+
+  // ETF apartado: verifies the symbol IS a fund, then streams the ETF-mode
+  // report (basic valuation only) while the deterministic deep-dive loads.
+  const handleEtfAnalyze = useCallback(async (symbol?: string) => {
+    const clean = (symbol ?? etfInput).trim().toUpperCase();
+    if (!clean) return;
+
+    etfAbortRef.current?.abort();
+    const controller = new AbortController();
+    etfAbortRef.current = controller;
+
+    setIsEtfLoading(true);
+    setEtfAnalysis("");
+    setEtfError("");
+    setEtfNotFund(null);
+    setCurrentEtf(clean);
+    setEtfDeep(null);
+    setEtfActiveSection(ETF_TABS[0]);
+
+    // Deep-dive data doubles as the is-it-a-fund gate.
+    fetchEtfData(clean, controller.signal)
+      .then((d) => {
+        if (controller.signal.aborted) return;
+        if (d?.found === true) {
+          setEtfDeep(d);
+        } else if (d && d.found === false) {
+          controller.abort();
+          setIsEtfLoading(false);
+          setEtfAnalysis("");
+          setEtfNotFund(clean);
+        }
+        // d === null (network/provider error) → keep streaming; the deep-dive
+        // blocks will show their own empty states.
+      })
+      .catch(() => { /* same: don't block the report on a detection error */ });
+
+    let accumulated = "";
+    try {
+      await streamAnalysis({
+        ticker: clean,
+        etfReport: true,
+        signal: controller.signal,
+        onDelta: (chunk) => { accumulated += chunk; setEtfAnalysis(accumulated); },
+        onDone: () => setIsEtfLoading(false),
+        onError: (err) => {
+          setEtfError(err);
+          setIsEtfLoading(false);
+          toast({ title: "Error", description: err, variant: "destructive" });
+        },
+      });
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === "AbortError") return;
+      setIsEtfLoading(false);
+      const msg = e instanceof Error ? e.message : "Error de conexión. Inténtalo de nuevo.";
+      setEtfError(msg);
+    }
+  }, [etfInput, toast]);
+
+  // Jump from the ticker tab to the ETF apartado with the symbol pre-loaded.
+  const analyzeAsEtf = useCallback((symbol: string) => {
+    setNavTab("etf");
+    setEtfInput(symbol);
+    setTickerIsEtf(null);
+    handleEtfAnalyze(symbol);
+  }, [handleEtfAnalyze]);
 
   const handleSectorAnalyze = useCallback(async () => {
     const clean = sectorInput.trim();
@@ -425,6 +521,10 @@ const Index = () => {
     if (e.key === "Enter" && !isLoading) handleAnalyze();
   };
 
+  const handleEtfKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !isEtfLoading) handleEtfAnalyze();
+  };
+
   const handleSectorKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !isSectorLoading) handleSectorAnalyze();
   };
@@ -450,6 +550,7 @@ const Index = () => {
             <nav className="flex">
               {([
                 { label: "TICKER",    key: "ticker"    },
+                { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
@@ -540,6 +641,21 @@ const Index = () => {
             </div>
           )}
 
+          {/* Detected ETF → redirect to the dedicated apartado */}
+          {tickerIsEtf && (
+            <div className="mb-4 px-4 py-3 border border-primary/30 bg-primary/5 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-[11px] text-foreground/80 font-mono">
+                <span className="text-primary font-bold">{tickerIsEtf}</span> es un ETF — los fondos se analizan en su propio apartado.
+              </span>
+              <button
+                onClick={() => analyzeAsEtf(tickerIsEtf)}
+                className="h-7 px-4 bg-primary text-black font-bold text-[10px] tracking-widest hover:bg-primary/90 transition-opacity"
+              >
+                ANALIZAR EN ETF
+              </button>
+            </div>
+          )}
+
           {/* Viewing saved banner */}
           {viewingReport && (
             <div className="mb-4 px-4 py-2 border border-primary/25 bg-primary/4 flex items-center justify-between">
@@ -582,9 +698,114 @@ const Index = () => {
               catalystCalendar={activeCatalyst}
               ticker={activeTicker}
               isLoading={isLoading && isLive}
-              etfData={isLive ? etfData : null}
               activeSection={activeSection}
               onSelectSection={setActiveSection}
+            />
+          )}
+          </div>
+
+          {/* Right column — index charts */}
+          <aside className="lg:w-[33%] lg:max-w-md lg:shrink-0 mt-8 lg:mt-0">
+            <IndexChartsPanel marketData={marketData} />
+          </aside>
+        </div>
+      )}
+
+      {/* ── ETF tab (dedicated apartado — funds only) ───────────────── */}
+      {navTab === "etf" && (
+        <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
+          <div className="flex-1 min-w-0">
+
+          {/* ETF search row */}
+          <div className="flex gap-2 mb-5">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground/30" />
+              <input
+                type="text"
+                value={etfInput}
+                onChange={(e) => setEtfInput(e.target.value.toUpperCase())}
+                onKeyDown={handleEtfKeyDown}
+                placeholder="ETF — SPY, QQQ, GLD, TAN, VWCE.DE..."
+                maxLength={20}
+                className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-primary transition-colors font-mono"
+              />
+            </div>
+            <button
+              onClick={() => handleEtfAnalyze()}
+              disabled={isEtfLoading || !etfInput.trim()}
+              className="h-8 px-5 bg-primary text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-opacity whitespace-nowrap"
+            >
+              {isEtfLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : "ANALIZAR ETF"}
+            </button>
+          </div>
+
+          {/* Error */}
+          {etfError && (
+            <div className="mb-4 p-3 border border-destructive/40 bg-destructive/5 flex items-start gap-2">
+              <AlertCircle className="h-3.5 w-3.5 text-destructive mt-0.5 shrink-0" />
+              <p className="text-xs text-destructive font-mono">{etfError}</p>
+            </div>
+          )}
+
+          {/* Not a fund → point back to the ticker search */}
+          {etfNotFund && (
+            <div className="mb-4 px-4 py-3 border border-primary/30 bg-primary/5 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-[11px] text-foreground/80 font-mono">
+                <span className="text-primary font-bold">{etfNotFund}</span> no es un ETF — las acciones se analizan en el apartado TICKER.
+              </span>
+              <button
+                onClick={() => {
+                  setNavTab("ticker");
+                  setTicker(etfNotFund);
+                  setEtfNotFund(null);
+                }}
+                className="h-7 px-4 bg-primary text-black font-bold text-[10px] tracking-widest hover:bg-primary/90 transition-opacity"
+              >
+                IR A TICKER
+              </button>
+            </div>
+          )}
+
+          {/* Loading placeholder */}
+          {isEtfLoading && !etfAnalysis && (
+            <div className="flex items-center gap-3 py-10 text-muted-foreground text-[11px] tracking-widest">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              RECOPILANDO DATOS DEL FONDO...
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!etfAnalysis && !isEtfLoading && !etfError && !etfNotFund && (
+            <div className="flex flex-col items-center justify-center py-28 opacity-20">
+              <div className="text-5xl font-bold tracking-[0.3em] text-primary mb-3">ETF</div>
+              <p className="text-[10px] tracking-[0.4em] text-muted-foreground">
+                INTRODUCE UN ETF PARA GENERAR UN ANÁLISIS COMPLETO
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2 justify-center">
+                {["SPY","QQQ","GLD","TAN","IWM","XLE","ARKK"].map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setEtfInput(s)}
+                    className="text-[9px] tracking-widest border border-border/50 px-2 py-1 hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ETF report */}
+          {etfAnalysis && !etfNotFund && (
+            <EtfReportView
+              content={etfAnalysis}
+              ticker={currentEtf}
+              isLoading={isEtfLoading}
+              etfDeep={etfDeep}
+              activeSection={etfActiveSection}
+              onSelectSection={setEtfActiveSection}
             />
           )}
           </div>
@@ -879,7 +1100,7 @@ function MarketTickerBar({
 // ── Report View (ticker horizontal tabs) ──────────────────────────────
 
 function ReportView({
-  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, etfData, activeSection, onSelectSection,
+  content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, activeSection, onSelectSection,
 }: {
   content: string;
   quarterlyData: QuarterlyPeriod[];
@@ -887,7 +1108,6 @@ function ReportView({
   catalystCalendar?: CatalystCalendar | null;
   ticker: string;
   isLoading: boolean;
-  etfData?: EtfResponse | null;
   activeSection: string;
   onSelectSection: (key: string) => void;
 }) {
@@ -901,7 +1121,6 @@ function ReportView({
     if (key === "Finanzas" && quarterlyData.length > 0) return true;
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
-    if (key === "ETF" && etfData?.found === true) return true;
     if (key === "Señales Técnicas" && !!ticker) return true;
     return false;
   });
@@ -956,7 +1175,90 @@ function ReportView({
               )}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
-              {active === "ETF" && etfData?.found === true && <EtfSubSection data={etfData} />}
+              {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
+              {sections[active] && renderElements(sections[active])}
+              {isLoading && (
+                <span className="terminal-cursor text-primary ml-1" />
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── ETF Report View (apartado ETF — horizontal tabs) ───────────────────
+
+function EtfReportView({
+  content, ticker, isLoading, etfDeep, activeSection, onSelectSection,
+}: {
+  content: string;
+  ticker: string;
+  isLoading: boolean;
+  etfDeep: EtfResponse | null;
+  activeSection: string;
+  onSelectSection: (key: string) => void;
+}) {
+  const sections = parseSections(content, ETF_TABS);
+
+  const available = ETF_TABS.filter((key) => {
+    if (sections[key]) return true;
+    if (key === "ETF" && etfDeep?.found === true) return true;
+    if (key === "Opciones" && !!ticker) return true;
+    if (key === "Riesgo" && !!ticker) return true;
+    if (key === "Señales Técnicas" && !!ticker) return true;
+    return false;
+  });
+
+  const active = available.includes(activeSection) ? activeSection : available[0];
+
+  return (
+    <div>
+      {/* ETF header strip */}
+      {ticker && (
+        <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
+          <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+          <span className="text-base font-bold text-primary tracking-[0.15em]">{ticker}</span>
+          <span className="text-[10px] text-muted-foreground/40 tracking-widest">ANÁLISIS DE ETF</span>
+          {etfDeep?.name && (
+            <span className="text-[10px] text-muted-foreground/55 truncate hidden sm:block">{etfDeep.name}</span>
+          )}
+          {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 ml-auto" />}
+        </div>
+      )}
+
+      {available.length > 0 && (
+        <>
+          {/* Horizontal scrollable tab bar */}
+          <div className="border border-border bg-card overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            <div className="flex min-w-max">
+              {available.map((key) => {
+                const cfg = ETF_SECTION_CONFIG[key];
+                const isActive = key === active;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => onSelectSection(key)}
+                    className={`px-4 py-2.5 text-[11px] tracking-widest whitespace-nowrap shrink-0 border-b-2 transition-colors font-semibold ${
+                      isActive
+                        ? "text-primary border-primary bg-secondary/30"
+                        : "text-muted-foreground/55 border-transparent hover:text-foreground"
+                    }`}
+                  >
+                    {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active section content */}
+          {active && (
+            <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
+              {active === "ETF" && etfDeep?.found === true && <EtfSubSection data={etfDeep} />}
+              {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
+              {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
               {sections[active] && renderElements(sections[active])}
               {isLoading && (

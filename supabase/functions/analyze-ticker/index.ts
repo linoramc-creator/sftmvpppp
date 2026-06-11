@@ -1786,6 +1786,79 @@ REGLAS DE FORMATO:
 - No cortes frases a medias.`;
 }
 
+// ETF report prompt: basic valuation only. No quarterly fundamentals, no
+// automatic red flags, no insider activity, no institutional holdings —
+// those blocks don't apply to funds and used to break the ETF view.
+function buildEtfSystemPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `Eres un analista financiero institucional senior especializado en ETFs. Fecha: ${today}.
+
+Genera EXACTAMENTE las 4 secciones siguientes, cada una iniciada con "## " (no las omitas ni fusiones):
+## Resumen Ejecutivo
+## Valoración
+## Noticias
+## Señales Técnicas
+
+== CONTENIDO POR SECCION ==
+
+## Resumen Ejecutivo
+- Párrafo 1 (5-7 líneas): qué replica el fondo, gestora, categoría, precio actual y rendimiento reciente.
+- Párrafo 2 (4-5 líneas): posicionamiento del fondo frente a alternativas y tesis de inversión.
+- Párrafo 3 (4-5 líneas): catalizadores y riesgos macro del activo subyacente (tipos, aranceles, geopolítica).
+- ### Perfil del Fondo: gestora, categoría, índice de referencia, fecha de lanzamiento, descripción (3-4 líneas).
+
+## Valoración
+Incluye una tabla de métricas básicas del fondo con estas filas (Métrica | Valor) — usa "—" si el dato no aparece en ninguna fuente:
+| Métrica | Valor |
+|---|---|
+| Precio Actual | |
+| Patrimonio (AUM) | |
+| Expense Ratio (TER) | |
+| Dividend Yield | |
+| Beta | |
+| 52W High | |
+| 52W Low | |
+| 52W Return | |
+| Volumen Promedio 10D | |
+
+PROHIBIDO en esta sección: red flags automáticos, actividad insider, tenencias institucionales, métricas de fundamentales corporativos (P/E del fondo solo si está disponible como dato real de la cartera).
+
+- ### Factores de Riesgo (6-8 viñetas):
+  Formato: "- **Tipo:** descripción con cifras/eventos. Nivel: **ALTO** / **MEDIO** / **BAJO**"
+  Cubre: concentración sectorial/geográfica, divisa, liquidez, tracking error, regulatorio, macro.
+- ### Catalizadores (4-6 viñetas): divide en **Corto plazo (0-3m)**, **Medio plazo (3-12m)**, **Largo plazo (+12m)**.
+
+## Noticias
+- ### Noticias del Fondo y su Temática: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL del contexto si está disponible; si no, "(Fuente)" sin enlace.
+- ### Contexto Macro Relevante: 4-5 líneas integrando indicadores FRED (tipos, inflación, yield 10Y).
+
+## Señales Técnicas
+Usa los INDICADORES TÉCNICOS (TWELVE DATA) y el precio actual / rango 52W.
+
+### Indicadores
+| Indicador | Valor | Señal |
+|---|---|---|
+| Tendencia | [ej. Precio > SMA50 > SMA200] | **BULLISH** / **BEARISH** / **NEUTRO** |
+| RSI (14) | [valor] | **SOBRECOMPRADO** (>70) / **SOBREVENTA** (<30) / **NEUTRO** (30-70) |
+| MACD | [valor] (Signal: [señal]) | **ALCISTA** / **BAJISTA** |
+| SMA 50 | $[valor] | [% precio vs SMA50] |
+| SMA 200 | $[valor] | [% precio vs SMA200] |
+| Soporte Clave | $[nivel] | [fuente] |
+| Resistencia Clave | $[nivel] | [fuente] |
+
+### Análisis Técnico
+2-3 líneas: tendencia dominante, confluencias, niveles críticos.
+
+REGLAS DE FORMATO:
+- Markdown estricto. Sin emojis.
+- TODOS los números con exactamente 2 decimales y unidades ($, %, x, B, M).
+- Señales y niveles de riesgo en **NEGRITAS**: **BULLISH**, **BEARISH**, **NEUTRO**, **ALTO**, **MEDIO**, **BAJO**.
+- Entre cada viñeta deja UNA LÍNEA EN BLANCO.
+- Si un dato no aparece en NINGUNA fuente: escribe "—" (em-dash), nunca "N/D".
+- Las 4 secciones son OBLIGATORIAS. Nunca inventes cifras.
+- No cortes frases a medias.`;
+}
+
 // =====================================================
 // HANDLERS
 // =====================================================
@@ -1799,7 +1872,10 @@ interface EnvKeys {
   TWELVE_KEY: string;
 }
 
-async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Response> {
+// etfMode trims the pipeline for funds: no quarterly fundamentals, no peers
+// table, no FMP insider/institutional context, no catalyst calendar — and an
+// ETF-specific prompt (basic valuation only; red flags & insider never apply).
+async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = false): Promise<Response> {
   const cleanTicker = ticker.trim().toUpperCase();
   const encoder = new TextEncoder();
 
@@ -1839,13 +1915,13 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           risksCatalystsSearch,
           catalystCalendar,
         ] = await Promise.all([
-          fetchYahooQuarterlyFinancials(cleanTicker),
-          env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
-          env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
-          env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
-          env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
+          etfMode ? Promise.resolve([]) : fetchYahooQuarterlyFinancials(cleanTicker),
+          !etfMode && env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
+          !etfMode && env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
+          !etfMode && env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
+          !etfMode && env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
           fetchFredData(env.FRED_KEY),
-          fetchFmpData(cleanTicker, env.FMP_KEY),
+          etfMode ? Promise.resolve("") : fetchFmpData(cleanTicker, env.FMP_KEY),
           fetchTwelveData(cleanTicker, env.TWELVE_KEY),
           fetchTechnicalIndicators(cleanTicker, env.TWELVE_KEY),
           env.TAVILY_KEY
@@ -1857,16 +1933,16 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           env.TAVILY_KEY && sector
             ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, env.TAVILY_KEY, 3, 14, "news", 130)
             : Promise.resolve(null),
-          env.TAVILY_KEY
+          !etfMode && env.TAVILY_KEY
             ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, env.TAVILY_KEY, 3, undefined, undefined, 140)
             : Promise.resolve(null),
-          env.TAVILY_KEY && peers.length > 0
+          !etfMode && env.TAVILY_KEY && peers.length > 0
             ? fetchTavilySearch(`${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`, env.TAVILY_KEY, 2, undefined, undefined, 120)
             : Promise.resolve(null),
           env.TAVILY_KEY
-            ? fetchTavilySearch(`${companyName} ${cleanTicker} risks catalysts growth headwinds 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} ${etfMode ? "ETF flows holdings outlook" : "risks catalysts growth headwinds"} 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
             : Promise.resolve(null),
-          fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
+          etfMode ? Promise.resolve(null) : fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
         ]);
 
         // Step 3: Merge quarterly data from all structured sources (Yahoo first)
@@ -1879,7 +1955,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
 
         // AI fallback when structured sources returned fewer than 4 quarters
         let aiFallback: any[] = [];
-        if (quarterlyHistory.length < 4 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
+        if (!etfMode && quarterlyHistory.length < 4 && env.TAVILY_KEY && env.GEMINI_API_KEY) {
           console.log(`Quarterly AI fallback triggered (0 structured quarters).`);
           aiFallback = await fetchAiQuarterlyFallback(cleanTicker, companyName, env.TAVILY_KEY, env.GEMINI_API_KEY);
           if (aiFallback.length > 0) {
@@ -1894,22 +1970,25 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           }
         }
 
-        // Step 4: Emit quarterly data event so frontend can render tables immediately
-        const quarterlyDebug = {
-          hasFinnhub:     !!env.FINNHUB_KEY,
-          hasFmp:         !!env.FMP_KEY,
-          hasTwelveData:  !!env.TWELVE_KEY,
-          hasTavily:      !!env.TAVILY_KEY,
-          yahooRows:      (yahooQuarterly as any[]).length,
-          finnhubRows:    (finnhubQuarterly as any[]).length,
-          fmpRows:        (fmpQuarterly as any[]).length,
-          twelveDataRows: (twelveDataQuarterly as any[]).length,
-          aiFallbackRows: aiFallback.length,
-          mergedRows:     quarterlyHistory.length,
-        };
-        controller.enqueue(encoder.encode(
-          `data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug, __catalystCalendar: catalystCalendar })}\n\n`
-        ));
+        // Step 4: Emit quarterly data event so frontend can render tables
+        // immediately. ETF mode has no quarterly fundamentals by design.
+        if (!etfMode) {
+          const quarterlyDebug = {
+            hasFinnhub:     !!env.FINNHUB_KEY,
+            hasFmp:         !!env.FMP_KEY,
+            hasTwelveData:  !!env.TWELVE_KEY,
+            hasTavily:      !!env.TAVILY_KEY,
+            yahooRows:      (yahooQuarterly as any[]).length,
+            finnhubRows:    (finnhubQuarterly as any[]).length,
+            fmpRows:        (fmpQuarterly as any[]).length,
+            twelveDataRows: (twelveDataQuarterly as any[]).length,
+            aiFallbackRows: aiFallback.length,
+            mergedRows:     quarterlyHistory.length,
+          };
+          controller.enqueue(encoder.encode(
+            `data: ${JSON.stringify({ __quarterly: quarterlyHistory, __quarterlyDebug: quarterlyDebug, __catalystCalendar: catalystCalendar })}\n\n`
+          ));
+        }
 
         // Step 5: Build Gemini prompt
         const dataContext = buildTickerDataContext(
@@ -1926,13 +2005,15 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys): Promise<Respo
           quarterly_twelve_data: (twelveDataQuarterly as any[]).length,
         });
 
-        const messages = [
-          { role: "system", content: buildTickerSystemPrompt() },
-          {
-            role: "user",
-            content: `${dataContext}
-
-INSTRUCCIÓN FINAL:
+        const finalInstruction = etfMode
+          ? `INSTRUCCIÓN FINAL:
+Genera el informe del ETF ${cleanTicker} (${companyName}) con las 4 secciones obligatorias.
+- En ## Valoración: SOLO la tabla básica de métricas del fondo. PROHIBIDO: red flags automáticos, actividad insider, tenencias institucionales y análisis de fundamentales corporativos (ingresos, márgenes, cash flow) — un ETF no los tiene.
+- Desarrolla ### Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
+- En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
+- En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
+- Si el ticker no existe o no es un fondo, indícalo en el Resumen Ejecutivo.`
+          : `INSTRUCCIÓN FINAL:
 Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secciones obligatorias.
 - En ## Finanzas: incluye la tabla de métricas actuales. Las tablas trimestrales se renderizan automáticamente — NO las generes.
 - En ## Valoración: desarrolla Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
@@ -1941,8 +2022,11 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secci
 - En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
 - En ## Institucional: usa los datos estructurados de FMP como fuente principal.
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
-- Si el ticker no existe, indícalo en el Resumen Ejecutivo.`,
-          },
+- Si el ticker no existe, indícalo en el Resumen Ejecutivo.`;
+
+        const messages = [
+          { role: "system", content: etfMode ? buildEtfSystemPrompt() : buildTickerSystemPrompt() },
+          { role: "user", content: `${dataContext}\n\n${finalInstruction}` },
         ];
 
         // Step 6: Call Gemini (Pro by default — keepalives above allow unlimited generation time)
@@ -3291,6 +3375,11 @@ Deno.serve(async (req) => {
     // Dispatch by body shape
     if (body.sector && typeof body.sector === "string" && body.sector.trim().length > 0 && body.sector.trim().length <= 80) {
       return await handleSectorAnalysis(body.sector, env);
+    }
+
+    // ETF report (apartado ETF) — trimmed pipeline + ETF prompt
+    if (body.etfReport === true && typeof body.ticker === "string" && body.ticker.trim().length > 0 && body.ticker.trim().length <= 10) {
+      return await handleTickerAnalysis(body.ticker, env, true);
     }
 
     if (body.ticker && typeof body.ticker === "string" && body.ticker.trim().length > 0 && body.ticker.trim().length <= 10) {
