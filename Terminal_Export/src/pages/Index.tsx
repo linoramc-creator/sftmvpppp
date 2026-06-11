@@ -8,6 +8,7 @@ import { OptionsSubSection } from "@/components/options/OptionsSubSection";
 import { RiskSubSection } from "@/components/charts/RiskCharts";
 import { EtfSubSection } from "@/components/charts/ETFCharts";
 import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
+import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import { fetchEtfData } from "@/lib/etf-api";
 import type { EtfResponse } from "@/types/etf";
 
@@ -1118,6 +1119,7 @@ function ReportView({
   // as soon as its content (or structured data) exists. Order never changes.
   const available = EXPECTED_TABS.filter((key) => {
     if (sections[key]) return true;
+    if (key === "Resumen Ejecutivo" && !!ticker) return true;
     if (key === "Finanzas" && quarterlyData.length > 0) return true;
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
@@ -1167,6 +1169,7 @@ function ReportView({
           {/* Active section content */}
           {active && (
             <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
+              {active === "Resumen Ejecutivo" && <InstrumentPriceChart ticker={ticker} />}
               {active === "Finanzas" && (
                 <>
                   <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
@@ -1204,6 +1207,7 @@ function EtfReportView({
 
   const available = ETF_TABS.filter((key) => {
     if (sections[key]) return true;
+    if (key === "Resumen Ejecutivo" && !!ticker) return true;
     if (key === "ETF" && etfDeep?.found === true) return true;
     if (key === "Opciones" && !!ticker) return true;
     if (key === "Riesgo" && !!ticker) return true;
@@ -1256,6 +1260,7 @@ function EtfReportView({
           {/* Active section content */}
           {active && (
             <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
+              {active === "Resumen Ejecutivo" && <InstrumentPriceChart ticker={ticker} />}
               {active === "ETF" && etfDeep?.found === true && <EtfSubSection data={etfDeep} />}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
