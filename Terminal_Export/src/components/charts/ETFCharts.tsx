@@ -3,7 +3,7 @@ import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import type { EtfResponse, EtfGeoRisk } from "@/types/etf";
+import type { EtfResponse, EtfFundamentals, EtfGeoRisk, EtfNewsItem } from "@/types/etf";
 import { OPT_COLORS, ttStyle } from "@/components/options/theme";
 
 const DONUT_COLORS = [
@@ -37,6 +37,100 @@ function PctBar({ pct, color, max = 100 }: { pct: number; color: string; max?: n
         <div className="h-full" style={{ width: `${width}%`, background: color }} />
       </div>
       <span className="text-[11px] font-mono text-foreground/80 tabular-nums w-12 text-right">{pct.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+// ── Fundamentals table (Valoración tab) ────────────────────────────────
+// Same metric/value layout as the ticker view. Metrics Yahoo doesn't publish
+// for funds (ROE, margins, D/E...) render as "—" — never crash, never hide
+// the row, so the table shape is identical for every instrument.
+
+const fmtUsd = (v: number | null) =>
+  v == null ? null : `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const fmtBig = (v: number | null) => {
+  if (v == null) return null;
+  const abs = Math.abs(v);
+  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
+  return `$${v.toLocaleString("en-US")}`;
+};
+
+const fmtRatio = (v: number | null) => (v == null ? null : v.toFixed(2));
+
+const fmtFracPct = (v: number | null) =>
+  v == null ? null : `${(v * 100).toFixed(2)}%`;
+
+const fmtVol = (v: number | null) => {
+  if (v == null) return null;
+  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return v.toLocaleString("en-US");
+};
+
+export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
+  const f: EtfFundamentals | undefined = data.fundamentals;
+  const rows: { label: string; value: string | null }[] = [
+    { label: "Precio Actual",          value: fmtUsd(f?.price ?? null) },
+    { label: "Market Cap",             value: fmtBig(f?.marketCap ?? f?.totalAssets ?? null) },
+    { label: "P/E TTM",                value: fmtRatio(f?.peTtm ?? null) },
+    { label: "P/B",                    value: fmtRatio(f?.pb ?? null) },
+    { label: "P/S TTM",                value: fmtRatio(f?.psTtm ?? null) },
+    { label: "ROE TTM",                value: null },
+    { label: "ROA TTM",                value: null },
+    { label: "Gross Margin TTM",       value: null },
+    { label: "Operating Margin TTM",   value: null },
+    { label: "Net Margin TTM",         value: null },
+    { label: "Deuda/Equity",           value: null },
+    { label: "EPS TTM",                value: fmtUsd(f?.epsTtm ?? null) },
+    { label: "Free Cash Flow/Share",   value: null },
+    { label: "Dividend Yield",         value: fmtFracPct(f?.dividendYield ?? null) },
+    { label: "Beta",                   value: fmtRatio(f?.beta ?? null) },
+    { label: "52W High",               value: fmtUsd(f?.high52 ?? null) },
+    { label: "52W Low",                value: fmtUsd(f?.low52 ?? null) },
+    { label: "52W Return",             value: fmtFracPct(f?.return52w ?? null) },
+    { label: "Volumen Promedio 10D",   value: fmtVol(f?.avgVolume10d ?? null) },
+  ];
+
+  return (
+    <div className="mb-4 border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
+        <div className="flex items-center gap-3">
+          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FUNDAMENTALES</span>
+          <span className="text-[10px] text-muted-foreground/40 tracking-widest">SNAPSHOT</span>
+        </div>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">YAHOO FINANCE</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full" style={{ minWidth: 320 }}>
+          <thead>
+            <tr className="border-b border-border bg-secondary/20">
+              <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium" style={{ minWidth: 200 }}>
+                MÉTRICA
+              </th>
+              <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap" style={{ minWidth: 140 }}>
+                VALOR ACTUAL
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-b border-border/20 hover:bg-primary/3 transition-colors">
+                <td className="px-4 py-3 text-[13px] text-foreground/90 font-medium whitespace-nowrap">
+                  {r.label}
+                </td>
+                <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] font-mono ${r.value == null ? "text-muted-foreground/20" : "text-primary font-semibold"}`}>
+                  {r.value ?? "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -217,14 +311,10 @@ function GeoRiskChart({ risks }: { risks: EtfGeoRisk[] }) {
 
 // ── News feed ──────────────────────────────────────────────────────────
 
-function EtfNews({ data }: { data: EtfResponse }) {
-  const news = data.news ?? [];
-  if (news.length === 0) {
-    return <EmptyNote text="Sin noticias recientes en ninguna fuente (Finnhub, Yahoo y FMP no devolvieron resultados para este ETF)." />;
-  }
+function NewsList({ items }: { items: EtfNewsItem[] }) {
   return (
     <div className="border border-border bg-card divide-y divide-border/30">
-      {news.map((n) => (
+      {items.map((n) => (
         <a
           key={n.url}
           href={n.url} target="_blank" rel="noopener noreferrer"
@@ -234,6 +324,135 @@ function EtfNews({ data }: { data: EtfResponse }) {
           <div className="text-[9px] text-muted-foreground/40 mt-0.5 font-mono">{n.source} · {n.datetime}</div>
         </a>
       ))}
+    </div>
+  );
+}
+
+function EtfNews({ data }: { data: EtfResponse }) {
+  const news = data.news ?? [];
+  if (news.length === 0) {
+    return <EmptyNote text="Sin noticias recientes en ninguna fuente (Finnhub, Yahoo y FMP no devolvieron resultados para este ETF)." />;
+  }
+  return <NewsList items={news} />;
+}
+
+// ── SECTOR tab (A2): peer table + objective insights + theme news ──────
+
+const fmtFracPctSigned = (v: number | null) =>
+  v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+
+export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
+  const tab = data.sectorTab;
+  if (!tab) {
+    return <EmptyNote text="Análisis sectorial no disponible (backend sin datos de tema/peers para este ETF)." />;
+  }
+  const peers = tab.peers ?? [];
+  const benefits = tab.benefits ?? [];
+  const risks = tab.risks ?? [];
+  const news = tab.news ?? [];
+
+  return (
+    <div className="space-y-6">
+      {tab.theme && (
+        <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono">
+          <span className="text-muted-foreground/50">TEMA DETECTADO</span>
+          <span className="text-primary/70 border border-primary/25 px-1.5 py-0.5">{tab.theme}</span>
+        </div>
+      )}
+
+      <div>
+        <SectionTitle
+          title="ETFs COMPARABLES DEL MISMO TEMA"
+          subtitle="Fondos líquidos de la misma temática · precios y métricas vía FMP + Yahoo Finance"
+        />
+        {peers.length === 0 ? (
+          <EmptyNote text="Sin datos de ETFs comparables (FMP y Yahoo no devolvieron resultados para los peers del tema)." />
+        ) : (
+          <div className="border border-border bg-card overflow-x-auto">
+            <table className="w-full font-mono min-w-max" style={{ fontSize: "12px" }}>
+              <thead>
+                <tr className="border-b border-border bg-secondary/40">
+                  <th className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/50 font-normal">TICKER</th>
+                  <th className="px-3 py-2 text-left text-[10px] tracking-widest text-muted-foreground/50 font-normal">NOMBRE</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">PRECIO</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">GASTOS</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">AUM</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">RET. YTD</th>
+                  <th className="px-3 py-2 text-right text-[10px] tracking-widest text-muted-foreground/50 font-normal">RET. 52W</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/30">
+                {peers.map((p) => (
+                  <tr key={p.symbol} className="hover:bg-primary/3 transition-colors">
+                    <td className="px-3 py-1.5 text-primary font-semibold">{p.symbol}</td>
+                    <td className="px-3 py-1.5 text-foreground/75 max-w-[220px] truncate" style={{ fontFamily: "var(--font-sans)" }}>{p.name ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/80">{fmtUsd(p.price) ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/65">{fmtFracPct(p.expenseRatio) ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/65">{fmtBig(p.totalAssets) ?? "—"}</td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums ${p.ytdReturn == null ? "text-muted-foreground/20" : p.ytdReturn >= 0 ? "text-primary" : "text-destructive"}`}>
+                      {fmtFracPctSigned(p.ytdReturn)}
+                    </td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums ${p.return52w == null ? "text-muted-foreground/20" : p.return52w >= 0 ? "text-primary" : "text-destructive"}`}>
+                      {fmtFracPctSigned(p.return52w)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <div>
+          <SectionTitle
+            title="BENEFICIOS OBJETIVOS"
+            subtitle="Reglas fijas sobre datos reales del fondo · cálculo determinista, no generado por IA"
+          />
+          {benefits.length === 0 ? (
+            <EmptyNote text="Ningún criterio objetivo de beneficio se cumple con los datos disponibles." />
+          ) : (
+            <div className="border border-border bg-card px-3 py-2 space-y-2">
+              {benefits.map((b) => (
+                <div key={b} className="flex items-start gap-2.5">
+                  <span className="text-primary text-[11px] leading-none select-none shrink-0" style={{ marginTop: 3 }}>●</span>
+                  <span className="text-[12px] text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>{b}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <SectionTitle
+            title="RIESGOS OBJETIVOS"
+            subtitle="Exposición real × heurísticas fijas de riesgo · cálculo determinista, no generado por IA"
+          />
+          {risks.length === 0 ? (
+            <EmptyNote text="Ningún criterio objetivo de riesgo se cumple con los datos disponibles." />
+          ) : (
+            <div className="border border-border bg-card px-3 py-2 space-y-2">
+              {risks.map((r) => (
+                <div key={r} className="flex items-start gap-2.5">
+                  <span className="text-destructive text-[11px] leading-none select-none shrink-0" style={{ marginTop: 3 }}>●</span>
+                  <span className="text-[12px] text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>{r}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <SectionTitle
+          title="NOTICIAS DEL SECTOR"
+          subtitle={`Últimos 30 días · ${tab.newsSource === "fmp" ? "FMP" : tab.newsSource === "yahoo" ? "Yahoo Finance" : "sin fuente"}`}
+        />
+        {news.length === 0 ? (
+          <EmptyNote text="Sin noticias del sector en ninguna fuente (FMP y Yahoo no devolvieron resultados)." />
+        ) : (
+          <NewsList items={news} />
+        )}
+      </div>
     </div>
   );
 }

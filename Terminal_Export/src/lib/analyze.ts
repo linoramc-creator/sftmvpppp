@@ -186,7 +186,8 @@ export interface TickerFundamentals {
     netMargin: (number | null)[];
     revenueGrowth: (number | null)[];
   };
-  price: { t: number[]; c: number[] } | null;
+  // OHLC arrays are optional: older backend deployments only ship closes.
+  price: { t: number[]; c: number[]; o?: number[]; h?: number[]; l?: number[] } | null;
   ts: number;
 }
 
@@ -210,6 +211,29 @@ export async function fetchTickerFundamentals(symbol: string): Promise<TickerFun
     return resp.json();
   } catch (e) {
     console.warn("[fetchTickerFundamentals] network error:", e);
+    return null;
+  }
+}
+
+// Macro economic calendar (FMP → Finnhub in the backend). Returns null on
+// network/HTTP error so the UI can distinguish "error" from "no events".
+export async function fetchMacroCalendar(): Promise<import("@/types/macro").MacroCalendarResponse | null> {
+  try {
+    const resp = await fetch(ANALYZE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ macroCalendar: true }),
+    });
+    if (!resp.ok) {
+      console.warn("[fetchMacroCalendar] HTTP", resp.status);
+      return null;
+    }
+    return resp.json();
+  } catch (e) {
+    console.warn("[fetchMacroCalendar] network error:", e);
     return null;
   }
 }

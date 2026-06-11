@@ -224,10 +224,10 @@ async function fetchYahooChart(
   symbol: string,
   range = "3mo",
   interval = "1d",
-): Promise<{ t: number[]; c: number[] } | null> {
+): Promise<{ t: number[]; c: number[]; o: number[]; h: number[]; l: number[] } | null> {
   const cacheKey = `yf-chart-${symbol}-${range}-${interval}`;
   const cached = yfCacheGet(cacheKey);
-  if (cached !== undefined) return cached as { t: number[]; c: number[] } | null;
+  if (cached !== undefined) return cached as { t: number[]; c: number[]; o: number[]; h: number[]; l: number[] } | null;
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
     const r = await fetch(url, { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(9_000) });
@@ -235,16 +235,30 @@ async function fetchYahooChart(
     const j = await r.json();
     const res = j?.chart?.result?.[0];
     const ts: number[] | undefined = res?.timestamp;
-    const closes: Array<number | null> | undefined = res?.indicators?.quote?.[0]?.close;
+    const quote = res?.indicators?.quote?.[0] ?? {};
+    const closes: Array<number | null> | undefined = quote.close;
     if (!ts || !closes || ts.length === 0) { yfCacheSet(cacheKey, null); return null; }
+    const opens: Array<number | null>  = Array.isArray(quote.open)  ? quote.open  : [];
+    const highs: Array<number | null>  = Array.isArray(quote.high)  ? quote.high  : [];
+    const lows:  Array<number | null>  = Array.isArray(quote.low)   ? quote.low   : [];
     // Forward-fill close gaps so the line never breaks, keep timestamps aligned.
+    // OHLC gaps fall back to the close of the same session (degenerate candle
+    // rather than a crash or a hole).
     const filled = forwardFill(closes);
     const t: number[] = [];
     const c: number[] = [];
+    const o: number[] = [];
+    const h: number[] = [];
+    const l: number[] = [];
     for (let i = 0; i < ts.length; i++) {
-      if (filled[i] != null) { t.push(ts[i]); c.push(filled[i] as number); }
+      const close = filled[i];
+      if (close == null) continue;
+      t.push(ts[i]); c.push(close as number);
+      o.push(opens[i] ?? (close as number));
+      h.push(highs[i] ?? (close as number));
+      l.push(lows[i]  ?? (close as number));
     }
-    const out = c.length > 1 ? { t, c } : null;
+    const out = c.length > 1 ? { t, c, o, h, l } : null;
     yfCacheSet(cacheKey, out);
     return out;
   } catch (_) { yfCacheSet(cacheKey, null); return null; }
@@ -2888,7 +2902,7 @@ function eNum(v: unknown): number | null {
 async function eYahooQuoteSummary(ticker: string): Promise<Record<string, any> | null> {
   const auth = await yfGetAuth();
   const sym = encodeURIComponent(ticker.toUpperCase());
-  const modules = "quoteType,fundProfile,topHoldings";
+  const modules = "quoteType,fundProfile,topHoldings,summaryDetail,defaultKeyStatistics,price";
   let url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}`;
   if (auth?.crumb) url += `&crumb=${encodeURIComponent(auth.crumb)}`;
   try {
@@ -3069,6 +3083,159 @@ async function eFmpNews(ticker: string, fmpKey: string): Promise<ENewsItem[]> {
   } catch (_) { return []; }
 }
 
+// =====================================================
+// ETF: SECTOR tab — peer comparison + deterministic insights (A2)
+// =====================================================
+
+// Peer candidates per dominant-sector theme. The list itself is a fixed,
+// auditable table; every figure shown for a peer comes from FMP/Yahoo.
+const ETF_THEME_PEERS: Record<string, { theme: string; query: string; peers: string[] }> = {
+  technology:             { theme: "Tecnología",             query: "technology sector ETF",       peers: ["XLK", "VGT", "QQQ", "SMH", "IYW", "FTEC"] },
+  financial_services:     { theme: "Servicios financieros",  query: "financial sector ETF",        peers: ["XLF", "VFH", "KRE", "KBE", "IYF"] },
+  healthcare:             { theme: "Salud",                  query: "healthcare sector ETF",       peers: ["XLV", "VHT", "IBB", "XBI", "IHI"] },
+  energy:                 { theme: "Energía",                query: "energy sector ETF",           peers: ["XLE", "VDE", "XOP", "OIH", "ICLN"] },
+  consumer_cyclical:      { theme: "Consumo cíclico",        query: "consumer discretionary ETF",  peers: ["XLY", "VCR", "FDIS", "RTH"] },
+  consumer_defensive:     { theme: "Consumo defensivo",      query: "consumer staples ETF",        peers: ["XLP", "VDC", "FSTA"] },
+  industrials:            { theme: "Industriales",           query: "industrials sector ETF",      peers: ["XLI", "VIS", "ITA", "PPA"] },
+  utilities:              { theme: "Utilities",              query: "utilities sector ETF",        peers: ["XLU", "VPU", "IDU"] },
+  realestate:             { theme: "Inmobiliario",           query: "real estate REIT ETF",        peers: ["XLRE", "VNQ", "IYR", "SCHH"] },
+  basic_materials:        { theme: "Materiales básicos",     query: "materials sector ETF",        peers: ["XLB", "VAW", "GDX", "XME"] },
+  communication_services: { theme: "Comunicaciones",         query: "communication services ETF",  peers: ["XLC", "VOX", "FCOM"] },
+};
+const ETF_THEME_BROAD = { theme: "Mercado amplio", query: "broad market index ETF", peers: ["SPY", "VOO", "IVV", "VTI", "QQQ", "IWM"] };
+const ETF_THEME_BONDS = { theme: "Renta fija",     query: "bond market ETF",        peers: ["BND", "AGG", "TLT", "IEF", "LQD", "HYG"] };
+
+function eDetectTheme(
+  sectors: { key: string; pct: number }[],
+  assetAllocation: { label: string; pct: number }[],
+): { theme: string; query: string; peers: string[] } {
+  const bonds = assetAllocation.find((a) => a.label === "Bonos")?.pct ?? 0;
+  if (bonds > 50) return ETF_THEME_BONDS;
+  const top = sectors[0];
+  if (top && top.pct >= 40 && ETF_THEME_PEERS[top.key]) return ETF_THEME_PEERS[top.key];
+  return ETF_THEME_BROAD;
+}
+
+type EPeerRow = {
+  symbol: string;
+  name: string | null;
+  price: number | null;
+  expenseRatio: number | null;
+  totalAssets: number | null;
+  ytdReturn: number | null;
+  return52w: number | null;
+};
+
+// One batch call covers price + name for every peer (FMP is the primary
+// source per the fallback policy; Yahoo enriches with fund-only fields).
+async function eFmpBatchQuote(
+  symbols: string[], fmpKey: string,
+): Promise<Map<string, { name: string | null; price: number | null }>> {
+  const out = new Map<string, { name: string | null; price: number | null }>();
+  if (!fmpKey || symbols.length === 0) return out;
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/quote/${symbols.join(",")}?apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9_000) });
+    if (!r.ok) return out;
+    const j = await r.json();
+    if (!Array.isArray(j)) return out;
+    for (const row of j as Record<string, unknown>[]) {
+      const sym = String(row.symbol ?? "");
+      if (!sym) continue;
+      out.set(sym, {
+        name: row.name ? String(row.name) : null,
+        price: eNum(row.price),
+      });
+    }
+  } catch (_) { /* fall through to Yahoo */ }
+  return out;
+}
+
+async function ePeerRows(peers: string[], self: string, fmpKey: string): Promise<EPeerRow[]> {
+  const list = peers.filter((p) => p !== self).slice(0, 6);
+  if (list.length === 0) return [];
+  const fmp = await eFmpBatchQuote(list, fmpKey);
+  const rows = await Promise.all(list.map(async (sym): Promise<EPeerRow> => {
+    const s = await eYahooQuoteSummary(sym);
+    const psd = s?.summaryDetail ?? {};
+    const pks = s?.defaultKeyStatistics ?? {};
+    const ppr = s?.price ?? {};
+    const pfp = s?.fundProfile ?? {};
+    const f = fmp.get(sym);
+    return {
+      symbol: sym,
+      name: (s?.quoteType?.shortName ? String(s.quoteType.shortName) : null)
+         ?? (s?.quoteType?.longName ? String(s.quoteType.longName) : null)
+         ?? f?.name ?? null,
+      price: eNum(ppr.regularMarketPrice) ?? f?.price ?? null,
+      expenseRatio: eNum(pfp.feesExpensesInvestment?.annualReportExpenseRatio)
+                 ?? eNum(pks.annualReportExpenseRatio),
+      totalAssets: eNum(psd.totalAssets),
+      ytdReturn: eNum(pks.ytdReturn),
+      return52w: eNum(pks["52WeekChange"]),
+    };
+  }));
+  return rows.filter((r) => r.price != null || r.name != null);
+}
+
+// Objective sector pros/cons derived only from the figures already fetched —
+// thresholds are fixed and auditable; the LLM never touches these strings.
+function eSectorInsights(args: {
+  fundamentals: { expenseRatio: number | null; totalAssets: number | null; dividendYield: number | null; return52w: number | null };
+  sectors: { key: string; sector: string; pct: number }[];
+  holdings: { pct: number }[];
+  countries: { country: string; pct: number }[];
+}): { benefits: string[]; risks: string[] } {
+  const { fundamentals: f, sectors, holdings, countries } = args;
+  const benefits: string[] = [];
+  const risks: string[] = [];
+  const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+
+  if (f.expenseRatio != null && f.expenseRatio <= 0.002) {
+    benefits.push(`Comisiones competitivas: ratio de gastos del ${pct(f.expenseRatio)} anual.`);
+  }
+  if (f.totalAssets != null && f.totalAssets >= 1e9) {
+    benefits.push(`Liquidez elevada: $${(f.totalAssets / 1e9).toFixed(1)}B en activos gestionados.`);
+  }
+  if (f.dividendYield != null && f.dividendYield >= 0.02) {
+    benefits.push(`Genera rentas: rentabilidad por dividendo del ${pct(f.dividendYield)}.`);
+  }
+  if (sectors.length >= 8) {
+    benefits.push(`Diversificación amplia: exposición a ${sectors.length} sectores.`);
+  }
+  if (f.return52w != null && f.return52w > 0) {
+    benefits.push(`Momentum positivo: +${(f.return52w * 100).toFixed(1)}% en las últimas 52 semanas.`);
+  }
+
+  for (const s of sectors.slice(0, 3)) {
+    const risk = ETF_SECTOR_RISK[s.key];
+    if (risk && risk.score >= 45 && s.pct >= 15) {
+      risks.push(`${s.sector} (${s.pct.toFixed(1)}% de la cartera): ${risk.note}.`);
+    }
+  }
+  const top10 = holdings.reduce((sum, h) => sum + h.pct, 0);
+  if (top10 > 50) {
+    risks.push(`Concentración: el top 10 de posiciones pesa el ${top10.toFixed(1)}% del fondo.`);
+  }
+  if (sectors[0] && sectors[0].pct >= 60) {
+    risks.push(`Cartera mono-sector: ${sectors[0].pct.toFixed(1)}% en ${sectors[0].sector}.`);
+  }
+  if (f.expenseRatio != null && f.expenseRatio > 0.005) {
+    risks.push(`Comisiones altas: ratio de gastos del ${pct(f.expenseRatio)} anual.`);
+  }
+  if (f.return52w != null && f.return52w < 0) {
+    risks.push(`Retorno negativo: ${(f.return52w * 100).toFixed(1)}% en las últimas 52 semanas.`);
+  }
+  for (const c of countries) {
+    const risk = ETF_COUNTRY_RISK[c.country];
+    if (risk && risk.score >= 65 && c.pct >= 5) {
+      risks.push(`${c.country} (${c.pct.toFixed(1)}% de la cartera): ${risk.note}.`);
+    }
+  }
+
+  return { benefits: benefits.slice(0, 5), risks: risks.slice(0, 5) };
+}
+
 async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
   const json = (b: unknown, status = 200) =>
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -3084,6 +3251,32 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
 
   const th = summary.topHoldings ?? {};
   const fp = summary.fundProfile ?? {};
+  const sd = summary.summaryDetail ?? {};
+  const ks = summary.defaultKeyStatistics ?? {};
+  const pr = summary.price ?? {};
+
+  // Fundamentals snapshot for the Valoración table. Yahoo only publishes a
+  // subset of these for funds — every field is nullable and the frontend
+  // renders "—" for the rest (ROE, margins, D/E... don't apply to ETFs).
+  const fundamentals = {
+    price:         eNum(pr.regularMarketPrice) ?? eNum(sd.previousClose),
+    marketCap:     eNum(pr.marketCap),
+    totalAssets:   eNum(sd.totalAssets),
+    expenseRatio:  eNum(fp.feesExpensesInvestment?.annualReportExpenseRatio)
+                ?? eNum(ks.annualReportExpenseRatio),
+    navPrice:      eNum(sd.navPrice) ?? eNum(ks.navPrice),
+    peTtm:         eNum(sd.trailingPE) ?? eNum(ks.trailingPE),
+    pb:            eNum(sd.priceToBook) ?? eNum(ks.priceToBook),
+    psTtm:         eNum(sd.priceToSalesTrailing12Months),
+    epsTtm:        eNum(ks.trailingEps),
+    dividendYield: eNum(sd.yield) ?? eNum(sd.dividendYield),
+    beta:          eNum(sd.beta) ?? eNum(ks.beta3Year),
+    high52:        eNum(sd.fiftyTwoWeekHigh),
+    low52:         eNum(sd.fiftyTwoWeekLow),
+    return52w:     eNum(ks["52WeekChange"]),
+    ytdReturn:     eNum(ks.ytdReturn) ?? eNum(sd.ytdReturn),
+    avgVolume10d:  eNum(sd.averageVolume10days) ?? eNum(sd.averageDailyVolume10Day),
+  };
 
   // Asset-class allocation (some ETFs have no bonds, no cash, etc. — only
   // categories actually present are emitted).
@@ -3167,12 +3360,40 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
   }
   geoRisks.sort((a, b) => b.contribution - a.contribution);
 
+  // SECTOR tab (A2): theme detection → peer comparison → deterministic
+  // insights → theme news (FMP stock_news on the peers, Yahoo search fallback).
+  const themeCfg = eDetectTheme(sectors, assetAllocation);
+  const sectorPeers = await ePeerRows(themeCfg.peers, ticker, env.FMP_KEY);
+  let sectorNewsSource: "fmp" | "yahoo" | null = null;
+  let sectorNews: ENewsItem[] = [];
+  const peerSyms = sectorPeers.map((p) => p.symbol);
+  if (peerSyms.length) {
+    sectorNews = await eFmpNews(peerSyms.join(","), env.FMP_KEY);
+    if (sectorNews.length) sectorNewsSource = "fmp";
+  }
+  if (!sectorNews.length) {
+    sectorNews = await eYahooNews(themeCfg.query);
+    if (sectorNews.length) sectorNewsSource = "yahoo";
+  }
+  const insights = eSectorInsights({
+    fundamentals: {
+      expenseRatio: fundamentals.expenseRatio,
+      totalAssets: fundamentals.totalAssets,
+      dividendYield: fundamentals.dividendYield,
+      return52w: fundamentals.return52w,
+    },
+    sectors,
+    holdings,
+    countries: countries ?? [],
+  });
+
   return json({
     ticker,
     found: true,
     name: String(summary.quoteType?.longName ?? summary.quoteType?.shortName ?? ""),
     family: fp.family ? String(fp.family) : null,
     category: fp.categoryName ? String(fp.categoryName) : null,
+    fundamentals,
     assetAllocation,
     sectors: sectors.map(({ sector, pct }) => ({ sector, pct })),
     sectorsSource,
@@ -3182,6 +3403,14 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     geoRisks: geoRisks.slice(0, 8),
     news,
     newsSource,
+    sectorTab: {
+      theme: themeCfg.theme,
+      peers: sectorPeers,
+      benefits: insights.benefits,
+      risks: insights.risks,
+      news: sectorNews,
+      newsSource: sectorNewsSource,
+    },
     fetchedAt: new Date().toISOString(),
   });
 }
@@ -3482,6 +3711,124 @@ async function handleRisk(tickerRaw: string): Promise<Response> {
 }
 
 // =====================================================
+// MACRO CALENDAR (pestaña "Calendario Macro") — FMP → Finnhub, no LLM
+// =====================================================
+
+type MacroEvent = {
+  event: string;
+  date: string;            // "YYYY-MM-DD HH:mm" (provider timezone, usually UTC)
+  country: string;
+  impact: "High" | "Medium" | "Low" | null;
+  actual: number | null;
+  previous: number | null;
+  estimate: number | null;
+  unit: string | null;
+};
+
+// Global macro data barely changes within the hour — cache the whole window.
+let MACRO_CACHE: { ts: number; payload: unknown } | null = null;
+const MACRO_TTL_MS = 30 * 60 * 1000;
+
+function macroNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = parseFloat(v.replace("%", "").replace(/,/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function macroImpact(v: unknown): "High" | "Medium" | "Low" | null {
+  const s = String(v ?? "").toLowerCase();
+  if (s === "high" || s === "3") return "High";
+  if (s === "medium" || s === "2") return "Medium";
+  if (s === "low" || s === "1") return "Low";
+  return null;
+}
+
+async function macroFromFmp(fmpKey: string, from: string, to: string): Promise<MacroEvent[]> {
+  if (!fmpKey) return [];
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/economic_calendar?from=${from}&to=${to}&apikey=${fmpKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (!Array.isArray(j)) return [];
+    return j.map((e: Record<string, unknown>): MacroEvent => ({
+      event: String(e.event ?? ""),
+      date: String(e.date ?? "").slice(0, 16),
+      country: String(e.country ?? ""),
+      impact: macroImpact(e.impact),
+      actual: macroNum(e.actual),
+      previous: macroNum(e.previous),
+      estimate: macroNum(e.estimate),
+      unit: e.unit ? String(e.unit) : null,
+    })).filter((e) => e.event && e.date);
+  } catch (_) { return []; }
+}
+
+// Fallback: Finnhub economic calendar (premium on most plans — a 403 simply
+// yields [] and the frontend shows its descriptive empty state).
+async function macroFromFinnhub(finnhubKey: string, from: string, to: string): Promise<MacroEvent[]> {
+  if (!finnhubKey) return [];
+  try {
+    const url = `https://finnhub.io/api/v1/calendar/economic?from=${from}&to=${to}&token=${finnhubKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    const list = Array.isArray(j?.economicCalendar) ? j.economicCalendar : [];
+    return list.map((e: Record<string, unknown>): MacroEvent => ({
+      event: String(e.event ?? ""),
+      date: String(e.time ?? "").slice(0, 16),
+      country: String(e.country ?? ""),
+      impact: macroImpact(e.impact),
+      actual: macroNum(e.actual),
+      previous: macroNum(e.prev),
+      estimate: macroNum(e.estimate),
+      unit: e.unit ? String(e.unit) : null,
+    })).filter((e: MacroEvent) => e.event && e.date);
+  } catch (_) { return []; }
+}
+
+async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+  if (MACRO_CACHE && Date.now() - MACRO_CACHE.ts < MACRO_TTL_MS) {
+    return json(MACRO_CACHE.payload);
+  }
+
+  const from = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const to   = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+
+  let source: "fmp" | "finnhub" | null = null;
+  let events = await macroFromFmp(env.FMP_KEY, from, to);
+  if (events.length) {
+    source = "fmp";
+  } else {
+    events = await macroFromFinnhub(env.FINNHUB_KEY, from, to);
+    if (events.length) source = "finnhub";
+  }
+
+  // High/Medium only — Low-impact noise would bury the events that move
+  // markets. Sorted ascending so the frontend can split past/upcoming.
+  const filtered = events
+    .filter((e) => e.impact === "High" || e.impact === "Medium")
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 200);
+
+  const payload = {
+    events: filtered,
+    source,
+    from,
+    to,
+    fetchedAt: new Date().toISOString(),
+  };
+  if (filtered.length) MACRO_CACHE = { ts: Date.now(), payload };
+  return json(payload);
+}
+
+// =====================================================
 // MAIN DISPATCHER
 // =====================================================
 
@@ -3535,6 +3882,11 @@ Deno.serve(async (req) => {
     // Technical series (sección "Señales Técnicas") — SMA/RSI/MACD in code, no Gemini
     if (body.technicals === true && typeof body.ticker === "string" && body.ticker.trim().length > 0) {
       return await handleTechnicals(body.ticker);
+    }
+
+    // Macro economic calendar (pestaña "Calendario Macro") — FMP → Finnhub, no Gemini
+    if (body.macroCalendar === true) {
+      return await handleMacroCalendar(env);
     }
 
     if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
