@@ -135,13 +135,31 @@ export function MacroCalendarSubSection() {
 
   const events = data?.events ?? [];
   if (events.length === 0) {
+    const diag = data?.diagnostics ?? {};
+    const SRC_LABEL: Record<string, string> = { fmp: "FMP", finnhub: "Finnhub", fred: "FRED" };
+    const rows = Object.entries(diag);
     return (
-      <div className="py-10 text-center border border-border bg-card">
-        <div className="text-[11px] text-muted-foreground/60 mb-1">Sin eventos macro disponibles</div>
-        <div className="text-[10px] text-muted-foreground/35">
-          Ninguna fuente (FMP, Finnhub) devolvió eventos económicos para la ventana actual
-          {data ? ` (${data.from} → ${data.to})` : ""}.
-        </div>
+      <div className="py-10 px-4 text-center border border-border bg-card">
+        <div className="text-[11px] text-muted-foreground/60 mb-2">Sin eventos macro disponibles</div>
+        {rows.length > 0 ? (
+          <div className="inline-block text-left mx-auto">
+            <div className="text-[10px] text-muted-foreground/40 mb-1.5">
+              Fuentes intentadas{data ? ` para ${data.from} → ${data.to}` : ""}:
+            </div>
+            <ul className="space-y-1">
+              {rows.map(([src, status]) => (
+                <li key={src} className="text-[10px] font-mono text-muted-foreground/50">
+                  <span className="text-foreground/70">{SRC_LABEL[src] ?? src}</span>: {status}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="text-[10px] text-muted-foreground/35">
+            Ninguna fuente devolvió eventos económicos para la ventana actual
+            {data ? ` (${data.from} → ${data.to})` : ""}.
+          </div>
+        )}
       </div>
     );
   }
@@ -156,7 +174,7 @@ export function MacroCalendarSubSection() {
       <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono">
         <span className="text-muted-foreground/50">EVENTOS ECONÓMICOS · ALTA Y MEDIA IMPORTANCIA</span>
         <span className="text-primary/70 border border-primary/25 px-1.5 py-0.5">
-          {data?.source === "finnhub" ? "FINNHUB" : "FMP"}
+          {data?.source === "finnhub" ? "FINNHUB" : data?.source === "fred" ? "FRED · EE.UU." : "FMP"}
         </span>
         {data && <span className="text-muted-foreground/35">{data.from} → {data.to}</span>}
       </div>
