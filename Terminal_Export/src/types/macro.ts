@@ -15,7 +15,9 @@ export interface MacroEvent {
 
 export interface MacroCalendarResponse {
   events: MacroEvent[];
-  source: "fmp" | "finnhub" | null;
+  source: "fmp" | "finnhub" | "fred" | null;
+  /** Per-source attempt status (e.g. { fmp: "HTTP 403 ...", fred: "ok · 12 eventos" }). */
+  diagnostics?: Record<string, string>;
   from: string;
   to: string;
   fetchedAt: string;

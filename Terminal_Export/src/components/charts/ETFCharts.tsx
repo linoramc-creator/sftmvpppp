@@ -42,9 +42,11 @@ function PctBar({ pct, color, max = 100 }: { pct: number; color: string; max?: n
 }
 
 // ── Fundamentals table (Valoración tab) ────────────────────────────────
-// Same metric/value layout as the ticker view. Metrics Yahoo doesn't publish
-// for funds (ROE, margins, D/E...) render as "—" — never crash, never hide
-// the row, so the table shape is identical for every instrument.
+// ETF-appropriate metric set only. Company-only metrics (ROE, ROA, margins,
+// D/E, EPS, FCF/share, P/S) don't exist for a fund, so they're omitted
+// entirely instead of shown as "—". Any ETF metric Yahoo doesn't publish for
+// this fund is hidden too (the row is dropped, not rendered as a dash). Stocks
+// use a different table (QuarterlyHistorySection) — this one is ETF-only.
 
 const fmtUsd = (v: number | null) =>
   v == null ? null : `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -73,34 +75,34 @@ const fmtVol = (v: number | null) => {
 
 export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
   const f: EtfFundamentals | undefined = data.fundamentals;
-  const rows: { label: string; value: string | null }[] = [
-    { label: "Precio Actual",          value: fmtUsd(f?.price ?? null) },
-    { label: "Market Cap",             value: fmtBig(f?.marketCap ?? f?.totalAssets ?? null) },
-    { label: "P/E TTM",                value: fmtRatio(f?.peTtm ?? null) },
-    { label: "P/B",                    value: fmtRatio(f?.pb ?? null) },
-    { label: "P/S TTM",                value: fmtRatio(f?.psTtm ?? null) },
-    { label: "ROE TTM",                value: null },
-    { label: "ROA TTM",                value: null },
-    { label: "Gross Margin TTM",       value: null },
-    { label: "Operating Margin TTM",   value: null },
-    { label: "Net Margin TTM",         value: null },
-    { label: "Deuda/Equity",           value: null },
-    { label: "EPS TTM",                value: fmtUsd(f?.epsTtm ?? null) },
-    { label: "Free Cash Flow/Share",   value: null },
-    { label: "Dividend Yield",         value: fmtFracPct(f?.dividendYield ?? null) },
-    { label: "Beta",                   value: fmtRatio(f?.beta ?? null) },
-    { label: "52W High",               value: fmtUsd(f?.high52 ?? null) },
-    { label: "52W Low",                value: fmtUsd(f?.low52 ?? null) },
-    { label: "52W Return",             value: fmtFracPct(f?.return52w ?? null) },
-    { label: "Volumen Promedio 10D",   value: fmtVol(f?.avgVolume10d ?? null) },
+  // ETF metrics only; null values are dropped so the table never shows "—".
+  const allRows: { label: string; value: string | null }[] = [
+    { label: "Precio Actual",        value: fmtUsd(f?.price ?? null) },
+    { label: "NAV",                  value: fmtUsd(f?.navPrice ?? null) },
+    { label: "AUM (Activos Gestionados)", value: fmtBig(f?.totalAssets ?? null) },
+    { label: "Ratio de Gastos",      value: fmtFracPct(f?.expenseRatio ?? null) },
+    { label: "P/E TTM",              value: fmtRatio(f?.peTtm ?? null) },
+    { label: "P/B",                  value: fmtRatio(f?.pb ?? null) },
+    { label: "Dividend Yield",       value: fmtFracPct(f?.dividendYield ?? null) },
+    { label: "Beta",                 value: fmtRatio(f?.beta ?? null) },
+    { label: "52W High",             value: fmtUsd(f?.high52 ?? null) },
+    { label: "52W Low",              value: fmtUsd(f?.low52 ?? null) },
+    { label: "52W Return",           value: fmtFracPct(f?.return52w ?? null) },
+    { label: "Retorno YTD",          value: fmtFracPct(f?.ytdReturn ?? null) },
+    { label: "Volumen Promedio 10D", value: fmtVol(f?.avgVolume10d ?? null) },
   ];
+  const rows = allRows.filter((r) => r.value != null);
+
+  if (rows.length === 0) {
+    return <EmptyNote text="Yahoo no publica métricas fundamentales para este ETF." />;
+  }
 
   return (
     <div className="mb-4 border border-border overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
         <div className="flex items-center gap-3">
           <span className="w-1.5 h-1.5 bg-primary shrink-0" />
-          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FUNDAMENTALES</span>
+          <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FUNDAMENTALES ETF</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">SNAPSHOT</span>
         </div>
         <span className="text-[10px] tracking-widest text-muted-foreground/30">YAHOO FINANCE</span>
@@ -123,8 +125,8 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
                 <td className="px-4 py-3 text-[13px] text-foreground/90 font-medium whitespace-nowrap">
                   {r.label}
                 </td>
-                <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] font-mono ${r.value == null ? "text-muted-foreground/20" : "text-primary font-semibold"}`}>
-                  {r.value ?? "—"}
+                <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap text-[14px] font-mono text-primary font-semibold">
+                  {r.value}
                 </td>
               </tr>
             ))}

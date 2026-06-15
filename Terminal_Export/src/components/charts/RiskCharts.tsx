@@ -28,11 +28,10 @@ const chartBox = {
 // ── Shared scaffolding ─────────────────────────────────────────────────
 
 function ChartBlock({
-  title, subtitle, howToRead, children,
+  title, subtitle, children,
 }: {
   title: string;
   subtitle: string;
-  howToRead: string;
   children: React.ReactNode;
 }) {
   return (
@@ -40,12 +39,6 @@ function ChartBlock({
       <div className="text-[10px] tracking-widest text-foreground font-semibold mb-1">{title}</div>
       <div className="text-[9px] text-muted-foreground/40 mb-1.5">{subtitle}</div>
       {children}
-      <div className="mt-2 px-3 py-2 border border-border/50 bg-card/50">
-        <div className="text-[9px] tracking-widest text-primary/60 uppercase mb-1">Cómo leer este indicador</div>
-        <p className="text-[11px] text-muted-foreground/70 leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>
-          {howToRead}
-        </p>
-      </div>
     </div>
   );
 }
@@ -365,7 +358,6 @@ export function RiskSubSection({ ticker }: { ticker: string }) {
       <ChartBlock
         title="DRAWDOWN HISTÓRICO"
         subtitle="Distancia respecto al máximo histórico (serie underwater, hasta 10 años)"
-        howToRead="Muestra cuánto ha caído el activo desde su máximo anterior en cada momento. Cuanto más profundo y prolongado el valle, más doloroso fue mantener la posición. Si el valor actual está cerca de 0%, el activo cotiza en máximos; un −30% significa que necesita subir un 43% para recuperarlos."
       >
         {data.drawdown
           ? <DrawdownChart data={data.drawdown} />
@@ -375,7 +367,6 @@ export function RiskSubSection({ ticker }: { ticker: string }) {
       <ChartBlock
         title="TERMÓMETRO DE REFUGIO"
         subtitle="Correlación rolling de 60 sesiones entre el activo y el oro (GLD)"
-        howToRead="Mide si el activo se mueve con el oro (refugio clásico) o contra él. Correlación negativa o cercana a 0 indica que el oro diversifica tu posición; correlación alta y positiva indica que en una crisis ambos podrían caer a la vez y el oro no te protegería."
       >
         {data.refuge
           ? <RefugeChart data={data.refuge} />
@@ -385,7 +376,6 @@ export function RiskSubSection({ ticker }: { ticker: string }) {
       <ChartBlock
         title="RÉGIMEN DE MERCADO VIX"
         subtitle="Distribución de retornos diarios: calma (VIX≤25, verde) vs pánico (VIX>25, rojo) · últimos 2 años"
-        howToRead="Compara cómo se comporta el activo cuando el mercado está tranquilo frente a cuando hay miedo. Si la campana roja (pánico) es mucho más ancha o está desplazada a la izquierda, el activo sufre amplificación en crisis. Si ambas campanas son parecidas, el activo es relativamente inmune al régimen de volatilidad."
       >
         {data.vixRegime
           ? <VixRegimeChart data={data.vixRegime} />
@@ -395,7 +385,6 @@ export function RiskSubSection({ ticker }: { ticker: string }) {
       <ChartBlock
         title="SENSIBILIDAD AL PETRÓLEO"
         subtitle="Beta OLS de los retornos diarios del activo frente al Brent (BZ=F) · último año"
-        howToRead="Cada punto es un día: eje X el movimiento del Brent, eje Y el del activo. La pendiente de la línea amarilla es la beta: una beta de 0.5 significa que, de media, el activo sube un 0.5% cuando el petróleo sube un 1%. Un R² bajo indica que el petróleo apenas explica los movimientos del activo, aunque la beta no sea cero."
       >
         {data.oilBeta
           ? <OilBetaChart data={data.oilBeta} />

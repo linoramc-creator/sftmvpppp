@@ -64,7 +64,7 @@ async function fetchFredData(key: string): Promise<string> {
     const results = await Promise.all(
       series.map(async (s) => {
         const res = await fetch(
-          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}&apikey=${key}&limit=1&sort_order=desc&file_type=json`
+          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}&api_key=${key}&limit=1&sort_order=desc&file_type=json`
         ).catch(() => null);
         if (!res?.ok) return null;
         const data = await res.json().catch(() => null);
@@ -74,7 +74,7 @@ async function fetchFredData(key: string): Promise<string> {
     );
 
     const cpiRes = await fetch(
-      `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&apikey=${key}&limit=14&sort_order=desc&file_type=json`
+      `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key=${key}&limit=14&sort_order=desc&file_type=json`
     ).catch(() => null);
     let cpiLine: string | null = null;
     if (cpiRes?.ok) {
@@ -2310,10 +2310,10 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
     )),
     Promise.all(indexSymbols.map(async s => ({ symbol: s, data: await fetchYahooChart(s, "3mo", "1d") }))),
     env.FRED_KEY
-      ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
+      ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
     env.FRED_KEY
-      ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS2&apikey=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
+      ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS2&api_key=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
   ]);
 
@@ -3746,15 +3746,27 @@ function macroImpact(v: unknown): "High" | "Medium" | "Low" | null {
   return null;
 }
 
-async function macroFromFmp(fmpKey: string, from: string, to: string): Promise<MacroEvent[]> {
-  if (!fmpKey) return [];
+// Each source returns its events plus a short human status so the frontend
+// can explain exactly which provider was tried and why it failed.
+type MacroFetchResult = { events: MacroEvent[]; status: string };
+
+async function macroFromFmp(fmpKey: string, from: string, to: string): Promise<MacroFetchResult> {
+  if (!fmpKey) return { events: [], status: "sin API key configurada" };
   try {
     const url = `https://financialmodelingprep.com/api/v3/economic_calendar?from=${from}&to=${to}&apikey=${fmpKey}`;
     const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
-    if (!r.ok) return [];
+    if (!r.ok) {
+      const gated = r.status === 401 || r.status === 402 || r.status === 403;
+      return { events: [], status: `HTTP ${r.status}${gated ? " (endpoint de pago en el plan free)" : ""}` };
+    }
     const j = await r.json();
-    if (!Array.isArray(j)) return [];
-    return j.map((e: Record<string, unknown>): MacroEvent => ({
+    if (!Array.isArray(j)) {
+      const msg = (j && typeof j === "object" && "Error Message" in j)
+        ? String((j as Record<string, unknown>)["Error Message"]).slice(0, 100)
+        : "la respuesta no es un array";
+      return { events: [], status: `sin datos (${msg})` };
+    }
+    const events = j.map((e: Record<string, unknown>): MacroEvent => ({
       event: String(e.event ?? ""),
       date: String(e.date ?? "").slice(0, 16),
       country: String(e.country ?? ""),
@@ -3764,20 +3776,23 @@ async function macroFromFmp(fmpKey: string, from: string, to: string): Promise<M
       estimate: macroNum(e.estimate),
       unit: e.unit ? String(e.unit) : null,
     })).filter((e) => e.event && e.date);
-  } catch (_) { return []; }
+    return { events, status: events.length ? `ok · ${events.length} eventos` : "0 eventos en la ventana" };
+  } catch (_) { return { events: [], status: "error de red o timeout" }; }
 }
 
-// Fallback: Finnhub economic calendar (premium on most plans — a 403 simply
-// yields [] and the frontend shows its descriptive empty state).
-async function macroFromFinnhub(finnhubKey: string, from: string, to: string): Promise<MacroEvent[]> {
-  if (!finnhubKey) return [];
+// Fallback #1: Finnhub economic calendar (premium on most plans).
+async function macroFromFinnhub(finnhubKey: string, from: string, to: string): Promise<MacroFetchResult> {
+  if (!finnhubKey) return { events: [], status: "sin API key configurada" };
   try {
     const url = `https://finnhub.io/api/v1/calendar/economic?from=${from}&to=${to}&token=${finnhubKey}`;
     const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
-    if (!r.ok) return [];
+    if (!r.ok) {
+      const gated = r.status === 401 || r.status === 402 || r.status === 403;
+      return { events: [], status: `HTTP ${r.status}${gated ? " (endpoint premium)" : ""}` };
+    }
     const j = await r.json();
     const list = Array.isArray(j?.economicCalendar) ? j.economicCalendar : [];
-    return list.map((e: Record<string, unknown>): MacroEvent => ({
+    const events = list.map((e: Record<string, unknown>): MacroEvent => ({
       event: String(e.event ?? ""),
       date: String(e.time ?? "").slice(0, 16),
       country: String(e.country ?? ""),
@@ -3787,7 +3802,68 @@ async function macroFromFinnhub(finnhubKey: string, from: string, to: string): P
       estimate: macroNum(e.estimate),
       unit: e.unit ? String(e.unit) : null,
     })).filter((e: MacroEvent) => e.event && e.date);
-  } catch (_) { return []; }
+    return { events, status: events.length ? `ok · ${events.length} eventos` : "0 eventos (endpoint premium)" };
+  } catch (_) { return { events: [], status: "error de red o timeout" }; }
+}
+
+// Fallback #2: FRED release dates (free, US-only). Gives the indicator name +
+// date — never forecast/previous/actual, so those stay null. We curate a
+// high-impact allowlist; importance is assigned from it, not invented.
+const FRED_HIGH_IMPACT: { re: RegExp; impact: "High" | "Medium" }[] = [
+  { re: /employment situation/i,            impact: "High"   }, // Nonfarm Payrolls
+  { re: /consumer price index/i,            impact: "High"   }, // CPI
+  { re: /personal income and outlays/i,     impact: "High"   }, // PCE
+  { re: /producer price index/i,            impact: "High"   }, // PPI
+  { re: /gross domestic product/i,          impact: "High"   }, // GDP
+  { re: /retail/i,                          impact: "High"   }, // Retail Sales
+  { re: /unemployment insurance|jobless/i,  impact: "High"   }, // Weekly claims
+  { re: /federal open market committee|fomc/i, impact: "High" },
+  { re: /industrial production/i,           impact: "Medium" },
+  { re: /consumer sentiment|consumer confidence/i, impact: "Medium" },
+  { re: /housing starts|new residential construction/i, impact: "Medium" },
+  { re: /durable goods|manufacturers.{0,20}orders/i, impact: "Medium" },
+  { re: /personal consumption/i,            impact: "Medium" },
+  { re: /trade balance|international trade/i, impact: "Medium" },
+];
+
+function fredImpact(name: string): "High" | "Medium" | null {
+  for (const m of FRED_HIGH_IMPACT) if (m.re.test(name)) return m.impact;
+  return null;
+}
+
+async function macroFromFred(fredKey: string, from: string, to: string): Promise<MacroFetchResult> {
+  if (!fredKey) return { events: [], status: "sin API key configurada" };
+  try {
+    // NOTE: FRED requires the parameter name `api_key` (with underscore).
+    const url = `https://api.stlouisfed.org/fred/releases/dates?api_key=${fredKey}`
+      + `&file_type=json&include_release_dates_with_no_data=true`
+      + `&realtime_start=${from}&realtime_end=${to}`
+      + `&sort_order=asc&order_by=release_date&limit=1000`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) return { events: [], status: `HTTP ${r.status}` };
+    const j = await r.json();
+    const list: Record<string, unknown>[] = Array.isArray(j?.release_dates) ? j.release_dates : [];
+    if (list.length === 0) {
+      const msg = (j && typeof j === "object" && "error_message" in j)
+        ? String((j as Record<string, unknown>)["error_message"]).slice(0, 100)
+        : "sin release_dates en la respuesta";
+      return { events: [], status: `sin datos (${msg})` };
+    }
+    const events: MacroEvent[] = [];
+    for (const rd of list) {
+      const date = String(rd.date ?? "").slice(0, 10);
+      const name = String(rd.release_name ?? "");
+      if (!date || !name) continue;
+      if (date < from || date > to) continue;          // hard window filter
+      const impact = fredImpact(name);
+      if (!impact) continue;                            // curated high-impact only
+      events.push({
+        event: name, date, country: "United States",
+        impact, actual: null, previous: null, estimate: null, unit: null,
+      });
+    }
+    return { events, status: events.length ? `ok · ${events.length} eventos` : "0 eventos de alto impacto en la ventana" };
+  } catch (_) { return { events: [], status: "error de red o timeout" }; }
 }
 
 async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
@@ -3801,13 +3877,26 @@ async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
   const from = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
   const to   = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
 
-  let source: "fmp" | "finnhub" | null = null;
-  let events = await macroFromFmp(env.FMP_KEY, from, to);
-  if (events.length) {
-    source = "fmp";
-  } else {
-    events = await macroFromFinnhub(env.FINNHUB_KEY, from, to);
-    if (events.length) source = "finnhub";
+  // Source order: FMP → Finnhub → FRED. Each attempt's status is recorded so
+  // the frontend can say exactly what was tried and why it failed.
+  const diagnostics: Record<string, string> = {};
+  let source: "fmp" | "finnhub" | "fred" | null = null;
+  let events: MacroEvent[] = [];
+
+  const fmp = await macroFromFmp(env.FMP_KEY, from, to);
+  diagnostics.fmp = fmp.status;
+  if (fmp.events.length) { events = fmp.events; source = "fmp"; }
+
+  if (!source) {
+    const fh = await macroFromFinnhub(env.FINNHUB_KEY, from, to);
+    diagnostics.finnhub = fh.status;
+    if (fh.events.length) { events = fh.events; source = "finnhub"; }
+  }
+
+  if (!source) {
+    const fr = await macroFromFred(env.FRED_KEY, from, to);
+    diagnostics.fred = fr.status;
+    if (fr.events.length) { events = fr.events; source = "fred"; }
   }
 
   // High/Medium only — Low-impact noise would bury the events that move
@@ -3820,6 +3909,7 @@ async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
   const payload = {
     events: filtered,
     source,
+    diagnostics,
     from,
     to,
     fetchedAt: new Date().toISOString(),
