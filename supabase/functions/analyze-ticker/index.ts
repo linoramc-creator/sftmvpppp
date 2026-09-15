@@ -407,6 +407,7 @@ type GeminiResult =
   | { ok: false; status: number; error: string };
 
 async function callGeminiStream(messages: any[], apiKey: string): Promise<GeminiResult> {
+  messages = messages.map(m => m.role === 'system' ? { ...m, content: m.content + '\nESTILO FINAL: redacta en español profesional, conciso y sin erratas. Omite toda referencia a proveedores, herramientas, fuentes, URLs, citas y metodología de investigación (Yahoo, FMP, Finnhub, Tavily, Gemini, etc.). No expliques cómo elaboras el informe. Conserva fechas, cifras, incertidumbre material y calificación de estimaciones. En institucional distingue opiniones y recomendaciones de operaciones reales; nunca deduzcas recomendaciones a partir de tenencias.' } : m);
   const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
   // Pro first for best analysis quality. Flash as fast fallback.
   // Keepalives in the response stream prevent Supabase's idle timeout

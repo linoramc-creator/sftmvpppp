@@ -332,7 +332,7 @@ export function RiskSubSection({ ticker }: { ticker: string }) {
   }, [ticker]);
 
   if (!isRiskConfigured()) {
-    return <EmptyBlock text="Backend de Supabase no configurado — define VITE_SUPABASE_URL para habilitar el análisis de riesgo." />;
+    return <EmptyBlock text="Análisis de riesgo no disponible temporalmente." />;
   }
 
   if (loading) {

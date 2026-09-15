@@ -175,7 +175,7 @@ export function IndexSparkline({ label, symbol, price, change1d, change1m, candl
             textTransform: 'uppercase',
           }}>Sin histórico disponible</span>
           <span style={{ fontSize: 8, color: '#334155', letterSpacing: '0.05em', fontFamily: 'monospace' }}>
-            redeploy supabase
+            Histórico no disponible
           </span>
         </div>
       )}

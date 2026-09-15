@@ -211,7 +211,7 @@ export function TechnicalSubSection({ ticker }: { ticker: string }) {
       </div>
 
       <div>
-        <div className="text-[9px] text-muted-foreground/40 mb-1">Precio (1 año) con medias móviles de 50 y 200 sesiones — cálculo determinista, no IA</div>
+        <div className="text-[9px] text-muted-foreground/40 mb-1">Precio (1 año) con medias móviles de 50 y 200 sesiones</div>
         <PriceSmaChart data={data} />
         <MiniLegend items={[["Cierre", OPT_COLORS.spot], ["SMA 50", OPT_COLORS.term], ["SMA 200", OPT_COLORS.flip]]} />
       </div>

@@ -195,7 +195,7 @@ export function OptionsView() {
       <div className="max-w-7xl mx-auto px-4 pt-8 pb-16">
         <div className="border border-amber-500/30 bg-amber-500/5 px-5 py-4">
           <div className="flex items-center gap-2 text-amber-400 text-[11px] tracking-widest uppercase mb-2">
-            <AlertCircle className="h-4 w-4" /> Backend de Supabase no configurado
+            <AlertCircle className="h-4 w-4" /> Servicio no disponible temporalmente
           </div>
           <p className="text-[12px] text-muted-foreground leading-relaxed">
             Define <code className="bg-primary/10 text-primary px-1">VITE_SUPABASE_URL</code> en el entorno de Vercel.
@@ -244,7 +244,7 @@ export function OptionsView() {
           <p className="text-[12px] text-muted-foreground/60">
             Greeks (BSM), GEX/DEX/VEX, superficie IV, skew, estructura temporal, max pain y mov. esperado.
           </p>
-          <p className="text-[10px] text-muted-foreground/30 mt-1">Datos de yfinance · Greeks calculados en código, nunca por IA.</p>
+          <p className="text-[10px] text-muted-foreground/30 mt-1">Sensibilidades teóricas de las opciones.</p>
         </div>
       )}
 

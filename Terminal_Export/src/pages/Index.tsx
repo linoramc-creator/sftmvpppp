@@ -1,3 +1,5 @@
+import { cleanReportText } from "@/lib/editorial";
+import { RevenueGrowthSection } from "@/components/charts/RevenueGrowthChart";
 import { buildGrowthChartData } from "@/lib/revenue-growth";
 import { BondsView, BusinessView, InstitutionalView, NewsView } from "@/components/MarketPanels";
 import { useState, useRef, useCallback, useEffect } from "react";
@@ -51,7 +53,7 @@ const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Noticias":               { label: "NOTICIAS",               category: "MARKET NEWS"            },
   "Señales Técnicas":       { label: "SEÑALES TÉCNICAS",       category: "TECHNICAL ANALYSIS"     },
   "Riesgo":                 { label: "RIESGO",                 category: "RISK ANALYTICS"         },
-  "Institucional":          { label: "INSTITUCIONAL",          category: "OWNERSHIP"              },
+  "Institucional":          { label: "INSTITUCIONAL",          category: "RECOMENDACIONES"        },
   "Calendario Macro":       { label: "CALENDARIO MACRO",       category: "MACRO EVENTS"           },
 };
 
@@ -66,6 +68,7 @@ const ETF_SECTION_CONFIG: Record<string, { label: string; category: string }> = 
   "Riesgo":            { label: "RIESGO",            category: "RISK ANALYTICS"     },
   "Noticias":          { label: "NOTICIAS",          category: "MARKET NEWS"        },
   "Señales Técnicas":  { label: "SEÑALES TÉCNICAS",  category: "TECHNICAL ANALYSIS" },
+  "Institucional": { label: "INSTITUCIONAL", category: "RECOMENDACIONES" },
   "Calendario Macro":  { label: "CALENDARIO MACRO",  category: "MACRO EVENTS"       },
 };
 
@@ -954,7 +957,7 @@ function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
           ÍNDICES GLOBALES
         </span>
         <span style={{ marginLeft: 'auto', fontSize: 8, color: '#475569', letterSpacing: '0.1em' }}>
-          LIVE · FINNHUB
+          MERCADO
         </span>
       </div>
       {PANEL_INDICES.map(({ symbol, label }) => {
@@ -1166,7 +1169,7 @@ function ReportView({
               {active === "Resumen Ejecutivo" && <InstrumentPriceChart ticker={ticker} />}
               {active === "Finanzas" && (
                 <>
-                  <QuarterlyHistorySection data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
+                  <QuarterlyHistorySection ticker={ticker} data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
                   <CatalystCalendarSection data={catalystCalendar ?? null} />
                 </>
               )}
@@ -1175,7 +1178,7 @@ function ReportView({
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
               {active === "Calendario Macro" && <MacroCalendarSubSection />}
               {active === "Desglose de ingresos" && <BusinessView key={ticker} ticker={ticker} />}
-              {active === "Institucional" && <><InstitutionalView key={ticker} ticker={ticker} />{sections[active] && <details className="mt-4"><summary className="text-xs text-primary cursor-pointer">Análisis e insiders del informe</summary>{renderElements(sections[active])}</details>}</>}
+              {active === "Institucional" && <InstitutionalView key={ticker} ticker={ticker} />}
               {active === "Noticias" && <NewsView key={ticker} subject={ticker} />}
               {sections[active] && !["Desglose de ingresos", "Institucional", "Noticias", "Calendario Macro"].includes(active) && renderElements(sections[active])}
               {isLoading && (
@@ -1204,6 +1207,7 @@ function EtfReportView({
   const sections = parseSections(content, ETF_TABS);
 
   const available = ETF_TABS.filter((key) => {
+    if (key === "Institucional" && ticker) return true;
     if (key === "Noticias" && ticker) return true;
     if (sections[key]) return true;
     if (key === "Resumen Ejecutivo" && !!ticker) return true;
@@ -1266,12 +1270,13 @@ function EtfReportView({
               {active === "Valoración" && etfDeep?.found === true && <EtfFundamentalsTable data={etfDeep} />}
               {active === "ETF" && etfDeep?.found === true && <EtfSubSection data={etfDeep} />}
               {active === "Sector" && etfDeep?.found === true && <EtfSectorSubSection data={etfDeep} />}
+              {active === "Institucional" && <InstitutionalView key={ticker} ticker={ticker} />}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
               {active === "Calendario Macro" && <MacroCalendarSubSection />}
               {active === "Noticias" && <NewsView key={ticker} subject={ticker} />}
-              {sections[active] && !["Noticias", "Calendario Macro"].includes(active) && renderElements(sections[active])}
+              {sections[active] && !["Noticias", "Institucional", "Calendario Macro"].includes(active) && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />
               )}
@@ -1395,8 +1400,9 @@ function SavedReportCard({
 type QTab = "valuation" | "income" | "cashflow" | "balance" | "margins" | "growth";
 
 function QuarterlyHistorySection({
-  data, debug, currentMetrics = [], isLoading = false,
+  ticker, data, debug, currentMetrics = [], isLoading = false,
 }: {
+  ticker: string;
   data: QuarterlyPeriod[];
   debug?: QuarterlyDebug | null;
   currentMetrics?: { label: string; value: string }[];
@@ -1423,22 +1429,7 @@ function QuarterlyHistorySection({
   }
 
   if (!data.length && !currentMetrics.length) {
-    let diagnostic = "Esperando datos del backend...";
-    if (debug) {
-      const problems: string[] = [];
-      if ((debug.yahooRows ?? 0) === 0)               problems.push("YAHOO: 0 filas (ticker no cubierto)");
-      if (!debug.hasFinnhub)                          problems.push("FINNHUB no configurada");
-      if (!debug.hasFmp)                              problems.push("FMP no configurada");
-      if (debug.hasTwelveData === false)              problems.push("TWELVE DATA no configurada");
-      if (debug.hasTavily     === false)              problems.push("TAVILY no configurada (fallback IA)");
-      if (debug.hasFinnhub && debug.finnhubRows === 0)    problems.push("FINNHUB: 0 filas (plan free no incluye /stock/financials)");
-      if (debug.hasFmp     && debug.fmpRows     === 0)    problems.push("FMP: 0 filas (ticker no cubierto)");
-      if (debug.hasTwelveData && (debug.twelveDataRows ?? 0) === 0) problems.push("TWELVE DATA: 0 filas (ticker no cubierto)");
-      if (debug.hasTavily && (debug.aiFallbackRows ?? 0) === 0)     problems.push("Fallback IA no encontró datos");
-      diagnostic = problems.length
-        ? problems.join(" · ")
-        : `Backend respondió pero con 0 trimestres`;
-    }
+    const diagnostic = "Información trimestral no disponible para este activo.";
     return (
       <div className="mb-6 border border-border overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
@@ -1495,9 +1486,7 @@ function QuarterlyHistorySection({
         : { rows: null, emptyMsg: "Sin datos de márgenes disponibles." };
     }
     if (t === "growth") {
-      return growthData.some(row => row.revenueGrowth !== null)
-        ? { rows: { data: growthData, render: () => <GrowthChart data={growthData} /> }, emptyMsg: "" }
-        : { rows: null, emptyMsg: "Sin datos de crecimiento disponibles." };
+      return { rows: { data: growthData, render: () => <RevenueGrowthSection ticker={ticker} fallback={data} /> }, emptyMsg: "" };
     }
     return { rows: null, emptyMsg: "" };
   };
@@ -1513,7 +1502,7 @@ function QuarterlyHistorySection({
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
         </div>
-        <span className="text-[10px] tracking-widest text-muted-foreground/30">{data.length}Q · YAHOO + FMP + TWELVE DATA + FINNHUB + AI</span>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30">{data.length} trimestres</span>
       </div>
 
       {/* Tabs */}
@@ -1582,7 +1571,7 @@ function QuarterlyHistorySection({
             <>
               {activeChart.rows.render()}
               <div className="mt-2 px-1 text-[9px] tracking-widest text-muted-foreground/30">
-                {activeChart.rows.data.length}Q · ordenado de antiguo (izquierda) a reciente (derecha) · valores faltantes omitidos
+                {tab !== "growth" && `${activeChart.rows.data.length} trimestres`}
               </div>
             </>
           ) : (
@@ -1606,7 +1595,7 @@ function CatalystCalendarSection({ data }: { data: CatalystCalendar | null }) {
       <div className="px-4 py-2.5 bg-secondary/30 border-b border-border flex items-center gap-2">
         <span className="w-1.5 h-1.5 bg-primary shrink-0" />
         <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">CATALYST CALENDAR</span>
-        <span className="text-[10px] text-muted-foreground/40 tracking-widest ml-auto">FMP</span>
+        <span className="text-[10px] text-muted-foreground/40 tracking-widest ml-auto"></span>
       </div>
 
       <div className="divide-y divide-border/30">
@@ -1669,7 +1658,7 @@ function normalizeSectionName(s: string): string {
 }
 
 function parseSections(content: string, knownTabs: string[]): Record<string, React.ReactNode[]> {
-  const lines = content.split("\n");
+  const lines = cleanReportText(content).split("\n");
   const sections: Record<string, React.ReactNode[]> = {};
   // Map of normalized -> canonical name from knownTabs
   const canonicalByNorm = new Map<string, string>(
@@ -1923,6 +1912,7 @@ function boldClass(inner: string): string {
 }
 
 function renderInline(text: string): React.ReactNode {
+  text = cleanReportText(text);
   const withLinks = text.split(/(\[[^\]]+\]\([^)]+\))/g);
   return withLinks.map((seg, si) => {
     const linkMatch = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);

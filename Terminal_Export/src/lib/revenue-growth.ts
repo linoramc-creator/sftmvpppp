@@ -1,5 +1,19 @@
 import type { QuarterlyPeriod } from './analyze';
 
+// Preserve the longer quarterly history while replacing overlapping values with
+// unrounded observations. Fiscal calendars can differ by a few days.
+export function mergeGrowthSeries(base: { period: string; revenueGrowth: number | null }[], precise: { period: string; revenueGrowth: number | null }[]) {
+  const rows = base.map(row => ({ ...row }));
+  for (const point of precise) {
+    if (point.revenueGrowth === null || !Number.isFinite(point.revenueGrowth)) continue;
+    const nearest = rows.filter(row => Math.abs(Date.parse(row.period) - Date.parse(point.period)) <= 15 * 86400000)
+      .sort((a, b) => Math.abs(Date.parse(a.period) - Date.parse(point.period)) - Math.abs(Date.parse(b.period) - Date.parse(point.period)))[0];
+    if (nearest) nearest.revenueGrowth = point.revenueGrowth;
+    else rows.push({ ...point });
+  }
+  return rows.sort((a, b) => a.period.localeCompare(b.period));
+}
+
 export function financialNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;

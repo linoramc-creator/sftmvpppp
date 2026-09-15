@@ -94,7 +94,7 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
   const rows = allRows.filter((r) => r.value != null);
 
   if (rows.length === 0) {
-    return <EmptyNote text="Yahoo no publica métricas fundamentales para este ETF." />;
+    return <EmptyNote text="Métricas fundamentales no disponibles para este ETF." />;
   }
 
   return (
@@ -105,7 +105,7 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FUNDAMENTALES ETF</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">SNAPSHOT</span>
         </div>
-        <span className="text-[10px] tracking-widest text-muted-foreground/30">YAHOO FINANCE</span>
+        <span className="text-[10px] tracking-widest text-muted-foreground/30"></span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full" style={{ minWidth: 320 }}>
@@ -149,7 +149,7 @@ function SectorBreakdown({ data }: { data: EtfResponse }) {
     : alloc.map((a) => ({ name: a.label, pct: a.pct }));
 
   if (rows.length === 0) {
-    return <EmptyNote text="Yahoo no publica desglose sectorial ni de clases de activo para este ETF." />;
+    return <EmptyNote text="Desglose sectorial y de clases de activo no disponible." />;
   }
 
   return (
@@ -190,7 +190,7 @@ function SectorBreakdown({ data }: { data: EtfResponse }) {
 function CountryBreakdown({ data }: { data: EtfResponse }) {
   const countries = data.countries ?? null;
   if (!countries || countries.length === 0) {
-    return <EmptyNote text="Desglose regional no disponible en ninguna fuente (FMP y Yahoo no publican la cartera por país de este ETF)." />;
+    return <EmptyNote text="Desglose regional no disponible." />;
   }
   const max = Math.max(...countries.map((c) => c.pct));
   return (
@@ -209,7 +209,7 @@ function CountryBreakdown({ data }: { data: EtfResponse }) {
       </div>
       {data.countriesSource === "yahoo-approx" && (
         <div className="text-[9px] text-muted-foreground/40 mt-1 px-1">
-          Aproximado a partir del país de domicilio del top 10 de posiciones (Yahoo), renormalizado — FMP no publica la cartera por país de este ETF.
+          Distribución regional aproximada; no equivale a la cartera completa.
         </div>
       )}
     </div>
@@ -221,7 +221,7 @@ function CountryBreakdown({ data }: { data: EtfResponse }) {
 function HoldingsTable({ data }: { data: EtfResponse }) {
   const holdings = data.holdings ?? [];
   if (holdings.length === 0) {
-    return <EmptyNote text="Yahoo no publica las posiciones principales de este ETF." />;
+    return <EmptyNote text="Posiciones principales no disponibles." />;
   }
   const max = Math.max(...holdings.map((h) => h.pct));
   return (
@@ -323,7 +323,7 @@ function NewsList({ items }: { items: EtfNewsItem[] }) {
           className="block px-3 py-2 hover:bg-primary/3 transition-colors"
         >
           <div className="text-[12px] text-foreground/85 leading-snug" style={{ fontFamily: "var(--font-sans)" }}>{n.title}</div>
-          <div className="text-[9px] text-muted-foreground/40 mt-0.5 font-mono">{n.source} · {n.datetime}</div>
+          <div className="text-[9px] text-muted-foreground/40 mt-0.5 font-mono">{n.datetime}</div>
         </a>
       ))}
     </div>
@@ -333,7 +333,7 @@ function NewsList({ items }: { items: EtfNewsItem[] }) {
 function EtfNews({ data }: { data: EtfResponse }) {
   const news = data.news ?? [];
   if (news.length === 0) {
-    return <EmptyNote text="Sin noticias recientes en ninguna fuente (Finnhub, Yahoo y FMP no devolvieron resultados para este ETF)." />;
+    return <EmptyNote text="Sin noticias recientes disponibles." />;
   }
   return <NewsList items={news} />;
 }
@@ -346,7 +346,7 @@ const fmtFracPctSigned = (v: number | null) =>
 export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
   const tab = data.sectorTab;
   if (!tab) {
-    return <EmptyNote text="Análisis sectorial no disponible (backend sin datos de tema/peers para este ETF)." />;
+    return <EmptyNote text="Análisis sectorial no disponible." />;
   }
   const peers = tab.peers ?? [];
   const benefits = tab.benefits ?? [];
@@ -365,10 +365,10 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="ETFs COMPARABLES DEL MISMO TEMA"
-          subtitle="Fondos líquidos de la misma temática · precios y métricas vía FMP + Yahoo Finance"
+          subtitle="Fondos líquidos de la misma temática"
         />
         {peers.length === 0 ? (
-          <EmptyNote text="Sin datos de ETFs comparables (FMP y Yahoo no devolvieron resultados para los peers del tema)." />
+          <EmptyNote text="No hay ETF comparables disponibles." />
         ) : (
           <div className="border border-border bg-card overflow-x-auto">
             <table className="w-full font-mono min-w-max" style={{ fontSize: "12px" }}>
@@ -409,7 +409,7 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
         <div>
           <SectionTitle
             title="BENEFICIOS OBJETIVOS"
-            subtitle="Reglas fijas sobre datos reales del fondo · cálculo determinista, no generado por IA"
+            subtitle="Características del fondo"
           />
           {benefits.length === 0 ? (
             <EmptyNote text="Ningún criterio objetivo de beneficio se cumple con los datos disponibles." />
@@ -427,7 +427,7 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
         <div>
           <SectionTitle
             title="RIESGOS OBJETIVOS"
-            subtitle="Exposición real × heurísticas fijas de riesgo · cálculo determinista, no generado por IA"
+            subtitle="Riesgo estimado de la exposición"
           />
           {risks.length === 0 ? (
             <EmptyNote text="Ningún criterio objetivo de riesgo se cumple con los datos disponibles." />
@@ -447,10 +447,10 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="NOTICIAS DEL SECTOR"
-          subtitle={`Últimos 30 días · ${tab.newsSource === "fmp" ? "FMP" : tab.newsSource === "yahoo" ? "Yahoo Finance" : "sin fuente"}`}
+          subtitle="Últimas noticias"
         />
         {news.length === 0 ? (
-          <EmptyNote text="Sin noticias del sector en ninguna fuente (FMP y Yahoo no devolvieron resultados)." />
+          <EmptyNote text="Sin noticias sectoriales disponibles." />
         ) : (
           <NewsList items={news} />
         )}
@@ -475,7 +475,7 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="EXPOSICIÓN POR SECTOR / CLASE DE ACTIVO"
-          subtitle={`Pesos publicados por el proveedor del fondo (vía ${data.sectorsSource === "fmp" ? "FMP" : "Yahoo Finance"})`}
+          subtitle="Distribución sectorial"
         />
         <SectorBreakdown data={data} />
       </div>
@@ -485,8 +485,8 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
           title="DESGLOSE REGIONAL"
           subtitle={
             data.countriesSource === "yahoo-approx"
-              ? "Peso por país estimado desde el top 10 de posiciones (vía Yahoo)"
-              : "Peso por país de la cartera (vía FMP)"
+              ? "Distribución regional aproximada"
+              : "Distribución regional de la cartera"
           }
         />
         <CountryBreakdown data={data} />
@@ -503,7 +503,7 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="CAPA DE RIESGO GEOPOLÍTICO"
-          subtitle="Exposición real (sector/país) × severidad heurística fija · cálculo determinista y auditable, no generado por IA"
+          subtitle="Riesgo estimado por sector y región"
         />
         <GeoRiskChart risks={data.geoRisks ?? []} />
       </div>
@@ -511,11 +511,7 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
       <div>
         <SectionTitle
           title="NOTICIAS RELEVANTES"
-          subtitle={`Últimos 30 días · ${
-            data.newsSource === "yahoo" ? "Yahoo Finance"
-            : data.newsSource === "fmp" ? "FMP"
-            : "Finnhub"
-          }`}
+          subtitle="Últimas noticias"
         />
         <EtfNews data={data} />
       </div>

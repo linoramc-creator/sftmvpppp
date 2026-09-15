@@ -194,7 +194,24 @@ export interface TickerFundamentals {
 // Fetches the dedicated, chart-ready fundamentals object. Returns null on network
 // error; returns an object with `found: false` when the ticker doesn't exist —
 // callers should branch on `.found` to show a fallback UI.
-export async function fetchTickerFundamentals(symbol: string): Promise<TickerFundamentals | null> {
+const fundamentalsCache = new Map<string, { at: number; value: TickerFundamentals }>();
+const fundamentalsPending = new Map<string, Promise<TickerFundamentals | null>>();
+export function fetchTickerFundamentals(symbol: string): Promise<TickerFundamentals | null> {
+  const key = symbol.trim().toUpperCase();
+  const entry = fundamentalsCache.get(key);
+  if (entry && Date.now() - entry.at < 300000) return Promise.resolve(entry.value);
+  if (fundamentalsPending.has(key)) return fundamentalsPending.get(key)!;
+  const request = fetchTickerFundamentalsUncached(key).then(value => {
+    if (value?.found) {
+      if (fundamentalsCache.size >= 50) fundamentalsCache.delete(fundamentalsCache.keys().next().value!);
+      fundamentalsCache.set(key, { at: Date.now(), value });
+    }
+    return value;
+  }).finally(() => fundamentalsPending.delete(key));
+  fundamentalsPending.set(key, request);
+  return request;
+}
+async function fetchTickerFundamentalsUncached(symbol: string): Promise<TickerFundamentals | null> {
   try {
     const resp = await fetch(ANALYZE_URL, {
       method: "POST",

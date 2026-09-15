@@ -36,7 +36,7 @@ export function OptionsSubSection({ ticker }: { ticker: string }) {
         setMeta(m);
         const expiries = m.expiries ?? [];
         if (expiries.length === 0) {
-          setError("Este ticker no tiene opciones cotizadas (o Yahoo no publica su cadena).");
+          setError("No hay opciones cotizadas disponibles para este activo.");
           setLoading(false);
           return;
         }
@@ -94,7 +94,7 @@ export function OptionsSubSection({ ticker }: { ticker: string }) {
   if (!isOptionsConfigured()) {
     return (
       <div className="py-8 text-center text-[11px] text-muted-foreground/50 border border-border bg-card">
-        Backend de Supabase no configurado — define VITE_SUPABASE_URL para habilitar las opciones.
+        Las opciones no están disponibles temporalmente.
       </div>
     );
   }
