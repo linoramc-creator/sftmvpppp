@@ -45,6 +45,16 @@ test('news limit is a maximum, never padded with irrelevant articles', () => {
   assert.ok(curateNews(rows, 'Apple', Date.parse('2026-09-15')).length <= 5);
   assert.deepEqual(curateNews(rows, 'Treasury', Date.parse('2026-09-15')), []);
 });
+test('news excludes passing mentions and repeated coverage of the same product launch', () => {
+  const rows = [
+    { title: 'Oracle revenue rises', excerpt: 'Apple also reported results.', url: 'https://example.com/1', source: 'test', date: '2026-09-14' },
+    { title: 'Apple unveils new iPhone', excerpt: 'Apple announced a major product launch at its headquarters.', url: 'https://example.com/2', source: 'test', date: '2026-09-14' },
+    { title: 'Analysts discuss Apple iPhone launch pricing', url: 'https://example.com/3', source: 'test', date: '2026-09-13' },
+  ];
+  const filtered = curateNews(rows, 'Apple AAPL', Date.parse('2026-09-15'));
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].url, rows[1].url);
+});
 test('segments exclude totals, preserve eliminations and require numeric reported values', () => {
   assert.deepEqual(segmentPeriods([{ date: '2025-09-30', reportedCurrency: 'USD', data: { Product: 90, Service: 20, Eliminations: -10, Total: 100, Unknown: 'N/D' } }]), [{ date: '2025-09-30', currency: 'USD', segments: [{ name: 'Product', value: 90 }, { name: 'Service', value: 20 }, { name: 'Eliminations', value: -10 }] }]);
   assert.deepEqual(segmentPeriods({ error: 'plan not available' }), []);

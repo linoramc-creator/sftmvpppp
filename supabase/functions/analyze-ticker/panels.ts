@@ -48,16 +48,18 @@ async function get(url: string, init?: RequestInit): Promise<Row | Row[] | null>
 export function curateNews(articles: Article[], subject: string, now = Date.now(), limit = 5): Article[] {
   const stop = new Set(['news', 'latest', 'sector', 'etf', 'inc', 'corp', 'the', 'and', 'of', 'de', 'del', 'la']);
   const tokens = subject.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter(t => !stop.has(t)) ?? [];
-  const noise = /\b(stocks? to buy|should you buy|best stocks|millionaire|motley fool|sponsored|promoted|price prediction|top \d+ stocks|buy now|worth buying)\b/i;
+  const noise = /\b(stocks? to buy|should you buy|best stocks|millionaire|motley fool|sponsored|promoted|price prediction|top \d+ stocks|buy now|worth buying|stock alert|urgent message)\b/i;
   const catalyst = /earnings|revenue|guidance|merger|acquisition|regulat|tariff|lawsuit|approval|contract|dividend|buyback|rates?|inflation|flows?|holdings?|launch|results|profit|sales|yield|policy|outflow|inflow|resultados|ingresos|beneficio|tipos|fusi[oó]n|arancel|demanda|contrato|inversi[oó]n|recort|crecimiento|producci[oó]n|fund|fondo/i;
   const seenUrls = new Set<string>();
+  const launches = new Map<string, number>();
   const titles: Set<string>[] = [];
   return articles.filter(a => {
     const date = Date.parse(a.date);
     if (!a.title || !Number.isFinite(date) || date < now - 14 * 86400000 || date > now + 86400000 || noise.test(a.title)) return false;
     try { if (!['http:', 'https:'].includes(new URL(a.url).protocol)) return false; } catch { return false; }
     const content = `${a.title} ${a.excerpt ?? ''}`.toLowerCase();
-    const words = new Set(content.match(/[\p{L}\p{N}]+/gu) ?? []);
+    // A passing mention in a market roundup is not direct coverage of the subject.
+    const words = new Set(a.title.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
     return tokens.some(t => words.has(t)) && catalyst.test(content);
   }).sort((a, b) => b.date.localeCompare(a.date)).filter(a => {
     const url = new URL(a.url); url.search = ''; url.hash = '';
@@ -66,9 +68,16 @@ export function curateNews(articles: Article[], subject: string, now = Date.now(
       const overlap = [...words].filter(word => other.has(word)).length;
       return overlap / Math.max(1, Math.min(words.size, other.size)) >= 0.75;
     });
-    if (duplicate) return false;
+    const product = a.title.toLowerCase().match(/\b(iphone|ipad|airpods|watch|foldable)\b/)?.[1];
+    const launch = product && /launch|unveil|debut|lanzamiento/i.test(`${a.title} ${a.excerpt ?? ''}`);
+    const time = Date.parse(a.date);
+    if (duplicate || (launch && launches.has(product!) && Math.abs(time - launches.get(product!)!) < 4 * 86400000)) return false;
+    if (launch) launches.set(product!, time);
     seenUrls.add(url.href); titles.push(words); return true;
-  }).slice(0, limit);
+  }).slice(0, limit).map(a => ({ ...a, excerpt: (a.excerpt ?? '').replace(/[#*_]/g, '').split(/(?<=[.!?])\s+/).filter(sentence => {
+    const words = new Set(sentence.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+    return tokens.some(t => words.has(t)) && sentence.length > 40 && !noise.test(sentence);
+  }).slice(0, 1).join('').slice(0, 360) }));
 }
 async function search(query: string, key: string, news = false, domains: string[] = []): Promise<Article[]> {
   if (!key) return [];
@@ -88,7 +97,7 @@ export async function newsPanel(subject: string, sector: boolean, env: Env): Pro
     const rows: Article[] = (data?.news ?? []).map((r: Row) => ({ title: r.title, url: r.link, source: r.publisher, date: day(r.providerPublishTime) ?? '' }));
     const trusted = (a: Article) => { try { return NEWS_DOMAINS.some(domain => new URL(a.url).hostname === domain || new URL(a.url).hostname.endsWith('.' + domain)); } catch { return false; } };
     let articles = curateNews(rows.filter(trusted), `${subject} ${company}`);
-    if (articles.length < 3) articles = curateNews([...articles, ...await search(`${subject} ${sector ? company : company} latest earnings regulation financial news`, env.TAVILY_KEY, true, NEWS_DOMAINS)].filter(trusted), `${subject} ${company}`);
+    if (articles.length < 3) articles = curateNews([...articles, ...await search(`${subject} ${company} latest earnings regulation financial news`, env.TAVILY_KEY, true, NEWS_DOMAINS)].filter(trusted), `${subject} ${company}`);
     return { fetchedAt: new Date().toISOString(), articles };
   });
 }
