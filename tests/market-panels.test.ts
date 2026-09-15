@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGrowthChartData, financialNumber } from '../Terminal_Export/src/lib/revenue-growth.ts';
-import { curateNews, segmentPeriods, cached, bondsPanel, businessPanel, institutionalPanel, extractChannels } from '../supabase/functions/analyze-ticker/panels.ts';
+import { curateNews, segmentPeriods, cached, bondsPanel, businessPanel, institutionalPanel, extractChannels, newsPanel } from '../supabase/functions/analyze-ticker/panels.ts';
 
 test('growth matches prior fiscal year despite ordering and missing intervening quarters', () => {
   const result = buildGrowthChartData([
@@ -55,6 +55,10 @@ test('news excludes passing mentions and repeated coverage of the same product l
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].url, rows[1].url);
 });
+test('corporate celebrations are not interest-rate news and awards are excluded', () => {
+  const article = { title: 'Apple celebrates its corporate anniversary', excerpt: 'Apple celebrated a decorated history with its employees.', url: 'https://example.com/celebration', source: 'test', date: '2026-09-14' };
+  assert.deepEqual(curateNews([article, { ...article, title: 'Apple TV wins Emmy awards', excerpt: 'Apple launches an awards campaign.' }], 'Apple', Date.parse('2026-09-15')), []);
+});
 test('segments exclude totals, preserve eliminations and require numeric reported values', () => {
   assert.deepEqual(segmentPeriods([{ date: '2025-09-30', reportedCurrency: 'USD', data: { Product: 90, Service: 20, Eliminations: -10, Total: 100, Unknown: 'N/D' } }]), [{ date: '2025-09-30', currency: 'USD', segments: [{ name: 'Product', value: 90 }, { name: 'Service', value: 20 }, { name: 'Eliminations', value: -10 }] }]);
   assert.deepEqual(segmentPeriods({ error: 'plan not available' }), []);
@@ -87,5 +91,15 @@ test('panels return explicit missing data when providers fail, without fabricate
     const institutions = await institutionalPanel('TEST', env, deps);
     assert.equal(institutions.institutionalPct, null);
     assert.deepEqual(institutions.holders, []);
+  } finally { globalThis.fetch = original; }
+});
+test('news resolves company names independently when the search quote lookup fails', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async input => String(input).includes('tavily.com')
+    ? Response.json({ results: [{ title: 'Example Corporation revenue grows', url: 'https://www.reuters.com/business/example', published_date: new Date().toISOString(), content: 'Example Corporation reported higher revenue in its latest results.' }] })
+    : new Response('', { status: 429 });
+  try {
+    const result = await newsPanel('EXAMPLE', false, { FMP_KEY: '', FRED_KEY: '', FINNHUB_KEY: '', TAVILY_KEY: 'test-only' }, { summary: async () => ({ quoteType: { longName: 'Example Corporation' } }) });
+    assert.equal(result.articles.length, 1);
   } finally { globalThis.fetch = original; }
 });

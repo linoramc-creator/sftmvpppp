@@ -3964,7 +3964,7 @@ Deno.serve(async (req) => {
       const deps = { summary: eYahooQuoteSummary };
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       const subject = typeof body.subject === "string" ? body.subject.trim() : "";
-      if (body.panel === "news" && subject.length > 0 && subject.length <= 80) return panelJson(await newsPanel(subject, body.sector === true, env));
+      if (body.panel === "news" && subject.length > 0 && subject.length <= 80) return panelJson(await newsPanel(subject, body.sector === true, env, deps));
       if (!/^[A-Za-z0-9.^-]{1,12}$/.test(subject)) return jsonError("Símbolo inválido", 400);
       if (body.panel === "business") return panelJson(await businessPanel(subject.toUpperCase(), env, deps));
       if (body.panel === "institutional") return panelJson(await institutionalPanel(subject.toUpperCase(), env, deps));
