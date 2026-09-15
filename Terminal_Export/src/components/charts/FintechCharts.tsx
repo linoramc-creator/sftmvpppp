@@ -185,7 +185,7 @@ export const GrowthChart = ({ data }: { data: GrowthData[] }) => (
       {Grid}{XA}{PctY}{Zero}
       <Tooltip contentStyle={ttStyle} formatter={pctFmt} cursor={{ stroke: '#334155' }} />
       {Leg}
-      {L('revenueGrowth', 'Revenue Growth YoY', C.growth)}
+      {L('revenueGrowth', 'Ingresos · variación interanual (%)', C.growth, { type: 'linear', connectNulls: false })}
     </LineChart>
   </Frame>
 );

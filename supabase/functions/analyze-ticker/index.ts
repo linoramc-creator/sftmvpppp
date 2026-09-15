@@ -1,19 +1,35 @@
+import { bondsPanel, businessPanel, institutionalPanel, newsPanel, curateNews, cached, fmpHolders } from "./panels.ts";
 // ============================================================
 // UNIFIED ANALYZE FUNCTION
 // Handles both TICKER analysis (body: { ticker: "AAPL" })
 // and    SECTOR analysis  (body: { sector: "Semiconductores" })
 // ============================================================
 
+function priorFiscalDate(dates: string[], current: string): string | undefined {
+  const time = Date.parse(current);
+  return dates.filter(date => { const days = (time - Date.parse(date)) / 86400000; return days >= 350 && days <= 380; })
+    .sort((a, b) => Math.abs(time - Date.parse(a) - 365.25 * 86400000) - Math.abs(time - Date.parse(b) - 365.25 * 86400000))[0];
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function panelJson(value: unknown): Response {
+  return new Response(JSON.stringify(value), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+}
+
 // =====================================================
 // SHARED HELPERS
 // =====================================================
 
-async function fetchTavilySearch(
+async function fetchTavilySearch(query: string, key: string, maxResults = 5, days?: number, topic?: string, contentLen = 150) {
+  return cached(`analysis-search:${query}:${maxResults}:${days}:${topic}:${contentLen}`, topic === "news" ? 3600000 : 21600000,
+    () => fetchTavilySearchUncached(query, key, maxResults, days, topic, contentLen));
+}
+
+async function fetchTavilySearchUncached(
   query: string,
   key: string,
   maxResults = 5,
@@ -350,7 +366,7 @@ async function fetchYahooQuarterlyFinancials(ticker: string): Promise<any[]> {
     const totalAssets = pick("quarterlyTotalAssets", date);
     const netDebt     = (totalDebt != null && cash != null) ? totalDebt - cash : null;
 
-    const prevDate = allDates[idx + 4];
+    const prevDate = priorFiscalDate(allDates, date);
     const prevRev  = prevDate ? pick("quarterlyTotalRevenue", prevDate) : null;
     const revGrowth = (rev != null && prevRev != null && Math.abs(prevRev) > 0)
       ? `${((rev - prevRev) / Math.abs(prevRev) * 100) >= 0 ? "+" : ""}${((rev - prevRev) / Math.abs(prevRev) * 100).toFixed(1)}%`
@@ -701,7 +717,7 @@ async function fetchFmpQuarterlyFinancials(ticker: string, key: string): Promise
       const equity    = bs.totalStockholdersEquity ?? bs.totalEquity ?? bs.stockholdersEquity ?? null;
       const totalAssets = bs.totalAssets ?? null;
 
-      const prevQ = incomeList[idx + 4] as any;
+      const prevQ = incomeList.find((row: any) => row.date === priorFiscalDate(incomeList.map((r: any) => r.date), q.date)) as any;
       const revGrowth = (rev && prevQ?.revenue && Math.abs(prevQ.revenue) > 0)
         ? `${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100) >= 0 ? "+" : ""}${((rev - prevQ.revenue) / Math.abs(prevQ.revenue) * 100).toFixed(1)}%`
         : "N/D";
@@ -849,7 +865,7 @@ async function fetchTwelveDataQuarterlyFinancials(ticker: string, key: string): 
       const totalAssets = num(bs?.assets?.total_assets)
                        ?? num(bs?.total_assets);
 
-      const prevQ = sorted[idx + 4];
+      const prevQ = sorted.find((row: any) => row.fiscal_date === priorFiscalDate(sorted.map((r: any) => r.fiscal_date), q.fiscal_date));
       const prevRev = num(prevQ?.sales);
       const revGrowth = (rev != null && prevRev != null && Math.abs(prevRev) > 0)
         ? `${((rev - prevRev) / Math.abs(prevRev) * 100) >= 0 ? "+" : ""}${((rev - prevRev) / Math.abs(prevRev) * 100).toFixed(1)}%`
@@ -1021,7 +1037,7 @@ ${context}`;
       const equity      = typeof q.equity === "number" ? q.equity : null;
       const totalAssets = typeof q.totalAssets === "number" ? q.totalAssets : null;
 
-      const prevQ = parsed[idx + 4];
+      const prevQ = parsed.find((row: any) => row.period === priorFiscalDate(parsed.map((r: any) => r.period), q.period));
       const prevRev = typeof prevQ?.revenue === "number" ? prevQ.revenue : null;
       const revGrowth = (rev != null && prevRev != null && Math.abs(prevRev) > 0)
         ? `${((rev - prevRev) / Math.abs(prevRev) * 100) >= 0 ? "+" : ""}${((rev - prevRev) / Math.abs(prevRev) * 100).toFixed(1)}%`
@@ -1139,7 +1155,7 @@ async function fetchFmpData(ticker: string, key: string): Promise<string> {
 
     const [targetRaw, institutionalRaw, insiderRaw, analystRaw] = await Promise.all([
       fetch(`${base}/price-target-consensus/${t}?apikey=${key}`).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${base}/institutional-holder/${t}?apikey=${key}`).then(r => r.ok ? r.json() : []).catch(() => []),
+      fmpHolders(ticker, key),
       fetch(`${base}/insider-trading?symbol=${t}&limit=5&apikey=${key}`).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch(`${base}/analyst-stock-recommendations/${t}?limit=1&apikey=${key}`).then(r => r.ok ? r.json() : []).catch(() => []),
     ]);
@@ -1610,8 +1626,8 @@ Añade un párrafo analítico de 4-5 líneas sobre los fundamentales más releva
 - ### Posicionamiento Competitivo: 3-4 líneas sobre cuota de mercado y ventajas diferenciales.
 
 ## Noticias
-- ### Noticias Corporativas Recientes: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL proporcionada en los datos de contexto ([URL: ...]) para enlazar directamente la fuente en formato markdown [texto](url). Si no hay URL disponible para una noticia, usa "(Fuente)" sin enlace.
-- ### Noticias del Sector: 3-4 noticias. Mismo formato con enlace si URL disponible.
+- ### Noticias Corporativas Recientes: un máximo de 4 noticias relevantes, publicadas en los últimos 14 días, sin duplicados ni recomendaciones genéricas de compra. Cada noticia debe tener fecha y URL verificables del contexto; si no hay, indícalo sin inventar. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL proporcionada en los datos de contexto ([URL: ...]) para enlazar directamente la fuente en formato markdown [texto](url). Si no hay URL disponible para una noticia, usa "(Fuente)" sin enlace.
+- ### Noticias del Sector: como máximo 1 noticia adicional directamente relevante. Mismo formato con enlace si URL disponible.
 - ### Contexto Macro Relevante: 4-5 líneas sobre entorno macro/geopolítico con impacto directo. Integra indicadores FRED (tipos, inflación, yield 10Y).
 
 ## Señales Técnicas
@@ -1768,7 +1784,7 @@ Genera un informe sectorial completo y detallado sobre el sector "${sector}". Us
 - Para cada ETF, 1-2 líneas sobre ventajas, liquidez, para qué tipo de inversor.
 
 ## Noticias y Tendencias
-- ### Noticias Recientes: 5-7 noticias importantes (últimas 4 semanas). Formato: "- **Titular:** impacto 2-3 líneas."
+- ### Noticias Recientes: un máximo de 4 noticias materiales con fecha y URL del contexto (últimos 14 días); excluye duplicados, publicidad y listas de inversión. Formato: "- **Titular:** impacto 2-3 líneas."
 - ### Tendencias Estructurales: 5-7 viñetas sobre megatendencias que definen el sector a largo plazo.
 - ### Disruptores e Innovaciones: 3-4 viñetas sobre tecnologías o modelos que están transformando el sector.
 
@@ -1843,7 +1859,7 @@ PROHIBIDO en esta sección: red flags automáticos, actividad insider, tenencias
 - ### Catalizadores (4-6 viñetas): divide en **Corto plazo (0-3m)**, **Medio plazo (3-12m)**, **Largo plazo (+12m)**.
 
 ## Noticias
-- ### Noticias del Fondo y su Temática: 5-7 noticias. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL del contexto si está disponible; si no, "(Fuente)" sin enlace.
+- ### Noticias del Fondo y su Temática: un máximo de 4 noticias materiales con fecha y URL del contexto (últimos 14 días); sin publicidad ni duplicados. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL del contexto si está disponible; si no, "(Fuente)" sin enlace.
 - ### Contexto Macro Relevante: 4-5 líneas integrando indicadores FRED (tipos, inflación, yield 10Y).
 
 ## Señales Técnicas
@@ -1939,22 +1955,22 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
           fetchTwelveData(cleanTicker, env.TWELVE_KEY),
           fetchTechnicalIndicators(cleanTicker, env.TWELVE_KEY),
           env.TAVILY_KEY
-            ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions 2025 2026`, env.TAVILY_KEY, 3, 60, undefined, 180)
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 3, 60, undefined, 180)
             : Promise.resolve(null),
           env.TAVILY_KEY
-            ? fetchTavilySearch(`${companyName} ${cleanTicker} news latest 2025 2026`, env.TAVILY_KEY, 4, 7, "news", 150)
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} news latest ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 4, 7, "news", 150)
             : Promise.resolve(null),
           env.TAVILY_KEY && sector
-            ? fetchTavilySearch(`${sector} sector outlook trends 2025 2026`, env.TAVILY_KEY, 3, 14, "news", 130)
+            ? fetchTavilySearch(`${sector} sector outlook trends ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 3, 14, "news", 130)
             : Promise.resolve(null),
           !etfMode && env.TAVILY_KEY
-            ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results 2025`, env.TAVILY_KEY, 3, undefined, undefined, 140)
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} quarterly earnings revenue EPS results ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 3, undefined, undefined, 140)
             : Promise.resolve(null),
           !etfMode && env.TAVILY_KEY && peers.length > 0
-            ? fetchTavilySearch(`${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive 2025`, env.TAVILY_KEY, 2, undefined, undefined, 120)
+            ? fetchTavilySearch(`${companyName} vs ${peers.slice(0, 2).join(" ")} market share competitive ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 2, undefined, undefined, 120)
             : Promise.resolve(null),
           env.TAVILY_KEY
-            ? fetchTavilySearch(`${companyName} ${cleanTicker} ${etfMode ? "ETF flows holdings outlook" : "risks catalysts growth headwinds"} 2025 2026`, env.TAVILY_KEY, 4, 30, "news", 160)
+            ? fetchTavilySearch(`${companyName} ${cleanTicker} ${etfMode ? "ETF flows holdings outlook" : "risks catalysts growth headwinds"} ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 4, 30, "news", 160)
             : Promise.resolve(null),
           etfMode ? Promise.resolve(null) : fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
         ]);
@@ -2045,7 +2061,7 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secci
 
         // Step 6: Call Gemini (Pro by default — keepalives above allow unlimited generation time)
         const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
-        if (!gemini.ok) {
+        if (gemini.ok === false) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: gemini.error })}\n\n`));
           return;
         }
@@ -2104,12 +2120,12 @@ async function handleSectorAnalysis(sector: string, env: EnvKeys): Promise<Respo
           regulatoryContext,
           fredContext,
         ] = await Promise.all([
-          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector news latest 2025 2026`, env.TAVILY_KEY, 6, 30, "news", 180) : Promise.resolve({ answer: "", results: [] }),
-          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector outlook trends growth forecast 2025 2026`, env.TAVILY_KEY, 5, undefined, undefined, 180) : Promise.resolve({ answer: "", results: [] }),
-          env.TAVILY_KEY ? fetchTavilySearch(`top companies ${cleanSector} sector leaders market cap 2025`, env.TAVILY_KEY, 5, undefined, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
-          env.TAVILY_KEY ? fetchTavilySearch(`best ETF ${cleanSector} sector invest 2025`, env.TAVILY_KEY, 4, undefined, undefined, 140) : Promise.resolve({ answer: "", results: [] }),
-          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector interest rates inflation tariffs macro impact 2025`, env.TAVILY_KEY, 4, 60, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
-          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector regulation policy geopolitical risk 2025 2026`, env.TAVILY_KEY, 3, 90, undefined, 150) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector news latest ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 6, 30, "news", 180) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector outlook trends growth forecast ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 5, undefined, undefined, 180) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`top companies ${cleanSector} sector leaders market cap ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 5, undefined, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`best ETF ${cleanSector} sector invest ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 4, undefined, undefined, 140) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector interest rates inflation tariffs macro impact ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 4, 60, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
+          env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector regulation policy geopolitical risk ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 3, 90, undefined, 150) : Promise.resolve({ answer: "", results: [] }),
           fetchFredData(env.FRED_KEY),
         ]);
 
@@ -2141,7 +2157,7 @@ Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones 
         ];
 
         const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
-        if (!gemini.ok) {
+        if (gemini.ok === false) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: gemini.error })}\n\n`));
           return;
         }
@@ -2251,8 +2267,9 @@ async function handleFundamentals(ticker: string): Promise<Response> {
   const grossMargin = revenue.map((r, i) => (r != null && r !== 0 && grossP[i] != null) ? (grossP[i]! / r) * 100 : null);
   const netMargin   = revenue.map((r, i) => (r != null && r !== 0 && netIncome[i] != null) ? (netIncome[i]! / r) * 100 : null);
   const revenueGrowth = revenue.map((r, i) => {
-    const prev = revenue[i - 4];
-    return (i >= 4 && r != null && prev != null && Math.abs(prev) > 0) ? ((r - prev) / Math.abs(prev)) * 100 : null;
+    const previousDate = priorFiscalDate(periodsIso, periodsIso[i]);
+    const prev = previousDate ? pick("quarterlyTotalRevenue", previousDate) : null;
+    return (r != null && prev != null && Math.abs(prev) > 0) ? ((r - prev) / Math.abs(prev)) * 100 : null;
   });
 
   // Forward-fill every monetary series so chart lines are continuous; ratios
@@ -2899,10 +2916,10 @@ function eNum(v: unknown): number | null {
   return null;
 }
 
-async function eYahooQuoteSummary(ticker: string): Promise<Record<string, any> | null> {
+async function eYahooQuoteSummary(ticker: string, requestedModules?: string): Promise<Record<string, any> | null> {
   const auth = await yfGetAuth();
   const sym = encodeURIComponent(ticker.toUpperCase());
-  const modules = "quoteType,fundProfile,topHoldings,summaryDetail,defaultKeyStatistics,price";
+  const modules = requestedModules ?? "quoteType,fundProfile,topHoldings,summaryDetail,defaultKeyStatistics,price";
   let url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}`;
   if (auth?.crumb) url += `&crumb=${encodeURIComponent(auth.crumb)}`;
   try {
@@ -3339,6 +3356,8 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     }
   }
 
+  news = curateNews(news.map(n => ({ ...n, date: n.datetime })), `${ticker} ${summary.quoteType?.longName ?? ""}`).map(n => ({ title: n.title, url: n.url, source: n.source, datetime: n.date }));
+
   // Geopolitical risk layer: real exposure × fixed heuristic score.
   const geoRisks: { factor: string; kind: "sector" | "país"; exposurePct: number; score: number; contribution: number; note: string }[] = [];
   for (const s of sectors.slice(0, 6)) {
@@ -3375,6 +3394,7 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     sectorNews = await eYahooNews(themeCfg.query);
     if (sectorNews.length) sectorNewsSource = "yahoo";
   }
+  sectorNews = curateNews(sectorNews.map(n => ({ ...n, date: n.datetime })), themeCfg.query).map(n => ({ title: n.title, url: n.url, source: n.source, datetime: n.date }));
   const insights = eSectorInsights({
     fundamentals: {
       expenseRatio: fundamentals.expenseRatio,
@@ -3939,6 +3959,17 @@ Deno.serve(async (req) => {
       FRED_KEY:       Deno.env.get("Fred")        ?? "",
       TWELVE_KEY:     Deno.env.get("Twelve Data") ?? "",
     };
+
+    if (typeof body.panel === "string") {
+      const deps = { summary: eYahooQuoteSummary };
+      if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
+      const subject = typeof body.subject === "string" ? body.subject.trim() : "";
+      if (body.panel === "news" && subject.length > 0 && subject.length <= 80) return panelJson(await newsPanel(subject, body.sector === true, env));
+      if (!/^[A-Za-z0-9.^-]{1,12}$/.test(subject)) return jsonError("Símbolo inválido", 400);
+      if (body.panel === "business") return panelJson(await businessPanel(subject.toUpperCase(), env, deps));
+      if (body.panel === "institutional") return panelJson(await institutionalPanel(subject.toUpperCase(), env, deps));
+      return jsonError("Panel inválido", 400);
+    }
 
     // Market data — no Gemini needed
     if (body.marketData === true) {

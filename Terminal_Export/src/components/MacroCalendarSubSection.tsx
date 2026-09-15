@@ -95,6 +95,8 @@ function EventsTable({ events, emptyText }: { events: MacroEvent[]; emptyText: s
 export function MacroCalendarSubSection() {
   const [data, setData]       = useState<MacroCalendarResponse | null>(macroCache?.data ?? null);
   const [loading, setLoading] = useState(!macroCache);
+  const [expanded, setExpanded] = useState(false);
+  const [region, setRegion] = useState("all");
   const [error, setError]     = useState(false);
 
   useEffect(() => {
@@ -133,8 +135,14 @@ export function MacroCalendarSubSection() {
     );
   }
 
-  const events = data?.events ?? [];
-  if (events.length === 0) {
+  const seen = new Set<string>();
+  const events = (data?.events ?? []).filter(e => {
+    const id = [e.country, e.date, e.event.trim().toLowerCase()].join('|');
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return (expanded || e.impact === "High") && (region === "all" || /^(US|USA|United States|Estados Unidos)$/i.test(e.country));
+  });
+  if (!data?.events?.length) {
     const diag = data?.diagnostics ?? {};
     const SRC_LABEL: Record<string, string> = { fmp: "FMP", finnhub: "Finnhub", fred: "FRED" };
     const rows = Object.entries(diag);
@@ -166,13 +174,18 @@ export function MacroCalendarSubSection() {
 
   // Split by today's date (UTC) — recent prints vs what's coming.
   const todayIso = new Date().toISOString().slice(0, 10);
-  const past = events.filter((e) => e.date.slice(0, 10) < todayIso);
-  const upcoming = events.filter((e) => e.date.slice(0, 10) >= todayIso);
+  const past = events.filter((e) => e.date.slice(0, 10) < todayIso).sort((a, b) => a.date.localeCompare(b.date)).slice(expanded ? -30 : -5);
+  const upcoming = events.filter((e) => e.date.slice(0, 10) >= todayIso).sort((a, b) => a.date.localeCompare(b.date)).slice(0, expanded ? 30 : 10);
 
   return (
     <div className="space-y-6">
+      <div className="flex gap-3 flex-wrap text-xs">
+        <button className="border border-primary/40 px-3 py-2 text-primary" onClick={() => setExpanded(!expanded)}>{expanded ? "Ver selección esencial" : "Ampliar: incluir impacto medio"}</button>
+        <select aria-label="Región del calendario" className="bg-background border border-border px-3" value={region} onChange={e => setRegion(e.target.value)}><option value="all">Todas las regiones</option><option value="us">EE. UU.</option></select>
+        <span className="text-muted-foreground self-center">{expanded ? "Hasta 30 próximos y 30 recientes" : "Hasta 10 próximos y 5 recientes"} · sin duplicados</span>
+      </div>
       <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono">
-        <span className="text-muted-foreground/50">EVENTOS ECONÓMICOS · ALTA Y MEDIA IMPORTANCIA</span>
+        <span className="text-muted-foreground/50">EVENTOS ECONÓMICOS · {expanded ? "ALTA Y MEDIA IMPORTANCIA" : "ALTO IMPACTO"}</span>
         <span className="text-primary/70 border border-primary/25 px-1.5 py-0.5">
           {data?.source === "finnhub" ? "FINNHUB" : data?.source === "fred" ? "FRED · EE.UU." : "FMP"}
         </span>

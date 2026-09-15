@@ -1,3 +1,5 @@
+import { buildGrowthChartData } from "@/lib/revenue-growth";
+import { BondsView, BusinessView, InstitutionalView, NewsView } from "@/components/MarketPanels";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
@@ -42,6 +44,7 @@ function persistReports(reports: SavedReport[]): boolean {
 const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
   "Resumen Ejecutivo":      { label: "RESUMEN EJECUTIVO",     category: "EXECUTIVE SUMMARY"     },
   "Finanzas":               { label: "FUNDAMENTALES",          category: "VALUATION & FINANCIALS" },
+  "Desglose de ingresos": { label: "DESGLOSE DE INGRESOS", category: "BUSINESS SEGMENTS" },
   "Opciones":               { label: "OPCIONES",               category: "OPTIONS FLOW"           },
   "Valoración":             { label: "VALORACIÓN",             category: "VALUATION"              },
   "Sector":                 { label: "SECTOR",                 category: "SECTOR & COMPS"         },
@@ -205,24 +208,6 @@ function buildMarginsChartData(data: QuarterlyPeriod[]): MarginsData[] {
     .filter((d): d is MarginsData => d !== null);
 }
 
-function buildGrowthChartData(data: QuarterlyPeriod[]): GrowthData[] {
-  const reversed = [...data].reverse(); // oldest → newest
-  return reversed
-    .map((q, idx) => {
-      let revenueGrowth = parsePercent(q.revenueGrowth);
-      // Client-side fallback: compute YoY from revenue when backend returns N/D
-      if (revenueGrowth == null && idx >= 4) {
-        const curr = parseMoney(q.revenue);
-        const prev = parseMoney(reversed[idx - 4].revenue);
-        if (curr != null && prev != null && Math.abs(prev) > 0) {
-          revenueGrowth = ((curr - prev) / Math.abs(prev)) * 100;
-        }
-      }
-      if (revenueGrowth == null) return null;
-      return { period: fmtPeriod(q.period), revenueGrowth };
-    })
-    .filter((d): d is GrowthData => d !== null);
-}
 
 // Extract the "| Métrica | Valor |" markdown table from analysis text
 function extractCurrentMetrics(content: string): { label: string; value: string }[] {
@@ -281,7 +266,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"ticker" | "etf" | "sector" | "guardados">("ticker");
+  const [navTab, setNavTab] = useState<"ticker" | "etf" | "sector" | "bonos" | "guardados">("ticker");
 
   const [clock, setClock] = useState("");
 
@@ -548,16 +533,17 @@ const Index = () => {
       <header className="border-b border-border bg-card">
         <div className="flex items-center justify-between px-5 h-10">
           {/* Left: logo + nav */}
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-6 min-w-0 flex-1">
+            <div className="hidden sm:flex items-center gap-2 shrink-0">
               <span className="w-2 h-2 rounded-full bg-primary inline-block" />
               <span className="text-primary font-bold text-xs tracking-[0.25em]">TERMINAL</span>
             </div>
-            <nav className="flex">
+            <nav className="flex min-w-0 overflow-x-auto" aria-label="Apartados principales">
               {([
                 { label: "TICKER",    key: "ticker"    },
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
+                { label: "BONOS", key: "bonos" },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
                 const active = navTab === key;
@@ -565,7 +551,7 @@ const Index = () => {
                   <button
                     key={key}
                     onClick={() => setNavTab(key)}
-                    className={`px-4 h-10 text-[11px] tracking-widest transition-colors ${
+                    className={`px-4 h-10 shrink-0 text-[11px] tracking-widest transition-colors ${
                       active
                         ? "text-primary border-b-2 border-primary"
                         : "text-muted-foreground hover:text-foreground"
@@ -583,7 +569,7 @@ const Index = () => {
             </nav>
           </div>
           {/* Right: live indicator + clock */}
-          <div className="flex items-center gap-3 text-[10px] text-muted-foreground/50 tabular-nums">
+          <div className="hidden xl:flex shrink-0 items-center gap-3 text-[10px] text-muted-foreground/50 tabular-nums">
             <span className="text-primary/50 tracking-widest">MKT</span>
             <span className="text-primary/70">·</span>
             <span className="text-primary/70 tracking-widest">LIVE</span>
@@ -601,6 +587,7 @@ const Index = () => {
       />
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
+      {navTab === "bonos" && <main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main>}
       {navTab === "ticker" && (
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
@@ -1123,6 +1110,7 @@ function ReportView({
   // Sections appear progressively while the report streams; a tab shows up
   // as soon as its content (or structured data) exists. Order never changes.
   const available = EXPECTED_TABS.filter((key) => {
+    if (["Desglose de ingresos", "Institucional", "Noticias"].includes(key) && ticker) return true;
     if (sections[key]) return true;
     if (key === "Resumen Ejecutivo" && !!ticker) return true;
     if (key === "Finanzas" && quarterlyData.length > 0) return true;
@@ -1186,7 +1174,10 @@ function ReportView({
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
               {active === "Calendario Macro" && <MacroCalendarSubSection />}
-              {sections[active] && renderElements(sections[active])}
+              {active === "Desglose de ingresos" && <BusinessView key={ticker} ticker={ticker} />}
+              {active === "Institucional" && <><InstitutionalView key={ticker} ticker={ticker} />{sections[active] && <details className="mt-4"><summary className="text-xs text-primary cursor-pointer">Análisis e insiders del informe</summary>{renderElements(sections[active])}</details>}</>}
+              {active === "Noticias" && <NewsView key={ticker} subject={ticker} />}
+              {sections[active] && !["Desglose de ingresos", "Institucional", "Noticias", "Calendario Macro"].includes(active) && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />
               )}
@@ -1213,6 +1204,7 @@ function EtfReportView({
   const sections = parseSections(content, ETF_TABS);
 
   const available = ETF_TABS.filter((key) => {
+    if (key === "Noticias" && ticker) return true;
     if (sections[key]) return true;
     if (key === "Resumen Ejecutivo" && !!ticker) return true;
     if (key === "Valoración" && etfDeep?.found === true) return true;
@@ -1278,7 +1270,8 @@ function EtfReportView({
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}
               {active === "Calendario Macro" && <MacroCalendarSubSection />}
-              {sections[active] && renderElements(sections[active])}
+              {active === "Noticias" && <NewsView key={ticker} subject={ticker} />}
+              {sections[active] && !["Noticias", "Calendario Macro"].includes(active) && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-primary ml-1" />
               )}
@@ -1321,7 +1314,7 @@ function SectorReportView({
         // "Calendario Macro" has no LLM content — it always renders its own
         // deterministic data component once a sector report exists.
         const isMacro = key === "Calendario Macro";
-        if (!sectionNodes && !isMacro) return null;
+        if (!sectionNodes && !isMacro && key !== "Noticias y Tendencias") return null;
 
         const isOpen = expanded[key] !== false;
         const isLast = key === SECTOR_TABS[SECTOR_TABS.length - 1];
@@ -1348,7 +1341,9 @@ function SectorReportView({
             {isOpen && (
               <div className="px-4 pt-3 pb-5 border-t border-border/50 analysis-content">
                 {isMacro && <MacroCalendarSubSection />}
-                {sectionNodes && renderElements(sectionNodes)}
+                {key === "Noticias y Tendencias" && <NewsView key={sectorName} subject={sectorName} sector />}
+                {key === "Noticias y Tendencias" && sectionNodes && renderElements(sectorTrends(sectionNodes))}
+                {sectionNodes && key !== "Noticias y Tendencias" && !isMacro && renderElements(sectionNodes)}
                 {isLoading && isLast && (
                   <span className="terminal-cursor text-primary ml-1" />
                 )}
@@ -1500,7 +1495,7 @@ function QuarterlyHistorySection({
         : { rows: null, emptyMsg: "Sin datos de márgenes disponibles." };
     }
     if (t === "growth") {
-      return growthData.length > 0
+      return growthData.some(row => row.revenueGrowth !== null)
         ? { rows: { data: growthData, render: () => <GrowthChart data={growthData} /> }, emptyMsg: "" }
         : { rows: null, emptyMsg: "Sin datos de crecimiento disponibles." };
     }
@@ -1786,6 +1781,15 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
 
 function renderElements(elements: React.ReactNode[]) {
   return <div className="space-y-0.5">{elements}</div>;
+}
+
+function sectorTrends(elements: React.ReactNode[]) {
+  let keep = false;
+  return elements.filter(node => {
+    const element = node as { type?: unknown; props?: { children?: unknown } } | null;
+    if (element?.type === 'h3') keep = /Tendencias|Disruptores|Innovaciones/i.test(String(element.props?.children ?? ''));
+    return keep;
+  });
 }
 
 function renderTable(tableLines: string[], baseKey: number) {
