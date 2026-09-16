@@ -1,3 +1,4 @@
+import { safeNewsHref } from "@/lib/navigation";
 import { authenticatedFetch } from "@/lib/beta-api";
 import { cleanHeadline, cleanNewsExcerpt } from "@/lib/editorial";
 import { useEffect, useState, type ReactNode } from 'react';
@@ -41,7 +42,6 @@ function usePanel<T>(panel: string, subject = '', sector = false) {
 }
 const fmt = (n: number | null | undefined, digits = 2) => n == null ? 'N/D' : n.toLocaleString('es-ES', { maximumFractionDigits: digits });
 const compact = (n: number) => Intl.NumberFormat('es-ES', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
-const safeLink = (url: string) => /^https?:\/\//i.test(url) ? url : undefined;
 function Status({ error, retry }: { error: string; retry: () => void }) {
   return <div className="border border-border p-8 text-sm text-muted-foreground" role="status">{error || 'Cargando…'}{error && <button className="ml-4 text-primary underline" onClick={retry}>Reintentar</button>}</div>;
 }
@@ -53,7 +53,7 @@ function Stamp({ at }: { at: string }) {
 }
 function Documents({ articles }: { articles: Article[] }) {
   return <div className="space-y-4">{articles.map(a => <article key={a.url} className="border-b border-border pb-3 last:border-0">
-    <a className="text-sm text-primary hover:underline" href={safeLink(a.url)} target="_blank" rel="noopener noreferrer">{cleanHeadline(a.title)}</a>
+    <a className="text-sm text-primary hover:underline" href={safeNewsHref(a.url)} target="_blank" rel="noopener noreferrer">{cleanHeadline(a.title)}</a>
     <p className="text-xs text-muted-foreground mt-1">{a.date || 'Fecha no disponible'}</p>
     {a.excerpt && <p className="text-sm text-foreground/80 leading-relaxed mt-2">{cleanNewsExcerpt(a.excerpt)}</p>}
   </article>)}</div>;

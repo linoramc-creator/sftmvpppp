@@ -1,3 +1,4 @@
+import { safeNewsHref } from "@/lib/navigation";
 import { accountApi } from "@/lib/beta-api";
 import { useProfile } from "@/components/AuthGate";
 import { cleanReportText } from "@/lib/editorial";
@@ -1923,7 +1924,7 @@ function renderInline(text: string): React.ReactNode {
     const linkMatch = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
       return (
-        <a key={si} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+        <a key={si} href={safeNewsHref(linkMatch[2])} target="_blank" rel="noopener noreferrer"
            className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors">
           {linkMatch[1]}
         </a>

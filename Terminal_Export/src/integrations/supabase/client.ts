@@ -13,5 +13,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
+    // Password access stays on this site; URL fragments cannot inject sessions.
+    detectSessionInUrl: false,
   }
 });

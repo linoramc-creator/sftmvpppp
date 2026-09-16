@@ -1,5 +1,6 @@
 {
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "redirects": [{ "source": "/:path*", "missing": [{ "type": "host", "value": "sftmvpppp.vercel.app" }], "destination": "https://sftmvpppp.vercel.app/:path*", "permanent": false }],
+  "rewrites": [{ "source": "/((?!assets/|favicon.ico|terminal-icon.svg|robots.txt).*)", "destination": "/index.html" }],
   "headers": [{
     "source": "/(.*)",
     "headers": [
