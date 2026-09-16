@@ -136,16 +136,16 @@ const BOND_ETFS = [['BND', 'Mercado de bonos EE. UU.'], ['AGG', 'Bonos agregados
 export async function bondsPanel(env: Env, deps?: Dependencies): Promise<BondsPanel> {
   // UTC date in the cache key guarantees a fresh request on each new day.
   return cached(`bonds:${new Date().toISOString().slice(0, 10)}`, HOUR, async () => {
-    const start = new Date(Date.now() - 370 * 86400000).toISOString().slice(0, 10);
+    const start = new Date(Date.now() - 3660 * 86400000).toISOString().slice(0, 10);
     const series = await Promise.all(FRED_SERIES.map(async ([id, label]): Promise<Series> => {
-      const raw = env.FRED_KEY ? await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${encodeURIComponent(env.FRED_KEY)}&file_type=json&observation_start=${start}`) : null;
+      const raw = env.FRED_KEY ? await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${encodeURIComponent(env.FRED_KEY)}&file_type=json&observation_start=${id.startsWith("DGS") ? start : new Date(Date.now() - 370 * 86400000).toISOString().slice(0, 10)}`) : null;
       const points: Point[] = ((raw as Row)?.observations ?? []).filter((r: Row) => r.value !== '.' && r.value !== '' && Number.isFinite(Number(r.value))).map((r: Row) => ({ date: r.date, value: Number(r.value) }));
       return { id, label, unit: ['T10Y2Y', 'BAMLC0A0CM', 'BAMLH0A0HYM2'].includes(id) ? 'pp' : '%', source: `https://fred.stlouisfed.org/series/${id}`, points };
     }));
     const etfs = await Promise.all(BOND_ETFS.map(async ([symbol, label]): Promise<BondFund> => {
       const [raw, summary] = await Promise.all([
-        get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
-        deps ? cached(`bond-profile:${symbol}`, 24 * HOUR, () => deps.summary(symbol, 'summaryDetail,fundProfile')) : null,
+        get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+        null,
       ]);
       const chart = (raw as Row)?.chart?.result?.[0];
       const close = chart?.indicators?.quote?.[0]?.close ?? [];

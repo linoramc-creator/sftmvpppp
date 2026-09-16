@@ -443,19 +443,7 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
           )}
         </div>
       </div>
-
-      <div>
-        <SectionTitle
-          title="NOTICIAS DEL SECTOR"
-          subtitle="Últimas noticias"
-        />
-        {news.length === 0 ? (
-          <EmptyNote text="Sin noticias sectoriales disponibles." />
-        ) : (
-          <NewsList items={news} />
-        )}
-      </div>
-    </div>
+</div>
   );
 }
 
@@ -507,14 +495,6 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
         />
         <GeoRiskChart risks={data.geoRisks ?? []} />
       </div>
-
-      <div>
-        <SectionTitle
-          title="NOTICIAS RELEVANTES"
-          subtitle="Últimas noticias"
-        />
-        <EtfNews data={data} />
-      </div>
-    </div>
+</div>
   );
 }

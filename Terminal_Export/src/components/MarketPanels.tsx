@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "@/lib/beta-api";
 import { cleanHeadline, cleanNewsExcerpt } from "@/lib/editorial";
 import { useEffect, useState, type ReactNode } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
@@ -10,8 +11,8 @@ function request<T>(panel: string, subject: string, sector: boolean, ttl: number
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data as T);
   if (pending.has(key)) return pending.get(key) as Promise<T>;
-  const promise = fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+  const promise = authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', },
     body: JSON.stringify({ panel, subject, sector }), signal: AbortSignal.timeout(55000),
   }).then(async response => {
     if (!response.ok) throw new Error('No se ha podido consultar este apartado.');
@@ -70,22 +71,22 @@ function History({ series, unit = '%' }: { series: Series[]; unit?: string }) {
   series.forEach(s => s.points.forEach(p => { const row = rows.get(p.date) ?? { date: p.date }; row[s.id] = p.value; rows.set(p.date, row); }));
   if (!rows.size) return <p className="text-sm text-muted-foreground py-8">No hay observaciones disponibles para este gráfico.</p>;
   return <><div className="h-72 w-full min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={[...rows.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))} margin={{ top: 8, right: 12, bottom: 5, left: 8 }}>
-    <CartesianGrid stroke="#253044" strokeDasharray="3 3" /><XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} tickFormatter={v => String(v).slice(5)} /><YAxis width={65} tick={{ fontSize: 10 }} tickFormatter={v => `${fmt(v, 1)} ${unit}`} domain={['auto', 'auto']} /><Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0' }} formatter={(v: number) => `${fmt(v)} ${unit}`} /><Legend wrapperStyle={{ fontSize: 11 }} /><ReferenceLine y={0} stroke="#475569" />
+    <CartesianGrid stroke="#253044" strokeDasharray="3 3" /><XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} tickFormatter={v => String(v).slice(0, 7)} /><YAxis width={65} tick={{ fontSize: 10 }} tickFormatter={v => `${fmt(v, 1)} ${unit}`} domain={['auto', 'auto']} /><Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0' }} formatter={(v: number) => `${fmt(v)} ${unit}`} /><Legend wrapperStyle={{ fontSize: 11 }} /><ReferenceLine y={0} stroke="#475569" />
     {series.map((s, i) => <Line key={s.id} dataKey={s.id} name={s.label} stroke={colors[i % colors.length]} dot={false} connectNulls={false} isAnimationActive={false} strokeWidth={2} type="linear" />)}
   </LineChart></ResponsiveContainer></div><div className="text-xs text-muted-foreground space-y-1 mt-3">{series.map(s => <p key={s.id}><span>{s.label}</span>: {s.points.at(-1)?.date ?? 'sin datos'}</p>)}</div></>;
 }
 export function BondsView() {
   const state = usePanel<BondsPanel>('bonds');
-  const [selected, setSelected] = useState('BND');
+  const [years, setYears] = useState(1);
   if (!state.data) return <Status {...state} />;
   const { series, etfs } = state.data;
   const choose = (...ids: string[]) => ids.flatMap(id => series.find(s => s.id === id) ?? []);
   // Same observation date for every maturity: never mix points from different days.
   const treasury = series.filter(s => s.id.startsWith('DGS'));
-  const common = treasury.length && treasury.every(s => s.points.length) ? treasury[0].points.map(p => p.date).filter(d => treasury.every(s => s.points.some(p => p.date === d))).sort().at(-1) : null;
+  const dateSets = treasury.map(s => new Set(s.points.map(p => p.date)));
+  const common = treasury.length ? treasury[0].points.map(p => p.date).sort().reverse().find(d => dateSets.every(dates => dates.has(d))) : null;
   const curve = treasury.map(s => ({ maturity: s.label, yield: common ? s.points.find(p => p.date === common)?.value ?? null : null }));
-  const fund = etfs.find(e => e.symbol === selected);
-  const rebased: Point[] = fund?.points.length && fund.points[0].value > 0 ? fund.points.map(p => ({ date: p.date, value: p.value / fund.points[0].value * 100 })) : [];
+  const historyStart = new Date(Date.now() - years * 365.25 * 86400000).toISOString().slice(0,10);
   return <div className="space-y-6"><div><h1 className="text-xl font-semibold tracking-wide text-primary">BONOS · EE. UU.</h1><p className="text-sm text-muted-foreground mt-2">Treasuries, tipos reales, inflación implícita, riesgo de crédito y ETF de renta fija. Datos actualizados con la última fecha disponible.</p></div>
     {state.error && <Status {...state} />}
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{choose('DGS2', 'DGS10', 'T10Y2Y', 'DFF').map(s => <Box key={s.id} title={s.label}><p className="text-2xl font-mono">{fmt(s.points.at(-1)?.value)} {s.unit}</p><p className="text-xs text-muted-foreground mt-2">{s.points.at(-1)?.date ?? 'Sin observaciones'}</p></Box>)}</div>
@@ -94,14 +95,11 @@ export function BondsView() {
         {common ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><LineChart data={curve}><CartesianGrid stroke="#253044" /><XAxis dataKey="maturity" tick={{ fontSize: 10 }} /><YAxis unit="%" domain={['auto', 'auto']} tick={{ fontSize: 10 }} /><Tooltip contentStyle={{ background: '#0f172a', color: '#e2e8f0' }} formatter={(v: number) => `${fmt(v)}%`} /><Line dataKey="yield" name="Rendimiento" stroke="#60a5fa" strokeWidth={2} type="linear" /></LineChart></ResponsiveContainer></div> : <p className="text-sm">No hay una fecha común para todas las duraciones. Consulta las fechas de cada vencimiento.</p>}
         <div className="flex flex-wrap gap-3 text-xs mt-3">{treasury.map(s => <span key={s.id} className="text-muted-foreground">{s.label}: {fmt(s.points.at(-1)?.value)}% ({s.points.at(-1)?.date ?? 'N/D'})</span>)}</div>
       </Box>
-      <Box title="TESORO · HISTÓRICO DE UN AÑO"><History series={choose('DGS2', 'DGS10', 'DGS30')} /></Box>
+      <Box title="TESORO · EVOLUCIÓN DE LOS TIPOS"><div className="flex gap-2 mb-4" role="group" aria-label="Horizonte del histórico del Tesoro">{[1,5,10].map(y=><button key={y} aria-pressed={years===y} onClick={()=>setYears(y)} className={`px-3 py-2 text-xs border ${years===y?'border-primary text-primary':'border-border'}`}>{y} {y===1?'año':'años'}</button>)}</div><History series={choose('DGS1', 'DGS5', 'DGS10').map(s=>({...s,points:s.points.filter(p=>p.date>=historyStart)}))} /></Box>
       <Box title="TIPO REAL E INFLACIÓN IMPLÍCITA · 10 AÑOS"><History series={choose('DFII10', 'T10YIE')} /></Box>
       <Box title="DIFERENCIALES DE CRÉDITO · OAS"><History series={choose('BAMLC0A0CM', 'BAMLH0A0HYM2')} unit="pp" /><p className="text-xs text-muted-foreground mt-2">1 punto porcentual (pp) = 100 puntos básicos.</p></Box>
-      <Box title="PENDIENTE DE LA CURVA · 10 MENOS 2 AÑOS"><History series={choose('T10Y2Y')} unit="pp" /></Box>
-      <Box title="ETF · EVOLUCIÓN DEL PRECIO"><select aria-label="ETF de bonos" className="bg-background border border-border p-2 text-sm mb-3 w-full" value={selected} onChange={e => setSelected(e.target.value)}>{etfs.map(e => <option key={e.symbol} value={e.symbol}>{e.symbol} · {e.label}</option>)}</select><History series={[{ id: selected, label: selected, unit: '', source: `https://finance.yahoo.com/quote/${selected}/`, points: rebased }]} unit="" /><p className="text-xs text-muted-foreground mt-2">Base 100 desde la primera cotización del período. Variación del precio, sin reinversión de distribuciones.</p></Box>
     </div>
-    {fund && <Box title={`${fund.symbol} · DATOS DEL FONDO`}><div className="grid sm:grid-cols-3 gap-4 text-sm"><div><p className="text-muted-foreground">Distribuciones últimos 12 meses / precio</p><p className="text-xl mt-2">{fmt(fund.distributionYield)}%</p></div><div><p className="text-muted-foreground">Gastos anuales declarados</p><p className="text-xl mt-2">{fmt(fund.expenseRatio, 3)}%</p></div><div><p className="text-muted-foreground">Patrimonio gestionado</p><p className="text-xl mt-2">{fund.assets == null ? 'N/D' : compact(fund.assets)} {fund.currency}</p></div></div><p className="text-xs text-muted-foreground mt-3">La tasa de distribuciones no es el yield SEC ni el rendimiento a vencimiento. Duración efectiva y yield SEC: no disponibles.</p></Box>}
-    <Box title="ETF DE BONOS · COTIZACIONES"><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-muted-foreground"><tr>{['ETF', 'Exposición', 'Precio', 'Variación diaria', 'Fecha'].map(h => <th className="p-2" key={h}>{h}</th>)}</tr></thead><tbody>{etfs.map(e => <tr key={e.symbol} className="border-t border-border"><td className="p-2"><button className="text-primary" onClick={() => setSelected(e.symbol)}>{e.symbol}</button></td><td className="p-2">{e.label}</td><td className="p-2 whitespace-nowrap">{fmt(e.price)} {e.currency}</td><td className="p-2">{fmt(e.change)}%</td><td className="p-2 whitespace-nowrap">{e.date ?? 'N/D'}</td></tr>)}</tbody></table></div><p className="text-xs text-muted-foreground mt-3">Los ETF tienen riesgo de tipos, crédito y fluctuación de precio; su cotización no es el rendimiento a vencimiento de un bono.</p></Box>
+    <Box title="ETF DE BONOS · COTIZACIONES"><div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-muted-foreground"><tr>{['ETF', 'Exposición', 'Precio', 'Variación diaria', 'Fecha'].map(h => <th className="p-2" key={h}>{h}</th>)}</tr></thead><tbody>{etfs.map(e => <tr key={e.symbol} className="border-t border-border"><td className="p-2"><span className="text-primary">{e.symbol}</span></td><td className="p-2">{e.label}</td><td className="p-2 whitespace-nowrap">{fmt(e.price)} {e.currency}</td><td className="p-2">{fmt(e.change)}%</td><td className="p-2 whitespace-nowrap">{e.date ?? 'N/D'}</td></tr>)}</tbody></table></div><p className="text-xs text-muted-foreground mt-3">Los ETF tienen riesgo de tipos, crédito y fluctuación de precio; su cotización no es el rendimiento a vencimiento de un bono.</p></Box>
     <Stamp at={state.data.fetchedAt} />
   </div>;
 }

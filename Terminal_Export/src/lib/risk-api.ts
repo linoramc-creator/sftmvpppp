@@ -1,10 +1,10 @@
+import { authenticatedFetch } from "@/lib/beta-api";
 // Client for the risk analytics endpoint of the unified analyze-ticker
 // edge function (body: { risk: true, ticker }).
 
 import type { RiskResponse } from "@/types/risk";
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
-const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
 const RISK_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/analyze-ticker` : "";
 
 export class RiskApiError extends Error {
@@ -26,13 +26,13 @@ export async function fetchRiskData(ticker: string, signal?: AbortSignal): Promi
   }
   let resp: Response;
   try {
-    resp = await fetch(RISK_URL, {
+    resp = await authenticatedFetch(RISK_URL, {
       method: "POST",
       signal,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        ...(ANON_KEY ? { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY } : {}),
+
       },
       body: JSON.stringify({ risk: true, ticker }),
     });

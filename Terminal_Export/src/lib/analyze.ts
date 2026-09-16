@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "@/lib/beta-api";
 // Single unified Supabase function — dispatches by body shape ({ticker} | {sector} | {marketData})
 const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
 
@@ -21,11 +22,10 @@ export interface MarketData {
 
 export async function fetchMarketData(symbols: string[]): Promise<MarketData | null> {
   try {
-    const resp = await fetch(ANALYZE_URL, {
+    const resp = await authenticatedFetch(ANALYZE_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
       body: JSON.stringify({ marketData: true, symbols }),
     });
@@ -83,11 +83,10 @@ async function streamSSE({
 }) {
   let resp: Response;
   try {
-    resp = await fetch(url, {
+    resp = await authenticatedFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
       body: JSON.stringify(body),
       signal,
@@ -113,6 +112,7 @@ async function streamSSE({
   const decoder = new TextDecoder();
   let textBuffer = "";
   let streamDone = false;
+  let streamFailed = false;
 
   const parseLine = (line: string) => {
     if (!line.startsWith("data: ")) return;
@@ -120,6 +120,7 @@ async function streamSSE({
     if (jsonStr === "[DONE]") { streamDone = true; return; }
     try {
       const parsed = JSON.parse(jsonStr);
+      if (parsed.__error || parsed.error) { streamFailed = true; onError(typeof parsed.__error === 'string' ? parsed.__error : 'No se pudo completar el informe.'); return; }
       if (onEvent) onEvent(parsed);
       const content = parsed.choices?.[0]?.delta?.content as string | undefined;
       if (content) onDelta(content);
@@ -147,6 +148,7 @@ async function streamSSE({
     parseLine(raw);
   }
 
+  if (!streamDone && !streamFailed) onError('La generación se interrumpió antes de terminar. Inténtalo de nuevo.');
   onDone();
 }
 
@@ -213,11 +215,10 @@ export function fetchTickerFundamentals(symbol: string): Promise<TickerFundament
 }
 async function fetchTickerFundamentalsUncached(symbol: string): Promise<TickerFundamentals | null> {
   try {
-    const resp = await fetch(ANALYZE_URL, {
+    const resp = await authenticatedFetch(ANALYZE_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
       body: JSON.stringify({ fundamentals: true, ticker: symbol }),
     });
@@ -236,11 +237,10 @@ async function fetchTickerFundamentalsUncached(symbol: string): Promise<TickerFu
 // network/HTTP error so the UI can distinguish "error" from "no events".
 export async function fetchMacroCalendar(): Promise<import("@/types/macro").MacroCalendarResponse | null> {
   try {
-    const resp = await fetch(ANALYZE_URL, {
+    const resp = await authenticatedFetch(ANALYZE_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
       body: JSON.stringify({ macroCalendar: true }),
     });
@@ -298,9 +298,6 @@ export async function streamAnalysis({
       }
       if (parsed.__catalystCalendar && onCatalystCalendar) {
         onCatalystCalendar(parsed.__catalystCalendar as CatalystCalendar);
-      }
-      if (parsed.__error) {
-        onError(parsed.__error as string);
       }
     },
   });

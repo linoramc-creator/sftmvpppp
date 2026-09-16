@@ -1,3 +1,5 @@
+import { accountApi } from "@/lib/beta-api";
+import { useProfile } from "@/components/AuthGate";
 import { cleanReportText } from "@/lib/editorial";
 import { RevenueGrowthSection } from "@/components/charts/RevenueGrowthChart";
 import { buildGrowthChartData } from "@/lib/revenue-growth";
@@ -21,6 +23,8 @@ import type { EtfResponse } from "@/types/etf";
 
 interface SavedReport {
   id: string;
+  kind: 'ticker' | 'etf' | 'sector';
+  etfDeep?: EtfResponse | null;
   ticker: string;
   savedAt: string;
   analysis: string;
@@ -31,14 +35,8 @@ interface SavedReport {
 
 const STORAGE_KEY = "terminal_reports_v1";
 
-function loadReports(): SavedReport[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
-  catch (_) { return []; }
-}
-
-function persistReports(reports: SavedReport[]): boolean {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(reports)); return true; }
-  catch (_) { return false; }
+function reportFromRow(row: any): SavedReport {
+  return { id:row.id,kind:row.kind,ticker:row.subject,savedAt:new Date(row.saved_at).toLocaleDateString('es-ES'),analysis:row.payload?.analysis??'',quarterlyData:row.payload?.quarterlyData??[],etfDeep:row.payload?.etfDeep??null };
 }
 
 // ── Section configs ────────────────────────────────────────────────────
@@ -236,6 +234,10 @@ function extractCurrentMetrics(content: string): { label: string; value: string 
 // ── Main component ─────────────────────────────────────────────────────
 
 const Index = () => {
+  const profile = useProfile();
+  const [saving,setSaving] = useState(false);
+  const saveLock = useRef(false);
+  const [reportsError,setReportsError] = useState("");
   // Ticker state
   const [ticker, setTicker]               = useState("");
   const [analysis, setAnalysis]           = useState("");
@@ -246,7 +248,7 @@ const Index = () => {
   const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
   const [catalystCalendar, setCatalystCalendar] = useState<CatalystCalendar | null>(null);
   const [tickerIsEtf, setTickerIsEtf]     = useState<string | null>(null);
-  const [savedReports, setSavedReports]   = useState<SavedReport[]>(loadReports);
+  const [savedReports, setSavedReports]   = useState<SavedReport[]>([]);
   const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
 
@@ -284,6 +286,12 @@ const Index = () => {
   const etfAbortRef    = useRef<AbortController | null>(null);
   const sectorAbortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    let active=true;
+    accountApi<any[]>('listReports').then(rows=>{if(active)setSavedReports(rows.map(reportFromRow));}).catch(e=>{if(active)setReportsError(e.message);});
+    return()=>{active=false;abortRef.current?.abort();etfAbortRef.current?.abort();sectorAbortRef.current?.abort();};
+  },[profile.id]);
 
   // Live clock
   useEffect(() => {
@@ -476,37 +484,33 @@ const Index = () => {
     }
   }, [sectorInput, toast]);
 
-  const handleSave = useCallback(() => {
-    if (!analysis || !currentTicker) return;
-    const report: SavedReport = {
-      id: `${currentTicker}_${Date.now()}`,
-      ticker: currentTicker,
-      savedAt: new Date().toLocaleDateString("es-ES", {
-        day: "2-digit", month: "short", year: "numeric",
-      }).toUpperCase(),
-      analysis,
-      quarterlyData,
-    };
-    const updated = [report, ...savedReports.filter((r) => r.ticker !== currentTicker)];
-    setSavedReports(updated);
-    const ok = persistReports(updated);
-    if (ok) {
-      toast({ title: "Informe guardado", description: `${currentTicker} guardado correctamente.` });
-    } else {
-      toast({
-        title: "Espacio agotado",
-        description: "Se ha alcanzado el límite de almacenamiento del navegador. Borra informes antiguos.",
-        variant: "destructive",
-      });
-    }
-  }, [analysis, currentTicker, quarterlyData, savedReports, toast]);
-
-  const handleDeleteReport = useCallback((id: string) => {
-    const updated = savedReports.filter((r) => r.id !== id);
-    setSavedReports(updated);
-    persistReports(updated);
-    if (viewingReport?.id === id) setViewingReport(null);
-  }, [savedReports, viewingReport]);
+  const saveCurrent = async (kind: 'ticker'|'etf'|'sector') => {
+    if(saveLock.current)return;
+    const subject=kind==='ticker'?currentTicker:kind==='etf'?currentEtf:currentSector;
+    const text=kind==='ticker'?analysis:kind==='etf'?etfAnalysis:sectorAnalysis;
+    if(!subject||!text)return;saveLock.current=true;setSaving(true);
+    try{const row=await accountApi<any>('saveReport',{kind,subject,payload:{analysis:text,quarterlyData:kind==='ticker'?quarterlyData:[],etfDeep:kind==='etf'?etfDeep:null}});
+      setSavedReports(previous=>[reportFromRow(row),...previous]);toast({title:'Informe guardado',description:subject+' guardado en tu cuenta.'});
+    }catch(e){toast({title:'No se pudo guardar',description:(e as Error).message,variant:'destructive'});}finally{saveLock.current=false;setSaving(false);}
+  };
+  const handleSave = () => {void saveCurrent('ticker');};
+  const handleDeleteReport = async (id:string) => {
+    try{await accountApi('deleteReport',{id});setSavedReports(previous=>previous.filter(r=>r.id!==id));if(viewingReport?.id===id)setViewingReport(null);}
+    catch(e){toast({title:'No se pudo eliminar',description:(e as Error).message,variant:'destructive'});}
+  };
+  const openSaved = async (id:string) => {
+    try{const row=await accountApi<any>('getReport',{id});setViewingReport(reportFromRow(row));setNavTab('ticker');setActiveSection(EXPECTED_TABS[0]);openAllSectorSections();}
+    catch(e){toast({title:'No se pudo abrir',description:(e as Error).message,variant:'destructive'});}
+  };
+  const importLegacy = async () => {
+    if(!profile.isAdmin||saveLock.current)return;
+    let old:any[];try{old=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');if(!Array.isArray(old))throw new Error();}catch{toast({title:'No se pudieron leer los informes antiguos'});return;}
+    if(!old.length){toast({title:'No hay informes antiguos en este navegador'});return;}
+    if(!window.confirm('¿Importar a tu cuenta los informes que guardaste en este navegador antes de activar los perfiles?'))return;
+    saveLock.current=true;setSaving(true);
+    try{while(old.length){const report=old[0];const row=await accountApi<any>('saveReport',{kind:'ticker',subject:report.ticker,payload:{analysis:report.analysis,quarterlyData:report.quarterlyData??[]}});setSavedReports(previous=>[reportFromRow(row),...previous]);old.shift();localStorage.setItem(STORAGE_KEY,JSON.stringify(old));}toast({title:'Informes antiguos importados'});}
+    catch(e){toast({title:'Importación incompleta',description:(e as Error).message,variant:'destructive'});}finally{saveLock.current=false;setSaving(false);}
+  };
 
   const toggleSectorSection = (key: string) =>
     setSectorExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -621,6 +625,7 @@ const Index = () => {
             {!isLoading && analysis && isLive && (
               <button
                 onClick={handleSave}
+                disabled={saving}
                 className="h-8 px-4 border border-primary/40 text-primary text-[11px] tracking-widest hover:bg-primary/8 transition-colors flex items-center gap-1.5"
               >
                 <Bookmark className="h-3 w-3" />
@@ -686,7 +691,7 @@ const Index = () => {
           )}
 
           {/* Report */}
-          {activeAnalysis && (
+          {activeAnalysis && (viewingReport?.kind === 'etf' ? <EtfReportView content={activeAnalysis} ticker={activeTicker} etfDeep={viewingReport.etfDeep??null} isLoading={false} activeSection={activeSection} onSelectSection={setActiveSection} /> : viewingReport?.kind === 'sector' ? <SectorReportView content={activeAnalysis} sectorName={activeTicker} isLoading={false} expanded={sectorExpanded} onToggle={toggleSectorSection} /> :
             <ReportView
               content={activeAnalysis}
               quarterlyData={activeQuarterly}
@@ -712,6 +717,7 @@ const Index = () => {
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
 
+          {etfAnalysis&&!isEtfLoading&&<button disabled={saving} onClick={()=>saveCurrent("etf")} className="mb-4 text-xs text-primary border border-primary/30 px-4 py-2">GUARDAR INFORME ETF</button>}
           {/* ETF search row */}
           <div className="flex gap-2 mb-5">
             <div className="relative flex-1">
@@ -880,6 +886,7 @@ const Index = () => {
             </div>
           )}
 
+          {sectorAnalysis&&!isSectorLoading&&<button disabled={saving} onClick={()=>saveCurrent("sector")} className="mb-4 text-xs text-primary border border-primary/30 px-4 py-2">GUARDAR INFORME DEL SECTOR</button>}
           {/* Sector report */}
           {sectorAnalysis && (
             <SectorReportView
@@ -908,7 +915,9 @@ const Index = () => {
             <span className="text-[10px] text-muted-foreground/40">{savedReports.length}</span>
           </div>
 
-          {savedReports.length === 0 && (
+          {reportsError&&<p role="alert" className="text-destructive text-sm mb-4">{reportsError}</p>}
+          {profile.isAdmin&&<button disabled={saving} onClick={importLegacy} className="text-xs text-primary border border-border p-2 mb-4">Importar informes antiguos de este navegador</button>}
+          {savedReports.length === 0 && !reportsError && (
             <div className="flex flex-col items-center justify-center py-20 opacity-25">
               <p className="text-[10px] tracking-widest text-muted-foreground">
                 NO HAY INFORMES GUARDADOS
@@ -921,11 +930,7 @@ const Index = () => {
               <SavedReportCard
                 key={report.id}
                 report={report}
-                onView={() => {
-                  setViewingReport(report);
-                  resetSections();
-                  setNavTab("ticker");
-                }}
+                onView={() => openSaved(report.id)}
                 onDelete={() => handleDeleteReport(report.id)}
               />
             ))}
@@ -1374,7 +1379,7 @@ function SavedReportCard({
     <div className="border border-border bg-card flex items-center justify-between px-4 py-3 hover:border-border/80 transition-colors">
       <button onClick={onView} className="flex items-center gap-5 text-left flex-1 min-w-0">
         <span className="w-1.5 h-1.5 bg-primary/60 shrink-0" />
-        <span className="text-sm font-bold text-primary tracking-wider">{report.ticker}</span>
+        <span className="text-sm font-bold text-primary tracking-wider">{report.ticker} <span className="text-xs text-muted-foreground">{report.kind==='sector'?'SECTOR':report.kind==='etf'?'ETF':'ACCIÓN'}</span></span>
         <span className="text-[10px] text-muted-foreground/50 tracking-wider">{report.savedAt}</span>
       </button>
       <div className="flex items-center gap-1.5 shrink-0">

@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "@/lib/beta-api";
 import { useEffect, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import {
@@ -8,18 +9,17 @@ import type { TechnicalsResponse } from "@/types/technicals";
 import { OPT_COLORS, ttStyle, fmtPrice } from "@/components/options/theme";
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
-const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
 const TECH_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/analyze-ticker` : "";
 
 async function fetchTechnicals(ticker: string, signal?: AbortSignal): Promise<TechnicalsResponse | null> {
   if (!TECH_URL) return null;
-  const resp = await fetch(TECH_URL, {
+  const resp = await authenticatedFetch(TECH_URL, {
     method: "POST",
     signal,
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
-      ...(ANON_KEY ? { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY } : {}),
+
     },
     body: JSON.stringify({ technicals: true, ticker }),
   });

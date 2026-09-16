@@ -1,3 +1,4 @@
+import { secureRequest } from "./beta-security.ts";
 import { bondsPanel, businessPanel, institutionalPanel, newsPanel, curateNews, cached, fmpHolders } from "./panels.ts";
 // ============================================================
 // UNIFIED ANALYZE FUNCTION
@@ -2063,13 +2064,13 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secci
         // Step 6: Call Gemini (Pro by default — keepalives above allow unlimited generation time)
         const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
         if (gemini.ok === false) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: gemini.error })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "No se pudo generar el informe. Inténtalo más tarde." })}\n\n`));
           return;
         }
         console.log(`Streaming ticker analysis with model: ${gemini.model}`);
 
         if (!gemini.response.body) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "Gemini returned empty response body" })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "El informe no ha devuelto contenido." })}\n\n`));
           return;
         }
 
@@ -2082,7 +2083,7 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secci
         }
       } catch (e: any) {
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: e?.message ?? "Error interno del servidor" })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "La generación se interrumpió. Inténtalo de nuevo." })}\n\n`));
         } catch (_) {}
       } finally {
         clearInterval(keepalive);
@@ -2159,13 +2160,13 @@ Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones 
 
         const gemini = await callGeminiStream(messages, env.GEMINI_API_KEY);
         if (gemini.ok === false) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: gemini.error })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "No se pudo generar el informe. Inténtalo más tarde." })}\n\n`));
           return;
         }
         console.log(`Streaming sector analysis with model: ${gemini.model}`);
 
         if (!gemini.response.body) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "Gemini returned empty response body" })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "El informe no ha devuelto contenido." })}\n\n`));
           return;
         }
 
@@ -2177,7 +2178,7 @@ Genera el informe sectorial completo sobre "${cleanSector}" con las 7 secciones 
         }
       } catch (e: any) {
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: e?.message ?? "Error interno del servidor" })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ __error: "La generación se interrumpió. Inténtalo de nuevo." })}\n\n`));
         } catch (_) {}
       } finally {
         clearInterval(keepalive);
@@ -2848,7 +2849,7 @@ async function handleOptions(body: Record<string, any>): Promise<Response> {
   } catch (e) {
     if (e instanceof OptError) return json({ error: e.message }, e.status);
     console.error("[options] error:", e);
-    return json({ error: (e as Error).message || "Error interno de opciones" }, 500);
+    return json({ error: "No se pudieron cargar las opciones." }, 500);
   }
 }
 
@@ -3343,21 +3344,8 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     if (countries) countriesSource = "yahoo-approx";
   }
 
-  let newsSource: "finnhub" | "yahoo" | "fmp" | null = null;
-  let news = await eFinnhubNews(ticker, env.FINNHUB_KEY);
-  if (news.length) {
-    newsSource = "finnhub";
-  } else {
-    news = await eYahooNews(ticker);
-    if (news.length) {
-      newsSource = "yahoo";
-    } else {
-      news = await eFmpNews(ticker, env.FMP_KEY);
-      if (news.length) newsSource = "fmp";
-    }
-  }
-
-  news = curateNews(news.map(n => ({ ...n, date: n.datetime })), `${ticker} ${summary.quoteType?.longName ?? ""}`).map(n => ({ title: n.title, url: n.url, source: n.source, datetime: n.date }));
+  const newsSource = null;
+  const news: ENewsItem[] = [];
 
   // Geopolitical risk layer: real exposure × fixed heuristic score.
   const geoRisks: { factor: string; kind: "sector" | "país"; exposurePct: number; score: number; contribution: number; note: string }[] = [];
@@ -3384,18 +3372,8 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
   // insights → theme news (FMP stock_news on the peers, Yahoo search fallback).
   const themeCfg = eDetectTheme(sectors, assetAllocation);
   const sectorPeers = await ePeerRows(themeCfg.peers, ticker, env.FMP_KEY);
-  let sectorNewsSource: "fmp" | "yahoo" | null = null;
-  let sectorNews: ENewsItem[] = [];
-  const peerSyms = sectorPeers.map((p) => p.symbol);
-  if (peerSyms.length) {
-    sectorNews = await eFmpNews(peerSyms.join(","), env.FMP_KEY);
-    if (sectorNews.length) sectorNewsSource = "fmp";
-  }
-  if (!sectorNews.length) {
-    sectorNews = await eYahooNews(themeCfg.query);
-    if (sectorNews.length) sectorNewsSource = "yahoo";
-  }
-  sectorNews = curateNews(sectorNews.map(n => ({ ...n, date: n.datetime })), themeCfg.query).map(n => ({ title: n.title, url: n.url, source: n.source, datetime: n.date }));
+  const sectorNewsSource = null;
+  const sectorNews: ENewsItem[] = [];
   const insights = eSectorInsights({
     fundamentals: {
       expenseRatio: fundamentals.expenseRatio,
@@ -3943,15 +3921,8 @@ async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
 // MAIN DISPATCHER
 // =====================================================
 
-Deno.serve(async (req) => {
-  console.log("analyze v8-UNIFIED started");
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+Deno.serve((req) => secureRequest(req, async (body) => {
   try {
-    const body = await req.json();
-
     const env: EnvKeys = {
       GEMINI_API_KEY: (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini") || Deno.env.get("GOOGLE_API_KEY")) ?? "",
       FINNHUB_KEY:    (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "",
@@ -4032,6 +4003,6 @@ Deno.serve(async (req) => {
     const msg = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : "";
     console.error("analyze fatal error:", msg, stack);
-    return jsonError(msg, 500);
+    return jsonError("No se ha podido completar el análisis. Inténtalo más tarde.", 500);
   }
-});
+}));

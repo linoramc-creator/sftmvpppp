@@ -98,6 +98,7 @@ function markdownToHtml(md: string): string {
 
 export function downloadAnalysisPdf(markdown: string, ticker: string) {
   const bodyHtml = markdownToHtml(markdown);
+  const safeTicker = ticker.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]!);
   const dateStr = new Date().toLocaleDateString("es-ES", {
     year: "numeric",
     month: "long",
@@ -114,7 +115,7 @@ export function downloadAnalysisPdf(markdown: string, ticker: string) {
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>${ticker} — Informe Financiero</title>
+<title>${safeTicker} — Informe Financiero</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -214,7 +215,7 @@ strong { font-weight: 700; }
 </head>
 <body>
 <div class="report-header">
-  <h1>${ticker} — Informe Financiero</h1>
+  <h1>${safeTicker} — Informe Financiero</h1>
   <div class="subtitle">AI-Powered Equity Research &nbsp;|&nbsp; ${dateStr} &nbsp;|&nbsp; Datos orientativos. No constituyen asesoramiento financiero.</div>
 </div>
 ${bodyHtml}

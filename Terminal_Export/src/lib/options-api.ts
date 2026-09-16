@@ -1,3 +1,4 @@
+import { authenticatedFetch } from "@/lib/beta-api";
 // Typed client for the Options analytics backend.
 //
 // Backend lives inside the unified `analyze-ticker` Supabase Edge Function
@@ -16,7 +17,6 @@ import type {
 } from "@/types/options";
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
-const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
 const OPTIONS_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/analyze-ticker` : "";
 
 export class OptionsApiError extends Error {
@@ -47,13 +47,13 @@ async function call<T>(
 
   let resp: Response;
   try {
-    resp = await fetch(OPTIONS_URL, {
+    resp = await authenticatedFetch(OPTIONS_URL, {
       method: "POST",
       signal,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        ...(ANON_KEY ? { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY } : {}),
+
       },
       body: JSON.stringify({ optionsAction: action, ...params }),
     });

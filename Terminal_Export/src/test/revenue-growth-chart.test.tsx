@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { RevenueGrowthBars } from '@/components/charts/RevenueGrowthChart';
+vi.mock('@/lib/analyze', () => ({ fetchTickerFundamentals: vi.fn(async () => null) }));
 it('draws finite positive, negative and zero bars while preserving missing quarters', () => {
   const { container } = render(<RevenueGrowthBars data={[{ period: '2024-03-31', revenueGrowth: null }, { period: '2024-06-30', revenueGrowth: 25 }, { period: '2024-09-30', revenueGrowth: null }, { period: '2024-12-31', revenueGrowth: -10 }, { period: '2025-03-31', revenueGrowth: 0 }]} />);
   expect(screen.getByRole('img', { name: /barras/ })).toBeInTheDocument();
