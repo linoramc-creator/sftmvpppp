@@ -4,8 +4,8 @@
 
 - Entrada: `https://sftmvpppp.vercel.app/`.
 - Administración: `https://sftmvpppp.vercel.app/admin`.
-- Acceso sin contraseña, mediante enlace enviado al e-mail. Supabase debe mantener la confirmación de correo activada y las sesiones anónimas desactivadas.
-- Solo el e-mail **verificado** `linoramc@gmail.com` recibe administración. No se aceptan roles enviados por el navegador ni en metadatos editables del usuario.
+- Registro e inicio de sesión con e-mail y contraseña, sin envío de correos. Por decisión del propietario, la confirmación de e-mail está desactivada; las sesiones anónimas siguen desactivadas. Mínimo de contraseña: 12 caracteres. Los correos registrados son identificadores declarados, no direcciones verificadas.
+- La cuenta del propietario que ya había confirmado `linoramc@gmail.com` antes del cambio queda vinculada por UUID en `beta_private.admin_users`. Ninguna cuenta nueva hereda administración por escribir ese e-mail, aunque la cuenta original desaparezca. No se aceptan roles enviados por el navegador ni en metadatos editables del usuario.
 - El administrador puede ver registros, e-mails, solicitudes, informes completados, número de guardados, activos analizados y estado de cada solicitud; puede revocar y restaurar accesos. La actividad se registra en el servidor.
 - La revocación bloquea nuevas consultas y lecturas de informes incluso con un JWT aún vigente. La interfaz comprueba el acceso cada minuto. No borra información ya descargada ni puede retirar una respuesta ya enviada.
 
@@ -29,13 +29,13 @@ Validación de identidad con el servidor Auth en cada llamada, comprobación de 
 
 Actualizadas dependencias, eliminada la librería PDF sin uso y dos clientes antiguos sin uso que pretendían consultar proveedores con claves VITE. El constructor HTML de impresión escapa también el nombre del activo. Los paneles de terminal y administrador se cargan bajo demanda tras iniciar sesión.
 
-## Correo: requisito de activación
+## Contraseñas y correo
 
-En la revisión del 16/09/2026 **no había SMTP propio configurado**. El servicio de correo por defecto de Supabase solo sirve para las direcciones autorizadas del equipo y no habilita una beta abierta. Se necesita configurar un remitente y credenciales SMTP en Authentication → Emails → SMTP Settings. No se deben incluir esas credenciales en GitHub, variables VITE ni conversaciones.
+No se necesita SMTP para el registro e inicio de sesión actuales. En «Mi contraseña» se puede establecer o cambiar la contraseña de la cuenta con una sesión activa; esto también permite migrar la cuenta del propietario que entró con un enlace. Las contraseñas son gestionadas por Supabase Auth y nunca se guardan en las tablas de informes ni se muestran al administrador.
 
-La URL de sitio y redirección se ha configurado a `https://sftmvpppp.vercel.app/`. No desactivar la confirmación del e-mail para resolver un fallo de entrega: permitiría suplantar direcciones y no sustituye el envío del enlace.
+La recuperación automática de contraseña por correo no está disponible. La interfaz lo indica antes del registro. No se debe restablecer una contraseña basándose solo en que alguien afirma ser dueño de un e-mail: no se comprueba su posesión en esta modalidad. El cambio de dirección mantiene la protección de confirmación de Supabase y no se ofrece en la interfaz.
 
-Antes de invitar testers, probar registro, recepción y apertura del enlace con un correo externo al equipo. Hasta completar esa configuración y prueba, el registro externo **no está listo**, aunque el código y los despliegues estén completos.
+La URL de sitio y redirección sigue siendo `https://sftmvpppp.vercel.app/`. El registro directo, el inicio con contraseña, el rechazo de contraseñas incorrectas y el cambio de contraseña se prueban con cuentas temporales que se eliminan al terminar. `tests/admin-identity.sql` comprueba que otra identidad no hereda administración aunque use la dirección del propietario.
 
 ## Validación
 
