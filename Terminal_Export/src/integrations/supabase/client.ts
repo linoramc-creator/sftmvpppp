@@ -4,6 +4,8 @@ import type { Database } from './types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// Recovery is the only email callback accepted; normal access uses passwords.
+export const isPasswordRecovery = window.location.pathname === '/' && new URLSearchParams(window.location.hash.slice(1)).get('type') === 'recovery';
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
@@ -13,7 +15,6 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
-    // Password access stays on this site; URL fragments cannot inject sessions.
-    detectSessionInUrl: false,
+    detectSessionInUrl: (url, params) => url.pathname === '/' && params.type === 'recovery',
   }
 });
