@@ -14,12 +14,13 @@ function request<T>(panel: string, subject: string, sector: boolean, ttl: number
   if (pending.has(key)) return pending.get(key) as Promise<T>;
   const promise = authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', },
-    body: JSON.stringify({ panel, subject, sector }), signal: AbortSignal.timeout(55000),
+    body: JSON.stringify({ panel, subject, sector }), signal: AbortSignal.timeout(panel === 'business' ? 110000 : 75000),
   }).then(async response => {
     if (!response.ok) throw new Error('No se ha podido consultar este apartado.');
     const data = await response.json();
     if (cache.size >= 100) cache.delete(cache.keys().next().value!);
-    cache.set(key, { at: Date.now(), data }); return data;
+    const incomplete = panel === 'business' && (!data.products?.length || !data.geography?.length);
+    if (!incomplete) cache.set(key, { at: Date.now(), data }); return data;
   }).finally(() => pending.delete(key));
   pending.set(key, promise);
   return promise;
@@ -117,9 +118,9 @@ function Segments({ title, periods }: { title: string; periods: SegmentPeriod[] 
   const current = periods.find(p => p.date === selected) ?? periods[0];
   const sum = current?.segments.reduce((total, s) => total + s.value, 0) ?? 0;
   return <Box title={title}>{!current ? <p className="text-sm text-muted-foreground">Desglose de ingresos no disponible.</p> : <>
-    <select className="bg-background border border-border p-2 text-sm mb-3" aria-label={`Período de ${title}`} value={current.date} onChange={e => setSelected(e.target.value)}>{periods.map(p => <option key={p.date} value={p.date}>Ejercicio cerrado: {p.date} · {p.currency}</option>)}</select>
+    <select className="bg-background border border-border p-2 text-sm mb-3" aria-label={`Período de ${title}`} value={current.date} onChange={e => setSelected(e.target.value)}>{periods.map(p => <option key={p.date} value={p.date}>{p.period === 'quarterly' ? 'Trimestre cerrado' : 'Ejercicio cerrado'}: {p.date} · {p.currency}</option>)}</select>
     <div style={{ height: Math.max(250, current.segments.length * 32) }}><ResponsiveContainer width="100%" height="100%"><BarChart data={current.segments} layout="vertical" margin={{ right: 20 }}><CartesianGrid stroke="#253044" /><XAxis type="number" tickFormatter={compact} tick={{ fontSize: 10 }} /><YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10 }} /><Tooltip formatter={(v: number) => `${fmt(v, 0)} ${current.currency}`} contentStyle={{ background: '#0f172a', color: '#e2e8f0' }} /><Bar dataKey="value" name="Ingresos" fill="#60a5fa" /></BarChart></ResponsiveContainer></div>
-    <div className="overflow-x-auto"><table className="w-full text-xs text-left"><thead><tr><th className="p-2">Segmento</th><th className="p-2">Ingresos ({current.currency})</th><th className="p-2">% de la suma presentada</th></tr></thead><tbody>{current.segments.map(s => <tr key={s.name} className="border-t border-border"><td className="p-2">{s.name}</td><td className="p-2">{fmt(s.value, 0)}</td><td className="p-2">{sum > 0 ? fmt(s.value / sum * 100) + '%' : 'N/D'}</td></tr>)}</tbody></table></div><p className="text-xs text-muted-foreground mt-3">Las categorías pueden solaparse o incluir eliminaciones contables. La suma presentada no equivale necesariamente a los ingresos consolidados.</p>
+    <div className="overflow-x-auto"><table className="w-full text-xs text-left"><thead><tr><th className="p-2">Segmento</th><th className="p-2">{current.currency === '%' ? 'Distribución publicada (%)' : 'Ingresos (' + current.currency + ')' }</th><th className="p-2">% de la suma presentada</th></tr></thead><tbody>{current.segments.map(s => <tr key={s.name} className="border-t border-border"><td className="p-2">{s.name}</td><td className="p-2">{fmt(s.value, 0)}</td><td className="p-2">{sum > 0 ? fmt(s.value / sum * 100) + '%' : 'N/D'}</td></tr>)}</tbody></table></div><p className="text-xs text-muted-foreground mt-3">{current.currency === '%' ? 'Porcentajes publicados, sujetos a redondeo. El resto de mercados se calcula como diferencia hasta el 100 %; no se estima su importe.' : 'Importes del período indicado. Las eliminaciones contables se muestran cuando están publicadas.'}</p>
   </>}</Box>;
 }
 export function BusinessView({ ticker }: { ticker: string }) {

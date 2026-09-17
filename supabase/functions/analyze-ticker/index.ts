@@ -1,4 +1,5 @@
 import { secureRequest } from "./beta-security.ts";
+import { researchPeers } from './business-research.ts';
 import { bondsPanel, businessPanel, institutionalPanel, newsPanel, curateNews, cached, fmpHolders } from "./panels.ts";
 // ============================================================
 // UNIFIED ANALYZE FUNCTION
@@ -502,7 +503,7 @@ async function fetchFinnhubData(ticker: string, key: string) {
 }
 
 async function fetchPeerData(peers: string[], key: string) {
-  if (!peers.length || !key) return [];
+  if (!peers.length) return [];
   const results = await Promise.all(
     peers.slice(0, 5).map(async (peer) => {
       const t = encodeURIComponent(peer);
@@ -511,6 +512,14 @@ async function fetchPeerData(peers: string[], key: string) {
         finnhubGet(`/stock/profile2?symbol=${t}`, key),
         finnhubGet(`/stock/metric?symbol=${t}&metric=all`, key),
       ]);
+      if(!quote?.c || !profile?.name){
+        const y=await eYahooQuoteSummary(peer,'price,defaultKeyStatistics,financialData,summaryDetail');
+        const raw=(v:any)=>typeof v==='number'?v:v?.raw;
+        const price=raw(y?.price?.regularMarketPrice);
+        if(!price)return null;
+        const cap=raw(y?.price?.marketCap),stat=y?.defaultKeyStatistics,fin=y?.financialData;
+        return {ticker:peer,name:y?.price?.longName??peer,price:`${price.toFixed(2)} ${y?.price?.currency??''}`,marketCap:cap?`${(cap/1e9).toFixed(2)}B ${y?.price?.currency??''}`:'N/D',pe:raw(y?.summaryDetail?.trailingPE)??'N/D',pb:raw(stat?.priceToBook)??'N/D',evEbitda:raw(stat?.enterpriseToEbitda)??'N/D',roe:raw(fin?.returnOnEquity)!=null?`${(raw(fin.returnOnEquity)*100).toFixed(1)}%`:'N/D',netMargin:raw(fin?.profitMargins)!=null?`${(raw(fin.profitMargins)*100).toFixed(1)}%`:'N/D',revenueGrowth:raw(fin?.revenueGrowth)!=null?`${(raw(fin.revenueGrowth)*100).toFixed(1)}%`:'N/D',weekReturn52:'N/D',beta:raw(stat?.beta)??'N/D'};
+      }
       const m = metrics?.metric ?? null;
       const mc = profile?.marketCapitalization ?? null;
 
@@ -539,7 +548,7 @@ async function fetchPeerData(peers: string[], key: string) {
       };
     })
   );
-  return results;
+  return results.filter(Boolean);
 }
 
 // =====================================================
@@ -1926,7 +1935,11 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
         const finnhubData = env.FINNHUB_KEY ? await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY) : null;
         const companyName = finnhubData?.profile?.name ?? cleanTicker;
         const sector      = finnhubData?.profile?.finnhubIndustry ?? "";
-        const peers       = finnhubData?.peers ?? [];
+        let peers: string[] = finnhubData?.peers ?? [];
+        if(!etfMode && peers.length<3){
+          const discovered=await cached(`stock-peers:${cleanTicker}`,86400000,()=>researchPeers(companyName,cleanTicker,env.TAVILY_KEY,env.GEMINI_API_KEY));
+          peers=[...new Set([...peers,...discovered])].filter(p=>p!==cleanTicker).slice(0,5);
+        }
 
         // Step 2: All remaining data in parallel
         const [
@@ -1951,7 +1964,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
           !etfMode && env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
           !etfMode && env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
           !etfMode && env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
-          !etfMode && env.FINNHUB_KEY ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
+          !etfMode ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
           fetchFredData(env.FRED_KEY),
           etfMode ? Promise.resolve("") : fetchFmpData(cleanTicker, env.FMP_KEY),
           fetchTwelveData(cleanTicker, env.TWELVE_KEY),

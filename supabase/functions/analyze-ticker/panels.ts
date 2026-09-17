@@ -1,4 +1,5 @@
 import { buildOpinions, editBusiness, recentPartnerships, type OpinionsPanel, type BusinessSummary, type Partnership } from "./editorial.ts";
+import { researchBusiness } from './business-research.ts';
 export type { OpinionsPanel } from "./editorial.ts";
 // On-demand panels with bounded per-isolate cache and request coalescing.
 type Row = Record<string, any>;
@@ -9,7 +10,7 @@ export type BondFund = { symbol: string; label: string; price: number | null; ch
 export type BondsPanel = { fetchedAt: string; series: Series[]; etfs: BondFund[] };
 export type Holder = { name: string; shares: number | null; value: number | null; pct: number | null; date: string | null; source: string; url: string };
 export type InstitutionalPanel = { fetchedAt: string; holders: Holder[]; institutionalPct: number | null; documents: Article[]; sources: string[] };
-export type SegmentPeriod = { date: string; currency: string; segments: { name: string; value: number }[] };
+export type SegmentPeriod = { date: string; currency: string; period?: 'annual' | 'quarterly'; documentUrl?: string; segments: { name: string; value: number }[] };
 export type Channel = { name: string; evidence: string; url: string };
 export type BusinessPanel = { fetchedAt: string; description: string; products: SegmentPeriod[]; geography: SegmentPeriod[]; channels: Channel[]; documents: Article[]; source: string; summary: BusinessSummary | null; partnerships: Partnership[] };
 export type NewsPanel = { fetchedAt: string; articles: Article[]; sectorArticles?: Article[]; sectorName?: string };
@@ -23,14 +24,15 @@ export async function cached<T>(key: string, ttl: number, fn: () => Promise<T>):
   if (pending.has(key)) return pending.get(key) as Promise<T>;
   const promise = fn().then(value => {
     if (cache.size >= 150) cache.delete(cache.keys().next().value!);
-    cache.set(key, { expires: Date.now() + (value === null ? Math.min(ttl, 60000) : ttl), value });
+    const incomplete = value === null || (key.startsWith('business:') && (!(value as any)?.products?.length || !(value as any)?.geography?.length)) || (key.startsWith('news:') && !(value as any)?.articles?.length);
+    cache.set(key, { expires: Date.now() + (incomplete ? Math.min(ttl, 120000) : ttl), value });
     return value;
   }).finally(() => pending.delete(key));
   pending.set(key, promise);
   return promise;
 }
 const HOUR = 3600000;
-const NEWS_DOMAINS = ['reuters.com', 'apnews.com', 'bloomberg.com', 'ft.com', 'wsj.com', 'cnbc.com', 'marketwatch.com', 'barrons.com', 'finance.yahoo.com', 'federalreserve.gov'];
+const NEWS_DOMAINS = ['reuters.com', 'apnews.com', 'bloomberg.com', 'ft.com', 'wsj.com', 'cnbc.com', 'marketwatch.com', 'barrons.com', 'finance.yahoo.com', 'federalreserve.gov', 'businesswire.com', 'globenewswire.com', 'prnewswire.com', 'utilitydive.com', 'industryweek.com', 'investors.com'];
 const num = (v: unknown): number | null => {
   if (v && typeof v === 'object' && 'raw' in v) return num((v as Row).raw);
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -50,8 +52,8 @@ async function get(url: string, init?: RequestInit): Promise<Row | Row[] | null>
 export function curateNews(articles: Article[], subject: string, now = Date.now(), limit = 5, thematic = false, maxAgeDays = 14): Article[] {
   const stop = new Set(['news', 'latest', 'sector', 'etf', 'inc', 'corp', 'the', 'and', 'of', 'de', 'del', 'la', 'trust', 'fund', 'funds', 'large', 'blend', 'index', 'state', 'street']);
   const tokens = subject.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter(t => t.length > 1 && !stop.has(t)) ?? [];
-  const noise = /\b(stocks? to buy|should you buy|best stocks|millionaire|motley fool|sponsored|promoted|price prediction|top \d+ stocks|buy now|worth buying|stock alert|urgent message|emmy|oscars|what you give up|here.s exactly)\b/i;
-  const catalyst = /\b(earnings|revenue|guidance|merger|acquisition|regulat\w*|tariff\w*|lawsuits?|approval|contracts?|dividends?|buybacks?|rates?|inflation|flows?|holdings?|launch\w*|unveil\w*|debut\w*|results?|profits?|sales|yields?|policy|outflows?|inflows?|resultados|ingresos|beneficios?|tipos|fusi[oó]n|arancel\w*|demanda\w*|contrato\w*|inversi[oó]n|recort\w*|crecimiento|producci[oó]n)\b/i;
+  const noise = /\b(stock market today|dow jones futures|eye buy points|stock forecast & analyst predictions|investor deadline|lead plaintiff|substantial losses|opportunity to lead|class action alert|ran the numbers|industry outlook|market size|market companies|market research|weekly review|what does she know|forecasts suggests?|will be worth|stocks? to buy|should you buy|best stocks|millionaire|motley fool|sponsored|promoted|price prediction|top \d+ stocks|buy now|worth buying|stock alert|urgent message|emmy|oscars|what you give up|here.s exactly)\b/i;
+  const catalyst = /\b(upgrades?|downgrades?|price target|ratings?|partnership|capacity|investment|earnings|revenue|guidance|merger|acquisition|regulat\w*|tariff\w*|lawsuits?|approval|contracts?|dividends?|buybacks?|rates?|inflation|flows?|holdings?|launch\w*|unveil\w*|debut\w*|results?|profits?|sales|yields?|policy|outflows?|inflows?|resultados|ingresos|beneficios?|tipos|fusi[oó]n|arancel\w*|demanda\w*|contrato\w*|inversi[oó]n|recort\w*|crecimiento|producci[oó]n)\b/i;
   const seenUrls = new Set<string>();
   const launches = new Map<string, number>();
   const titles: Set<string>[] = [];
@@ -94,36 +96,51 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
   return cached(`news:${sector}:${subject}`, HOUR, async () => {
     const aliases: Record<string, string> = { semiconductores: 'semiconductors semiconductor chips', 'inteligencia artificial': 'artificial intelligence AI', 'energía': 'energy oil gas', salud: 'healthcare pharmaceutical biotech', defensa: 'defense aerospace', consumo: 'consumer retail', 'tecnología': 'technology software', bancos: 'banks banking', 'inmobiliario': 'real estate REIT' };
     const topic = sector ? `${subject} ${aliases[subject.toLowerCase()] ?? ''}` : subject;
-    const [raw, profile] = await Promise.all([
+    const [raw, profile, finnhubNews, fmpNews] = await Promise.all([
       get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(topic)}&newsCount=15&quotesCount=${sector ? 0 : 1}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       !sector && deps ? cached(`news-name:${subject}`, 24 * HOUR, () => deps.summary(subject, 'quoteType,assetProfile,fundProfile')) : null,
+      !sector && env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(subject)}&from=${new Date(Date.now()-90*86400000).toISOString().slice(0,10)}&to=${new Date().toISOString().slice(0,10)}&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
+      !sector && env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(subject)}&limit=50&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
     ]);
     const data = raw as Row;
     const company = sector ? topic : profile?.quoteType?.longName ?? profile?.quoteType?.shortName ?? data?.quotes?.[0]?.longname ?? data?.quotes?.[0]?.shortname ?? subject;
     const rows: Article[] = (data?.news ?? []).map((r: Row) => ({ title: r.title, url: r.link, source: r.publisher, date: day(r.providerPublishTime) ?? '' }));
-    const trusted = (a: Article) => { try { return NEWS_DOMAINS.some(domain => new URL(a.url).hostname === domain || new URL(a.url).hostname.endsWith('.' + domain)); } catch { return false; } };
+    for(const r of Array.isArray(finnhubNews)?finnhubNews:[])if(r.url&&r.headline)rows.push({title:r.headline,url:r.url,source:r.source??'',date:day(r.datetime)??'',excerpt:r.summary??''});
+    for(const r of Array.isArray(fmpNews)?fmpNews:[])if(r.url&&r.title)rows.push({title:r.title,url:r.url,source:r.publisher??'',date:day(r.publishedDate)??'',excerpt:r.text??''});
+    const allowedDomains = [...NEWS_DOMAINS];
+    try { if(profile?.assetProfile?.website) allowedDomains.push(new URL(profile.assetProfile.website).hostname.replace(/^www\./,'')); } catch {}
     const thematic = sector || profile?.quoteType?.quoteType === 'ETF';
     const category = profile?.fundProfile?.categoryName ?? '';
     const broadUsMarket = thematic && /^(SPY|VOO|IVV|VTI|ITOT|SCHB)$/.test(subject);
     const sectorName = sector ? subject : broadUsMarket ? 'Bolsa de EE. UU.' : profile?.assetProfile?.sector || category || (thematic ? company : '');
-    const sectorContexts: Record<string, string> = { Technology: 'technology software semiconductor chips AI Nvidia Microsoft Apple cloud', 'Bolsa de EE. UU.': 'S&P 500 Nasdaq equities stocks market Fed inflation', Healthcare: 'healthcare pharmaceutical biotech FDA drugs', Financials: 'banks banking insurance financial', 'Financial Services': 'banks banking insurance financial', Energy: 'energy oil gas OPEC', 'Consumer Cyclical': 'consumer retail automotive sales', 'Consumer Defensive': 'consumer staples retail food', Industrials: 'industrial manufacturing aerospace transport', 'Real Estate': 'real estate REIT property housing', Utilities: 'utilities electricity power', 'Basic Materials': 'materials metals mining chemicals', 'Communication Services': 'telecom streaming advertising media' };
+    const sectorContexts: Record<string, string> = { Technology: 'technology software semiconductor chips AI Nvidia Microsoft Apple cloud', 'Bolsa de EE. UU.': 'S&P 500 Nasdaq equities stocks market Fed inflation', Healthcare: 'healthcare pharmaceutical biotech FDA drugs', Financials: 'banks banking insurance financial', 'Financial Services': 'banks banking insurance financial', Energy: 'energy oil gas OPEC', 'Consumer Cyclical': 'consumer retail automotive sales', 'Consumer Defensive': 'consumer staples retail food', Industrials: 'industrial manufacturing aerospace transport electricity power hydrogen fuel cells infrastructure', 'Real Estate': 'real estate REIT property housing', Utilities: 'utilities electricity power', 'Basic Materials': 'materials metals mining chemicals', 'Communication Services': 'telecom streaming advertising media' };
     async function selection(name: string, initial: Article[], theme: boolean, query = name, required?: RegExp) {
-      let candidates = initial.filter(trusted);
+      let candidates = initial;
       const choose = (days: number) => curateNews(required ? candidates.filter(a => required.test(a.title)) : candidates, name, Date.now(), 6, theme, days);
       let selected = choose(30);
       if (selected.length < 6) {
-        candidates = [...candidates, ...await search(query + ' news', env.TAVILY_KEY, true, NEWS_DOMAINS, 30, 18)].filter(trusted);
+        candidates = [...candidates, ...await search(query + ' results contracts partnerships', env.TAVILY_KEY, true, allowedDomains, 30, 18)];
         selected = choose(30);
       }
       if (selected.length < 6) {
-        candidates = [...candidates, ...await search(query + ' earnings outlook', env.TAVILY_KEY, true, NEWS_DOMAINS, 90, 18)].filter(trusted);
+        candidates = [...candidates, ...await search(query + ' earnings outlook contracts investment', env.TAVILY_KEY, true, allowedDomains, 90, 18)];
         selected = choose(90);
+      }
+      if (selected.length < 6) {
+        // Broader discovery only when the initial financial press coverage is thin.
+        // Dates, direct relevance, event significance and deduplication still apply.
+        candidates = [...candidates, ...await search(query + ' revenue growth partnership capacity results', env.TAVILY_KEY, true, [], 90, 20)];
+        selected = choose(90);
+      }
+      if (selected.length < 6) {
+        candidates = [...candidates, ...await search(query + ' announced partnership contract agreement', env.TAVILY_KEY, true, [], 180, 20)];
+        selected = choose(180);
       }
       return selected;
     }
     const [articles, sectorArticles] = await Promise.all([
-      selection(`${subject} ${company}`, rows, thematic, broadUsMarket ? `${subject} S&P 500 ETF` : company, broadUsMarket ? /\bSPY\b|\bSPDR\b|\bVOO\b|\bIVV\b|\bVTI\b|S&P\s*500|S.P.500/i : undefined),
-      !sector && sectorName ? selection(sectorContexts[sectorName] ?? sectorName, [], true, broadUsMarket ? 'US stock market' : sectorName + ' sector') : Promise.resolve([]),
+      selection(`${subject} ${company}`, rows, thematic, broadUsMarket ? `${subject} S&P 500 ETF` : company, broadUsMarket ? /\bSPY\b|\bSPDR\b|\bVOO\b|\bIVV\b|\bVTI\b|S&P\s*500|S.P.500/i : !thematic && company !== subject ? new RegExp(company.replace(/\b(incorporated|corporation|corp|inc|ltd)\b\.?/gi,'').trim().split(/\s+/).slice(0,2).join(' ').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i') : undefined),
+      !sector && sectorName ? selection(`${sectorContexts[sectorName] ?? sectorName} ${profile?.assetProfile?.industry ?? ''}`, [], true, broadUsMarket ? 'US stock market' : `${profile?.assetProfile?.industry || sectorName} industry`) : Promise.resolve([]),
     ]);
     return { fetchedAt: new Date().toISOString(), articles, sectorArticles, sectorName };
   });
@@ -204,14 +221,16 @@ export function extractChannels(documents: Article[]): Channel[] {
 export async function businessPanel(ticker: string, env: Env, deps: Dependencies): Promise<BusinessPanel> {
   return cached(`business:${ticker}`, 24 * HOUR, async () => {
     const [summary, products, geography, profileRaw] = await Promise.all([
-      deps.summary(ticker, 'assetProfile'),
+      deps.summary(ticker, 'assetProfile,quoteType'),
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-product-segmentation?symbol=${encodeURIComponent(ticker)}&period=annual&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-geographic-segmentation?symbol=${encodeURIComponent(ticker)}&period=annual&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
     ]);
     const profile = Array.isArray(profileRaw) ? profileRaw[0] : null;
-    const company = profile?.companyName ?? ticker;
+    const company = profile?.companyName ?? summary?.quoteType?.longName ?? summary?.quoteType?.shortName ?? ticker;
     const description = summary?.assetProfile?.longBusinessSummary ?? profile?.description ?? '';
+    const structuredProducts=segmentPeriods(products), structuredGeography=segmentPeriods(geography);
+    const researchPromise=(!structuredProducts.length||!structuredGeography.length) ? researchBusiness(company,ticker,profile?.website??summary?.assetProfile?.website??'',env.TAVILY_KEY,env.GEMINI_API_KEY??'') : Promise.resolve({products:[],geography:[],context:''});
     const shortCompany = company.replace(/ (inc\.?|corporation|corp\.?)$/i, '');
     const partnershipDomains = [...NEWS_DOMAINS];
     try { if (profile?.website) partnershipDomains.push(new URL(profile.website).hostname); } catch { /* optional company website */ }
@@ -221,7 +240,8 @@ export async function businessPanel(ticker: string, env: Env, deps: Dependencies
       const text = `${doc.title} ${doc.excerpt ?? ''}`.toLowerCase();
       return text.includes(ticker.toLowerCase()) || text.includes(company.toLowerCase().replace(/ (inc\.?|corporation|corp\.?)$/i, ''));
     });
-    const editorial = await editBusiness(description, company, documents, env.GEMINI_API_KEY ?? '');
-    return { fetchedAt: new Date().toISOString(), description: '', products: segmentPeriods(products), geography: segmentPeriods(geography), channels: [], documents, source: '', summary: editorial.summary, partnerships: editorial.partnerships };
+    const research=await researchPromise;
+    const editorial = await editBusiness([description,research.context].filter(Boolean).join('\n'), company, documents, env.GEMINI_API_KEY ?? '');
+    return { fetchedAt: new Date().toISOString(), description: '', products: structuredProducts.length?structuredProducts:research.products, geography: structuredGeography.length?structuredGeography:research.geography, channels: [], documents, source: '', summary: editorial.summary, partnerships: editorial.partnerships };
   });
 }
