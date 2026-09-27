@@ -12,8 +12,8 @@ type CorrelationData={symbols:string[];correlation:(number|null)[][];observation
 const pct=(v:number|null|undefined)=>v==null?"—":`${v>0?"+":""}${v.toFixed(2)}%`;
 const compact=(v:number|null|undefined)=>v==null?"—":Intl.NumberFormat("es-ES",{notation:"compact",maximumFractionDigits:2}).format(v);
 
-export default function MarketTools(){
-  const [tab,setTab]=useState<"comparison"|"correlation">("comparison");
+export default function MarketTools({initialTab="comparison",compact:embedded=false}:{initialTab?:"comparison"|"correlation";compact?:boolean}){
+  const [tab,setTab]=useState<"comparison"|"correlation">(initialTab);
   const [symbols,setSymbols]=useState(SECTOR_ETFS.join(", "));
   const [compare,setCompare]=useState<ComparisonData|null>(null);
   const [corrSymbols,setCorrSymbols]=useState("SPY, QQQ, GLD, TLT");
@@ -31,8 +31,8 @@ export default function MarketTools(){
   const comparisonChart=useMemo(()=>{if(!compare)return[];const dates=new Map<number,Record<string,string|number|null>>();for(const asset of compare.assets){if(!asset.dates||!asset.closes?.length)continue;const start=asset.closes[0];asset.dates.forEach((time,i)=>{const row=dates.get(time)??{date:new Date(time*1000).toLocaleDateString("es-ES",{day:"2-digit",month:"short"})};row[asset.symbol]=start?+((asset.closes![i]/start-1)*100).toFixed(2):null;dates.set(time,row);});}return [...dates.entries()].sort((a,b)=>a[0]-b[0]).map(([,row])=>row);},[compare]);
   const button=(active:boolean)=>`px-4 py-2 text-[10px] tracking-widest border ${active?"border-primary text-primary bg-primary/10":"border-border text-muted-foreground hover:text-foreground"}`;
   return <main className="max-w-7xl mx-auto px-4 py-7 space-y-5">
-    <div><p className="text-primary text-[10px] tracking-[.25em]">ANÁLISIS DE MERCADO</p><h1 className="text-xl font-semibold mt-2">Sectores, ETF y correlaciones</h1><p className="text-sm text-muted-foreground mt-2">Datos históricos diarios para comparar actividad y co-movimientos entre activos.</p></div>
-    <nav className="flex gap-2 border-b border-border pb-3" aria-label="Herramientas de mercado"><button className={button(tab==="comparison")} onClick={()=>setTab("comparison")}>COMPARAR SECTORES Y ETF</button><button className={button(tab==="correlation")} onClick={()=>setTab("correlation")}>CORRELACIÓN ENTRE ACTIVOS</button></nav>
+    <div><p className="text-primary text-[10px] tracking-[.25em]">{embedded?"TERMINAL · MERCADOS":"ANÁLISIS DE MERCADO"}</p><h1 className="text-xl font-semibold mt-2">{tab==="comparison"?"Comparación de sectores y ETF":"Correlación entre activos"}</h1><p className="text-sm text-muted-foreground mt-2">{tab==="comparison"?"Compara rentabilidad, volumen negociado y actividad de ETF sectoriales.":"Explora el rendimiento y la correlación de los activos que elijas."}</p></div>
+    {!embedded&&<nav className="flex gap-2 border-b border-border pb-3" aria-label="Herramientas de mercado"><button className={button(tab==="comparison")} onClick={()=>setTab("comparison")}>COMPARAR SECTORES Y ETF</button><button className={button(tab==="correlation")} onClick={()=>setTab("correlation")}>CORRELACIÓN ENTRE ACTIVOS</button></nav>}
     {error&&<p role="alert" className="border border-destructive/40 p-3 text-sm text-destructive flex gap-2"><AlertCircle className="w-4 h-4 shrink-0"/>{error}</p>}
     {tab==="comparison"?<section className="space-y-5">
       <div className="border border-border bg-card p-4 space-y-3"><label className="text-xs tracking-wide block">ETF sectoriales de EE. UU. <span className="text-muted-foreground">(edita los tickers separados por comas; máximo 12)</span><textarea aria-label="ETF sectoriales" rows={2} value={symbols} onChange={e=>setSymbols(e.target.value)} className="mt-2 w-full resize-y bg-background border border-border px-3 py-2 text-sm"/></label><button disabled={busy||parsed.length<2} onClick={()=>void load("comparison")} className="inline-flex items-center gap-2 bg-primary text-black px-4 py-2 text-xs font-bold tracking-widest disabled:opacity-50">{busy?<Loader2 className="w-4 h-4 animate-spin"/>:<RefreshCw className="w-4 h-4"/>} ACTUALIZAR COMPARACIÓN</button></div>

@@ -19,6 +19,7 @@ import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
 import { downloadAnalysisPdf } from "@/lib/reportPdf";
+import MarketTools from "@/pages/MarketTools";
 import type { EtfResponse } from "@/types/etf";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -275,7 +276,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"ticker" | "etf" | "sector" | "bonos" | "guardados">("ticker");
+  const [navTab, setNavTab] = useState<"ticker" | "etf" | "sector" | "comparacion" | "correlacion" | "bonos" | "guardados">("ticker");
 
   const [clock, setClock] = useState("");
 
@@ -567,6 +568,8 @@ const Index = () => {
                 { label: "TICKER",    key: "ticker"    },
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
+                { label: "COMPARAR", key: "comparacion" },
+                { label: "CORRELACIÓN", key: "correlacion" },
                 { label: "BONOS", key: "bonos" },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
@@ -612,6 +615,8 @@ const Index = () => {
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "bonos" && <main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main>}
+      {navTab === "comparacion" && <MarketTools initialTab="comparison" compact />}
+      {navTab === "correlacion" && <MarketTools initialTab="correlation" compact />}
       {navTab === "ticker" && (
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
