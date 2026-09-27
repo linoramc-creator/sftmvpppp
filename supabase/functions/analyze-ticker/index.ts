@@ -1954,7 +1954,7 @@ async function handleMarketComparison(symbols:string[]):Promise<Response>{
     const chart=await fetchYahooChart(symbol,"3mo","1d");if(!chart)return {symbol,available:false};
     const last=chart.c.length-1,vol=chart.v?.[last]??null, dollarVolume=vol!=null?vol*chart.c[last]:null;
     const base=chart.c[Math.max(0,last-20)],meanVol=chart.v?.slice(Math.max(0,last-19),last+1).reduce((s,n)=>s+n,0)/(chart.v?.slice(Math.max(0,last-19),last+1).length||1)??null;
-    return {symbol,available:true,price:chart.c[last],change1d:last>0?(chart.c[last]/chart.c[last-1]-1)*100:null,change1m:base? (chart.c[last]/base-1)*100:null,volume:vol,dollarVolume,avgVolume20:meanVol,volumeVsAverage:meanVol&&vol!=null?vol/meanVol:null,netFundFlows:null,dates:chart.t,closes:chart.c};
+    return {symbol,available:true,lastTradeDate:new Date(chart.t[last]*1000).toISOString().slice(0,10),price:chart.c[last],change1d:last>0?(chart.c[last]/chart.c[last-1]-1)*100:null,change1m:base? (chart.c[last]/base-1)*100:null,volume:vol,dollarVolume,avgVolume20:meanVol,volumeVsAverage:meanVol&&vol!=null?vol/meanVol:null,netFundFlows:null,dates:chart.t,closes:chart.c};
   }));
   return panelJson({assets:rows,flowNote:"Flujos netos de suscripciones no disponibles de forma consistente para esta selección; volumen negociado y volumen en dólares son medidas de actividad, no entradas netas al fondo.",fetchedAt:new Date().toISOString()});
 }
@@ -1966,7 +1966,8 @@ async function handleAssetCorrelation(symbols:string[],range:string):Promise<Res
   const dates=[...dateSets.reduce((set,m)=>new Set([...set].filter(d=>m.has(d))),new Set(dateSets[0]?.keys()??[]))].sort();
   const returns=dateSets.map(m=>dates.slice(1).map((d,i)=>{const prev=m.get(dates[i]),cur=m.get(d);return prev&&cur?(cur/prev-1)*100:null;}));
   const correlation=returns.map((row,i)=>returns.map((other,j)=>{const pairs=row.map((v,k)=>[v,other[k]] as const).filter((p):p is readonly [number,number]=>p[0]!=null&&p[1]!=null);if(i===j)return 1;if(pairs.length<3)return null;const mx=pairs.reduce((s,p)=>s+p[0],0)/pairs.length,my=pairs.reduce((s,p)=>s+p[1],0)/pairs.length;const num=pairs.reduce((s,p)=>s+(p[0]-mx)*(p[1]-my),0),dx=Math.sqrt(pairs.reduce((s,p)=>s+(p[0]-mx)**2,0)),dy=Math.sqrt(pairs.reduce((s,p)=>s+(p[1]-my)**2,0));return dx&&dy?num/(dx*dy):null;}));
-  const chart=dates.map((date,k)=>{const row:Record<string,string|number|null>={date};for(let i=0;i<series.length;i++){const values=series[i].chart!.c;const start=values[0];row[series[i].symbol]=values[k]!=null&&start?+((values[k]/start-1)*100).toFixed(2):null;}return row;});
+  const starts=dateSets.map(m=>dates.length?m.get(dates[0]):undefined);
+  const chart=dates.map(date=>{const row:Record<string,string|number|null>={date};for(let i=0;i<series.length;i++){const value=dateSets[i].get(date),start=starts[i];row[series[i].symbol]=value!=null&&start?+((value/start-1)*100).toFixed(2):null;}return row;});
   return panelJson({symbols:series.map(a=>a.symbol),correlation,observations:Math.max(0,dates.length-1),chart,range,fetchedAt:new Date().toISOString()});
 }
 
