@@ -18,6 +18,7 @@ import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
 import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
+import { downloadAnalysisPdf } from "@/lib/reportPdf";
 import type { EtfResponse } from "@/types/etf";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ interface SavedReport {
   ticker: string;
   savedAt: string;
   analysis: string;
+  aiSummary?: string;
   quarterlyData: QuarterlyPeriod[];
 }
 
@@ -37,7 +39,7 @@ interface SavedReport {
 const STORAGE_KEY = "terminal_reports_v1";
 
 function reportFromRow(row: any): SavedReport {
-  return { id:row.id,kind:row.kind,ticker:row.subject,savedAt:new Date(row.saved_at).toLocaleDateString('es-ES'),analysis:row.payload?.analysis??'',quarterlyData:row.payload?.quarterlyData??[],etfDeep:row.payload?.etfDeep??null };
+  return { id:row.id,kind:row.kind,ticker:row.subject,savedAt:new Date(row.saved_at).toLocaleDateString('es-ES'),analysis:row.payload?.analysis??'',aiSummary:row.payload?.aiSummary,quarterlyData:row.payload?.quarterlyData??[],etfDeep:row.payload?.etfDeep??null };
 }
 
 // ── Section configs ────────────────────────────────────────────────────
@@ -252,6 +254,7 @@ const Index = () => {
   const [savedReports, setSavedReports]   = useState<SavedReport[]>([]);
   const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
+  const [summaryBusy,setSummaryBusy]=useState(false);
 
   // ETF apartado state (independent of the ticker flow)
   const [etfInput, setEtfInput]               = useState("");
@@ -495,6 +498,19 @@ const Index = () => {
     }catch(e){toast({title:'No se pudo guardar',description:(e as Error).message,variant:'destructive'});}finally{saveLock.current=false;setSaving(false);}
   };
   const handleSave = () => {void saveCurrent('ticker');};
+  const handleSummaryPdf = async () => {
+    if(!viewingReport)return;
+    const printWindow=window.open("","_blank");
+    if(!printWindow){toast({title:"Permite ventanas emergentes",description:"Necesitamos abrir la vista de impresión para crear el PDF."});return;}
+    setSummaryBusy(true);
+    try{
+      const result=await accountApi<{summary:string}>('summarizeReport',{id:viewingReport.id});
+      const updated={...viewingReport,aiSummary:result.summary};setViewingReport(updated);
+      setSavedReports(previous=>previous.map(r=>r.id===updated.id?updated:r));
+      downloadAnalysisPdf(result.summary,`${viewingReport.ticker} · resumen ejecutivo`,printWindow);
+    }catch(e){printWindow.close();toast({title:"No se pudo generar el PDF",description:e instanceof Error?e.message:"Inténtalo de nuevo."});}
+    finally{setSummaryBusy(false);}
+  };
   const handleDeleteReport = async (id:string) => {
     try{await accountApi('deleteReport',{id});setSavedReports(previous=>previous.filter(r=>r.id!==id));if(viewingReport?.id===id)setViewingReport(null);}
     catch(e){toast({title:'No se pudo eliminar',description:(e as Error).message,variant:'destructive'});}
@@ -664,6 +680,7 @@ const Index = () => {
               <span className="text-[10px] text-primary/70 tracking-widest">
                 INFORME GUARDADO · {viewingReport.ticker} · {viewingReport.savedAt}
               </span>
+              <button disabled={summaryBusy} onClick={()=>void handleSummaryPdf()} className="ml-auto mr-4 text-[10px] text-primary tracking-widest disabled:opacity-50">{summaryBusy?'RESUMIENDO…':'RESUMEN IA · PDF'}</button>
               <button
                 onClick={() => setViewingReport(null)}
                 className="text-[10px] text-muted-foreground/50 hover:text-foreground tracking-widest"

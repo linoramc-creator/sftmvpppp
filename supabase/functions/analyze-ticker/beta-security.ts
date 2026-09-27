@@ -37,10 +37,12 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   const symbol = (v: unknown) => typeof v==='string'&&SYMBOL.test(v.trim().toUpperCase());
   if(body.ticker!==undefined&&!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');
   if(body.subject!==undefined&&body.panel!=='bonds'&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
-  if(body.accountAction) return {request_class:'account'};
+  if(body.accountAction) return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   if(body.panel){
-    if(!['bonds','news','institutional','business'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
-    if(body.panel!=='bonds' && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
+    if(!['bonds','news','institutional','business','comparison','correlation'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>12||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 12 ETF válidos.');
+    if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
+    if(['news','institutional','business'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
     return {request_class:['news','business'].includes(body.panel)?'expensive':'data'};
   }
   if(body.marketData===true){if(body.symbols!==undefined&&(!Array.isArray(body.symbols)||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Lista de activos inválida.');return {request_class:'data'};}
@@ -73,6 +75,20 @@ async function account(body: Body,user: User): Promise<Response> {
       const cleaned={analysis:payload.analysis,quarterlyData:payload.quarterlyData,etfDeep:kind==='etf'?payload.etfDeep??null:null};
       return json(await rpc('beta_save_report',{uid:user.id,report_kind:kind,report_subject:subject.trim(),report_payload:cleaned}));
     }
+    case 'summarizeReport':{
+      if(!UUID.test(body.id??''))throw new BetaError(400,'Informe inválido.');
+      const rows=await service(`beta_reports?id=eq.${body.id}&user_id=eq.${user.id}&select=*&limit=1`);
+      if(!rows.length)throw new BetaError(404,'Informe no encontrado.');
+      const row=rows[0];if(typeof row.payload?.aiSummary==='string'&&row.payload.aiSummary.length>0)return json({summary:row.payload.aiSummary,cached:true});
+      const key=env('GEMINI_API_KEY');if(!key)throw new BetaError(503,'El resumen con IA no está disponible ahora.');
+      const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(key)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:'Resume en español el informe financiero proporcionado en 8-12 viñetas claras: tesis, valoración, crecimiento, riesgos, catalizadores y conclusión equilibrada. Usa exclusivamente el texto dado, no inventes datos ni recomendaciones personalizadas. Máximo 500 palabras.'}]},contents:[{role:'user',parts:[{text:`Activo: ${row.subject}\n\nInforme:\n${String(row.payload.analysis).slice(0,70000)}`}]}],generationConfig:{temperature:0.2,maxOutputTokens:900}}),signal:AbortSignal.timeout(30000)});
+      if(!response.ok)throw new BetaError(503,'No se pudo generar el resumen. Inténtalo de nuevo.');
+      const result=await response.json();const summary=result?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text??'').join('').trim();
+      if(!summary||summary.length>12000)throw new BetaError(503,'El resumen no está disponible.');
+      const payload={...row.payload,aiSummary:summary};
+      await service(`beta_reports?id=eq.${row.id}&user_id=eq.${user.id}`,{method:'PATCH',body:JSON.stringify({payload}),headers:{Prefer:'return=minimal'}});
+      return json({summary,cached:false});
+    }
     case 'deleteReport':if(!UUID.test(body.id??''))throw new BetaError(400,'Informe inválido.');await service(`beta_reports?id=eq.${body.id}&user_id=eq.${user.id}`,{method:'DELETE'});return json({ok:true});
     case 'adminOverview':{
       if(body.targetId!==undefined&&body.targetId!==null&&!UUID.test(body.targetId))throw new BetaError(400,'Usuario inválido.');
@@ -81,6 +97,13 @@ async function account(body: Body,user: User): Promise<Response> {
     case 'adminRevoke':if(!UUID.test(body.targetId??'')||typeof body.revoked!=='boolean')throw new BetaError(400,'Usuario inválido.');await rpc('beta_set_revoked',{admin_uid:user.id,target_uid:body.targetId,revoke_access:body.revoked});return json({ok:true});
     default:throw new BetaError(400,'Operación inválida.');
   }
+}
+const cacheKey=(kind:string,subject:string)=>`${kind}:${subject.trim().toUpperCase()}`;
+export async function readSharedReport(kind:string,subject:string):Promise<any|null>{
+  try{const rows=await service(`beta_analysis_cache?cache_key=eq.${encodeURIComponent(cacheKey(kind,subject))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=payload&limit=1`);return rows[0]?.payload??null;}catch{return null;}
+}
+export async function writeSharedReport(kind:string,subject:string,payload:any):Promise<void>{
+  try{await service('beta_analysis_cache?on_conflict=cache_key',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({cache_key:cacheKey(kind,subject),kind,subject:subject.trim().slice(0,80),payload,expires_at:new Date(Date.now()+2*60*60*1000).toISOString()})});await service(`beta_analysis_cache?expires_at=lt.${encodeURIComponent(new Date().toISOString())}`,{method:'DELETE'});}catch{console.error('Could not persist shared report cache');}
 }
 async function finish(id: string,status: string){try{await service(`beta_usage?id=eq.${id}&status=eq.started`,{method:'PATCH',body:JSON.stringify({status,finished_at:new Date().toISOString()})});}catch{console.error('Could not finalize usage record');}}
 function tracked(response: Response,id: string): Response {

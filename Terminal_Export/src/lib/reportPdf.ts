@@ -96,7 +96,7 @@ function markdownToHtml(md: string): string {
   return html.join("\n");
 }
 
-export function downloadAnalysisPdf(markdown: string, ticker: string) {
+export function downloadAnalysisPdf(markdown: string, ticker: string, targetWindow?: Window) {
   const bodyHtml = markdownToHtml(markdown);
   const safeTicker = ticker.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]!);
   const dateStr = new Date().toLocaleDateString("es-ES", {
@@ -105,7 +105,7 @@ export function downloadAnalysisPdf(markdown: string, ticker: string) {
     day: "numeric",
   });
 
-  const win = window.open("", "_blank");
+  const win = targetWindow ?? window.open("", "_blank");
   if (!win) {
     alert("Permite ventanas emergentes en tu navegador para descargar el PDF.");
     return;
@@ -215,11 +215,11 @@ strong { font-weight: 700; }
 </head>
 <body>
 <div class="report-header">
-  <h1>${safeTicker} — Informe Financiero</h1>
-  <div class="subtitle">AI-Powered Equity Research &nbsp;|&nbsp; ${dateStr} &nbsp;|&nbsp; Datos orientativos. No constituyen asesoramiento financiero.</div>
+  <h1>${safeTicker} — Resumen Financiero</h1>
+  <div class="subtitle">Resumen del informe guardado &nbsp;|&nbsp; ${dateStr} &nbsp;|&nbsp; Información orientativa; no constituye asesoramiento financiero.</div>
 </div>
 ${bodyHtml}
-<div class="footer">Generado por AI · Fuentes: Finnhub, Tavily · ${dateStr}</div>
+<div class="footer">${dateStr} · Información orientativa; no constituye asesoramiento financiero.</div>
 <script>
 window.onload = function() {
   setTimeout(function() { window.print(); }, 500);

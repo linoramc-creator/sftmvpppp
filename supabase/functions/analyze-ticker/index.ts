@@ -1,4 +1,4 @@
-import { secureRequest } from "./beta-security.ts";
+import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
 import { researchPeers } from './business-research.ts';
 import { bondsPanel, businessPanel, institutionalPanel, newsPanel, curateNews, cached, fmpHolders } from "./panels.ts";
 // ============================================================
@@ -242,10 +242,10 @@ async function fetchYahooChart(
   symbol: string,
   range = "3mo",
   interval = "1d",
-): Promise<{ t: number[]; c: number[]; o: number[]; h: number[]; l: number[] } | null> {
+): Promise<{ t: number[]; c: number[]; o: number[]; h: number[]; l: number[]; v?: number[] } | null> {
   const cacheKey = `yf-chart-${symbol}-${range}-${interval}`;
   const cached = yfCacheGet(cacheKey);
-  if (cached !== undefined) return cached as { t: number[]; c: number[]; o: number[]; h: number[]; l: number[] } | null;
+  if (cached !== undefined) return cached as { t: number[]; c: number[]; o: number[]; h: number[]; l: number[]; v?: number[] } | null;
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
     const r = await fetch(url, { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(9_000) });
@@ -259,6 +259,7 @@ async function fetchYahooChart(
     const opens: Array<number | null>  = Array.isArray(quote.open)  ? quote.open  : [];
     const highs: Array<number | null>  = Array.isArray(quote.high)  ? quote.high  : [];
     const lows:  Array<number | null>  = Array.isArray(quote.low)   ? quote.low   : [];
+    const volumes: Array<number | null> = Array.isArray(quote.volume) ? quote.volume : [];
     // Forward-fill close gaps so the line never breaks, keep timestamps aligned.
     // OHLC gaps fall back to the close of the same session (degenerate candle
     // rather than a crash or a hole).
@@ -268,6 +269,7 @@ async function fetchYahooChart(
     const o: number[] = [];
     const h: number[] = [];
     const l: number[] = [];
+    const v: number[] = [];
     for (let i = 0; i < ts.length; i++) {
       const close = filled[i];
       if (close == null) continue;
@@ -275,8 +277,9 @@ async function fetchYahooChart(
       o.push(opens[i] ?? (close as number));
       h.push(highs[i] ?? (close as number));
       l.push(lows[i]  ?? (close as number));
+      v.push(volumes[i] ?? 0);
     }
-    const out = c.length > 1 ? { t, c, o, h, l } : null;
+    const out = c.length > 1 ? { t, c, o, h, l, v } : null;
     yfCacheSet(cacheKey, out);
     return out;
   } catch (_) { yfCacheSet(cacheKey, null); return null; }
@@ -1911,6 +1914,60 @@ interface EnvKeys {
   FMP_KEY: string;
   FRED_KEY: string;
   TWELVE_KEY: string;
+}
+
+const REPORT_CACHE_TTL = 2 * 60 * 60 * 1000;
+function sseData(value: unknown) { return `data: ${JSON.stringify(value)}\n\n`; }
+async function cachedReportResponse(kind: "ticker"|"etf"|"sector", subject: string, create: () => Promise<Response>): Promise<Response> {
+  const encoder = new TextEncoder();
+  const hit = await readSharedReport(kind, subject);
+  if (hit?.analysis && Date.now() - Number(hit.savedAt) < REPORT_CACHE_TTL) {
+    const stream = new ReadableStream<Uint8Array>({ start(controller) {
+      if (hit.quarterlyData) controller.enqueue(encoder.encode(sseData({ __quarterly: hit.quarterlyData, __quarterlyDebug: hit.quarterlyDebug, __catalystCalendar: hit.catalystCalendar })));
+      controller.enqueue(encoder.encode(sseData({ choices: [{ delta: { content: hit.analysis } }] })));
+      controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close();
+    }});
+    return new Response(stream,{headers:{...corsHeaders,"Content-Type":"text/event-stream","Cache-Control":"no-cache"}});
+  }
+  const response = await create();
+  if (!response.ok || !response.body || !response.headers.get("Content-Type")?.includes("text/event-stream")) return response;
+  let analysis="", lineBuffer="", complete=false;
+  const payload: Record<string,unknown>={savedAt:Date.now()};
+  const decoder=new TextDecoder();
+  const reader=response.body.getReader();
+  const stream=new ReadableStream<Uint8Array>({
+    async pull(controller){try{
+      const part=await reader.read();
+      if(part.done){if(complete&&analysis.length>500){payload.analysis=analysis;await writeSharedReport(kind,subject,payload);}controller.close();return;}
+      const decoded=decoder.decode(part.value,{stream:true});lineBuffer+=decoded;
+      const lines=lineBuffer.split("\n");lineBuffer=lines.pop()??"";
+      for(const line of lines){if(!line.startsWith("data: "))continue;const raw=line.slice(6).trim();if(raw==="[DONE]"){complete=true;continue;}try{const event=JSON.parse(raw);if(event.__quarterly){payload.quarterlyData=event.__quarterly;payload.quarterlyDebug=event.__quarterlyDebug;payload.catalystCalendar=event.__catalystCalendar;}const delta=event.choices?.[0]?.delta?.content;if(typeof delta==="string")analysis+=delta;if(event.__error||event.error)complete=false;}catch{}}
+      controller.enqueue(part.value);
+    }catch{try{await reader.cancel();}catch{}controller.error(new Error("Stream error"));}}
+  });
+  return new Response(stream,{status:response.status,headers:response.headers});
+}
+
+async function handleMarketComparison(symbols:string[]):Promise<Response>{
+  const clean=[...new Set(symbols.map(s=>s.trim().toUpperCase()))].slice(0,12);
+  const rows=await Promise.all(clean.map(async symbol=>{
+    const chart=await fetchYahooChart(symbol,"3mo","1d");if(!chart)return {symbol,available:false};
+    const last=chart.c.length-1,vol=chart.v?.[last]??null, dollarVolume=vol!=null?vol*chart.c[last]:null;
+    const base=chart.c[Math.max(0,last-20)],meanVol=chart.v?.slice(Math.max(0,last-19),last+1).reduce((s,n)=>s+n,0)/(chart.v?.slice(Math.max(0,last-19),last+1).length||1)??null;
+    return {symbol,available:true,price:chart.c[last],change1d:last>0?(chart.c[last]/chart.c[last-1]-1)*100:null,change1m:base? (chart.c[last]/base-1)*100:null,volume:vol,dollarVolume,avgVolume20:meanVol,volumeVsAverage:meanVol&&vol!=null?vol/meanVol:null,netFundFlows:null,dates:chart.t,closes:chart.c};
+  }));
+  return panelJson({assets:rows,flowNote:"Flujos netos de suscripciones no disponibles de forma consistente para esta selección; volumen negociado y volumen en dólares son medidas de actividad, no entradas netas al fondo.",fetchedAt:new Date().toISOString()});
+}
+async function handleAssetCorrelation(symbols:string[],range:string):Promise<Response>{
+  const ranges:Record<string,string>={"1m":"1mo","3m":"3mo","6m":"6mo","1y":"1y"};const selected=ranges[range]??"3mo";
+  const assets=await Promise.all([...new Set(symbols.map(s=>s.trim().toUpperCase()))].map(async symbol=>({symbol,chart:await fetchYahooChart(symbol,selected,"1d")})));
+  const series=assets.filter(a=>a.chart?.c.length);
+  const dateSets=series.map(a=>new Map(a.chart!.t.map((t,i)=>[new Date(t*1000).toISOString().slice(0,10),a.chart!.c[i]])));
+  const dates=[...dateSets.reduce((set,m)=>new Set([...set].filter(d=>m.has(d))),new Set(dateSets[0]?.keys()??[]))].sort();
+  const returns=dateSets.map(m=>dates.slice(1).map((d,i)=>{const prev=m.get(dates[i]),cur=m.get(d);return prev&&cur?(cur/prev-1)*100:null;}));
+  const correlation=returns.map((row,i)=>returns.map((other,j)=>{const pairs=row.map((v,k)=>[v,other[k]] as const).filter((p):p is readonly [number,number]=>p[0]!=null&&p[1]!=null);if(i===j)return 1;if(pairs.length<3)return null;const mx=pairs.reduce((s,p)=>s+p[0],0)/pairs.length,my=pairs.reduce((s,p)=>s+p[1],0)/pairs.length;const num=pairs.reduce((s,p)=>s+(p[0]-mx)*(p[1]-my),0),dx=Math.sqrt(pairs.reduce((s,p)=>s+(p[0]-mx)**2,0)),dy=Math.sqrt(pairs.reduce((s,p)=>s+(p[1]-my)**2,0));return dx&&dy?num/(dx*dy):null;}));
+  const chart=dates.map((date,k)=>{const row:Record<string,string|number|null>={date};for(let i=0;i<series.length;i++){const values=series[i].chart!.c;const start=values[0];row[series[i].symbol]=values[k]!=null&&start?+((values[k]/start-1)*100).toFixed(2):null;}return row;});
+  return panelJson({symbols:series.map(a=>a.symbol),correlation,observations:Math.max(0,dates.length-1),chart,range,fetchedAt:new Date().toISOString()});
 }
 
 // etfMode trims the pipeline for funds: no quarterly fundamentals, no peers
@@ -3948,6 +4005,8 @@ Deno.serve((req) => secureRequest(req, async (body) => {
     if (typeof body.panel === "string") {
       const deps = { summary: eYahooQuoteSummary };
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
+      if (body.panel === "comparison") return await handleMarketComparison(body.symbols);
+      if (body.panel === "correlation") return await handleAssetCorrelation(body.symbols,typeof body.range==="string"?body.range:"3m");
       const subject = typeof body.subject === "string" ? body.subject.trim() : "";
       if (body.panel === "news" && subject.length > 0 && subject.length <= 80) return panelJson(await newsPanel(subject, body.sector === true, env, deps));
       if (!/^[A-Za-z0-9.^-]{1,12}$/.test(subject)) return jsonError("Símbolo inválido", 400);
@@ -3999,16 +4058,16 @@ Deno.serve((req) => secureRequest(req, async (body) => {
 
     // Dispatch by body shape
     if (body.sector && typeof body.sector === "string" && body.sector.trim().length > 0 && body.sector.trim().length <= 80) {
-      return await handleSectorAnalysis(body.sector, env);
+      return await cachedReportResponse("sector",body.sector,()=>handleSectorAnalysis(body.sector, env));
     }
 
     // ETF report (apartado ETF) — trimmed pipeline + ETF prompt
     if (body.etfReport === true && typeof body.ticker === "string" && body.ticker.trim().length > 0 && body.ticker.trim().length <= 10) {
-      return await handleTickerAnalysis(body.ticker, env, true);
+      return await cachedReportResponse("etf",body.ticker,()=>handleTickerAnalysis(body.ticker, env, true));
     }
 
     if (body.ticker && typeof body.ticker === "string" && body.ticker.trim().length > 0 && body.ticker.trim().length <= 10) {
-      return await handleTickerAnalysis(body.ticker, env);
+      return await cachedReportResponse("ticker",body.ticker,()=>handleTickerAnalysis(body.ticker, env));
     }
 
     return jsonError("Petición inválida: debe incluir 'ticker' (≤10 chars), 'sector' (≤80 chars), o 'marketData: true'.", 400);
