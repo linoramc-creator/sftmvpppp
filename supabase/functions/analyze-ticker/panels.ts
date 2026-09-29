@@ -1,5 +1,6 @@
 import { buildOpinions, editBusiness, recentPartnerships, type OpinionsPanel, type BusinessSummary, type Partnership } from "./editorial.ts";
 import { researchBusiness } from './business-research.ts';
+import { treasury, earnings, type TreasuryPoint, type EarningsEvent } from './feed-extras.ts';
 export type { OpinionsPanel } from "./editorial.ts";
 // On-demand panels with bounded per-isolate cache and request coalescing.
 type Row = Record<string, any>;
@@ -17,7 +18,7 @@ export type NewsPanel = { fetchedAt: string; articles: Article[]; sectorArticles
 export type FeedQuote = { symbol: string; label: string; price: number | null; change: number | null; date: string | null; currency: string };
 export type FeedGroup = { label: string; items: FeedQuote[] };
 export type FeedEvent = { date: string; title: string; impact: string };
-export type MarketFeed = { fetchedAt: string; groups: FeedGroup[]; headlines: Article[]; agenda: FeedEvent[] };
+export type MarketFeed = { fetchedAt: string; groups: FeedGroup[]; headlines: Article[]; geopolitics:Article[]; treasury:TreasuryPoint[]; earnings:EarningsEvent[] };
 type Env = { FMP_KEY: string; FRED_KEY: string; TAVILY_KEY: string; FINNHUB_KEY: string; GEMINI_API_KEY?: string };
 type Dependencies = { summary: (ticker: string, modules: string) => Promise<Row | null> };
 const cache = new Map<string, { expires: number; value: unknown }>();
@@ -153,6 +154,7 @@ const FEED_MARKETS: { label: string; items: [string, string][] }[] = [
   { label: 'ÍNDICES', items: [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq Composite'], ['^DJI', 'Dow Jones'], ['^VIX', 'Volatilidad']] },
   { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural']] },
   { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['BTC-USD', 'Bitcoin']] },
+  { label: 'ETF PRINCIPALES', items: [['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM']] },
 ];
 async function feedQuote(symbol: string, label: string): Promise<FeedQuote> {
   const raw = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -167,10 +169,11 @@ async function feedQuote(symbol: string, label: string): Promise<FeedQuote> {
 }
 function validFeedImage(value: unknown) {
   if (typeof value !== 'string' || value.length > 2000) return undefined;
+  if (/logo|favicon|brand|placeholder|default[-_]|reuters/i.test(value)) return undefined;
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? url.href : undefined; } catch { return undefined; }
 }
 function curateFeed(articles: Article[]): Article[] {
-  const important = /\b(fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos)\b/i;
+  const important = /\b(geopolitics|ceasefire|conflict|military|shipping|strait|fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos)\b/i;
   const seen = new Set<string>();
   const words: Set<string>[] = [];
   return articles.filter(article => {
@@ -189,30 +192,24 @@ function curateFeed(articles: Article[]): Article[] {
 export async function marketFeedPanel(env: Env): Promise<MarketFeed> {
   const cacheKey = `feed:${new Date().toISOString().slice(0, 13)}`;
   return cached(cacheKey, 5 * 60000, async () => {
-    const now = new Date();
-    const start = now.toISOString().slice(0, 10);
-    const end = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
-    const [groups, yahoo, finnhub, fmp, web, calendar] = await Promise.all([
+    const [groups, yahoo, finnhub, fmp, web, bonds, earningsEvents, geopolitical] = await Promise.all([
       Promise.all(FEED_MARKETS.map(async group => ({ label: group.label, items: await Promise.all(group.items.map(([symbol, label]) => feedQuote(symbol, label))) }))),
       get('https://query1.finance.yahoo.com/v1/finance/search?q=global%20markets%20oil%20gold%20currencies&newsCount=25&quotesCount=0', { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 5, 18),
-      env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/economic_calendar?from=${start}&to=${end}&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
+      treasury(env.FRED_KEY),
+      earnings(env.FMP_KEY,env.FINNHUB_KEY),
+      search('geopolitics war sanctions ceasefire trade tariffs shipping energy security latest',env.TAVILY_KEY,true,NEWS_DOMAINS,2,15),
     ]);
     const headlines: Article[] = [];
     for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.[0]?.url) });
     for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
     for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
     headlines.push(...web);
-    const agenda = (Array.isArray(calendar) ? calendar : []).flatMap((row: Row) => {
-      const date = day(row.date);
-      const title = String(row.event ?? row.name ?? '');
-      const country = String(row.country ?? '').toLowerCase();
-      const impact = String(row.impact ?? '').toLowerCase();
-      return date && title && (/united states|usa|us|eeuu|estados unidos/.test(country) || !country) && /high|medium|alto|medio/.test(impact) ? [{ date, title, impact: /high|alto/.test(impact) ? 'Alta' : 'Media' }] : [];
-    }).slice(0, 8);
-    return { fetchedAt: new Date().toISOString(), groups, headlines: curateFeed(headlines), agenda };
+    const geoPattern=/war|sanction|ceasefire|tariff|conflict|nato|military|diploma|guerra|sancion|arancel|conflicto|geopol|shipping|strait/i;
+    const geopolitics=curateFeed([...geopolitical,...headlines].filter(a=>geoPattern.test(`${a.title} ${a.excerpt??''}`)&&Date.parse(a.date)>=Date.now()-3*86400000)).slice(0,6);
+    return { fetchedAt: new Date().toISOString(), groups, headlines: curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url))), geopolitics, treasury:bonds, earnings:earningsEvents, agenda:[] };
   });
 }
 const FRED_SERIES = [
