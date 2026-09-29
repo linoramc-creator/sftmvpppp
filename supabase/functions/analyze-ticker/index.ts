@@ -1,6 +1,6 @@
 import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
 import { researchPeers } from './business-research.ts';
-import { bondsPanel, businessPanel, institutionalPanel, newsPanel, curateNews, cached, fmpHolders } from "./panels.ts";
+import { bondsPanel, businessPanel, institutionalPanel, newsPanel, marketFeedPanel, curateNews, cached, fmpHolders } from "./panels.ts";
 // ============================================================
 // UNIFIED ANALYZE FUNCTION
 // Handles both TICKER analysis (body: { ticker: "AAPL" })
@@ -436,7 +436,7 @@ async function callGeminiStream(messages: any[], apiKey: string): Promise<Gemini
       res = await fetch(GEMINI_URL, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ messages, stream: true, model }),
+        body: JSON.stringify({ messages, stream: true, model, max_tokens: 12000, temperature: 0.2 }),
         signal: AbortSignal.timeout(100_000),
       });
     } catch (e: any) {
@@ -4005,6 +4005,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
 
     if (typeof body.panel === "string") {
       const deps = { summary: eYahooQuoteSummary };
+      if (body.panel === "feed") return panelJson(await marketFeedPanel(env));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       if (body.panel === "comparison") return await handleMarketComparison(body.symbols);
       if (body.panel === "correlation") return await handleAssetCorrelation(body.symbols,typeof body.range==="string"?body.range:"3m");

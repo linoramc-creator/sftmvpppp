@@ -4,7 +4,7 @@ import { useProfile } from "@/components/AuthGate";
 import { cleanReportText } from "@/lib/editorial";
 import { RevenueGrowthSection } from "@/components/charts/RevenueGrowthChart";
 import { buildGrowthChartData } from "@/lib/revenue-growth";
-import { BondsView, BusinessView, InstitutionalView, NewsView } from "@/components/MarketPanels";
+import { BondsView, BusinessView, FeedView, InstitutionalView, NewsView } from "@/components/MarketPanels";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
@@ -276,7 +276,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"ticker" | "etf" | "sector" | "comparacion" | "correlacion" | "bonos" | "guardados">("ticker");
+  const [navTab, setNavTab] = useState<"feed" | "ticker" | "etf" | "sector" | "comparacion" | "correlacion" | "bonos" | "guardados">("feed");
 
   const [clock, setClock] = useState("");
 
@@ -565,6 +565,7 @@ const Index = () => {
             </div>
             <nav className="flex min-w-0 overflow-x-auto" aria-label="Apartados principales">
               {([
+                { label: "HOY",       key: "feed"      },
                 { label: "TICKER",    key: "ticker"    },
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
@@ -615,6 +616,7 @@ const Index = () => {
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "bonos" && <main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main>}
+      {navTab === "feed" && <main className="max-w-7xl mx-auto px-4 py-6"><FeedView /></main>}
       {navTab === "comparacion" && <MarketTools initialTab="comparison" compact />}
       {navTab === "correlacion" && <MarketTools initialTab="correlation" compact />}
       {navTab === "ticker" && (

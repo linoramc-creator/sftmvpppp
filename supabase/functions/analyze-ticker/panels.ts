@@ -4,7 +4,7 @@ export type { OpinionsPanel } from "./editorial.ts";
 // On-demand panels with bounded per-isolate cache and request coalescing.
 type Row = Record<string, any>;
 export type Point = { date: string; value: number };
-export type Article = { title: string; url: string; source: string; date: string; excerpt?: string };
+export type Article = { title: string; url: string; source: string; date: string; excerpt?: string; image?: string };
 export type Series = { id: string; label: string; unit: string; source: string; points: Point[] };
 export type BondFund = { symbol: string; label: string; price: number | null; change: number | null; date: string | null; currency: string; points: Point[]; distributionYield: number | null; expenseRatio: number | null; assets: number | null };
 export type BondsPanel = { fetchedAt: string; series: Series[]; etfs: BondFund[] };
@@ -12,8 +12,12 @@ export type Holder = { name: string; shares: number | null; value: number | null
 export type InstitutionalPanel = { fetchedAt: string; holders: Holder[]; institutionalPct: number | null; documents: Article[]; sources: string[] };
 export type SegmentPeriod = { date: string; currency: string; period?: 'annual' | 'quarterly'; documentUrl?: string; segments: { name: string; value: number }[] };
 export type Channel = { name: string; evidence: string; url: string };
-export type BusinessPanel = { fetchedAt: string; description: string; products: SegmentPeriod[]; geography: SegmentPeriod[]; channels: Channel[]; documents: Article[]; source: string; summary: BusinessSummary | null; partnerships: Partnership[] };
+export type BusinessPanel = { fetchedAt: string; description: string; products: SegmentPeriod[]; geography: SegmentPeriod[]; productDisclosure: string; geographyDisclosure: string; channels: Channel[]; documents: Article[]; source: string; summary: BusinessSummary | null; partnerships: Partnership[] };
 export type NewsPanel = { fetchedAt: string; articles: Article[]; sectorArticles?: Article[]; sectorName?: string };
+export type FeedQuote = { symbol: string; label: string; price: number | null; change: number | null; date: string | null; currency: string };
+export type FeedGroup = { label: string; items: FeedQuote[] };
+export type FeedEvent = { date: string; title: string; impact: string };
+export type MarketFeed = { fetchedAt: string; groups: FeedGroup[]; headlines: Article[]; agenda: FeedEvent[] };
 type Env = { FMP_KEY: string; FRED_KEY: string; TAVILY_KEY: string; FINNHUB_KEY: string; GEMINI_API_KEY?: string };
 type Dependencies = { summary: (ticker: string, modules: string) => Promise<Row | null> };
 const cache = new Map<string, { expires: number; value: unknown }>();
@@ -24,7 +28,7 @@ export async function cached<T>(key: string, ttl: number, fn: () => Promise<T>):
   if (pending.has(key)) return pending.get(key) as Promise<T>;
   const promise = fn().then(value => {
     if (cache.size >= 150) cache.delete(cache.keys().next().value!);
-    const incomplete = value === null || (key.startsWith('business:') && (!(value as any)?.products?.length || !(value as any)?.geography?.length)) || (key.startsWith('news:') && !(value as any)?.articles?.length);
+    const incomplete = value === null || (key.startsWith('business:') && (!(value as any)?.products?.length || !(value as any)?.geography?.length)) || (key.startsWith('news:') && !(value as any)?.articles?.length) || (key.startsWith('feed:') && !(value as any)?.headlines?.length);
     cache.set(key, { expires: Date.now() + (incomplete ? Math.min(ttl, 120000) : ttl), value });
     return value;
   }).finally(() => pending.delete(key));
@@ -145,6 +149,72 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     return { fetchedAt: new Date().toISOString(), articles, sectorArticles, sectorName };
   });
 }
+const FEED_MARKETS: { label: string; items: [string, string][] }[] = [
+  { label: 'ÍNDICES', items: [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq Composite'], ['^DJI', 'Dow Jones'], ['^VIX', 'Volatilidad']] },
+  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural']] },
+  { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['BTC-USD', 'Bitcoin']] },
+];
+async function feedQuote(symbol: string, label: string): Promise<FeedQuote> {
+  const raw = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const chart = (raw as Row)?.chart?.result?.[0];
+  const meta = chart?.meta ?? {};
+  const close = chart?.indicators?.quote?.[0]?.close ?? [];
+  const points = (chart?.timestamp ?? []).map((time: number, index: number) => ({ date: day(time), value: num(close[index]) })).filter((point: { date: string | null; value: number | null }) => point.date && point.value !== null);
+  const price = num(meta.regularMarketPrice) ?? points.at(-1)?.value ?? null;
+  const priceDate = day(meta.regularMarketTime) ?? points.at(-1)?.date ?? null;
+  const previous = points.filter((point: { date: string }) => point.date < (priceDate ?? '')).at(-1)?.value ?? points.at(-2)?.value ?? null;
+  return { symbol, label, price, change: price !== null && previous && previous > 0 ? (price / previous - 1) * 100 : null, date: priceDate, currency: String(meta.currency ?? '') || 'USD' };
+}
+function validFeedImage(value: unknown) {
+  if (typeof value !== 'string' || value.length > 2000) return undefined;
+  try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? url.href : undefined; } catch { return undefined; }
+}
+function curateFeed(articles: Article[]): Article[] {
+  const important = /\b(fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos)\b/i;
+  const seen = new Set<string>();
+  const words: Set<string>[] = [];
+  return articles.filter(article => {
+    const stamp = Date.parse(article.date);
+    if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 5 * 86400000 || stamp > Date.now() + 86400000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)) return false;
+    try { const url = new URL(article.url); if (!['http:', 'https:'].includes(url.protocol)) return false; url.search = ''; url.hash = ''; if (seen.has(url.href)) return false; seen.add(url.href); } catch { return false; }
+    const current = new Set(article.title.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+    const duplicate = words.some(other => {
+      const overlap = [...current].filter(word => other.has(word)).length;
+      return overlap >= 5 && overlap / Math.max(1, Math.min(current.size, other.size)) > 0.65;
+    });
+    if (duplicate) return false;
+    words.push(current); return true;
+  }).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 9).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) }));
+}
+export async function marketFeedPanel(env: Env): Promise<MarketFeed> {
+  const cacheKey = `feed:${new Date().toISOString().slice(0, 13)}`;
+  return cached(cacheKey, 5 * 60000, async () => {
+    const now = new Date();
+    const start = now.toISOString().slice(0, 10);
+    const end = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+    const [groups, yahoo, finnhub, fmp, web, calendar] = await Promise.all([
+      Promise.all(FEED_MARKETS.map(async group => ({ label: group.label, items: await Promise.all(group.items.map(([symbol, label]) => feedQuote(symbol, label))) }))),
+      get('https://query1.finance.yahoo.com/v1/finance/search?q=global%20markets%20oil%20gold%20currencies&newsCount=25&quotesCount=0', { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+      env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
+      env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
+      search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 5, 18),
+      env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/economic_calendar?from=${start}&to=${end}&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
+    ]);
+    const headlines: Article[] = [];
+    for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.[0]?.url) });
+    for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
+    for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
+    headlines.push(...web);
+    const agenda = (Array.isArray(calendar) ? calendar : []).flatMap((row: Row) => {
+      const date = day(row.date);
+      const title = String(row.event ?? row.name ?? '');
+      const country = String(row.country ?? '').toLowerCase();
+      const impact = String(row.impact ?? '').toLowerCase();
+      return date && title && (/united states|usa|us|eeuu|estados unidos/.test(country) || !country) && /high|medium|alto|medio/.test(impact) ? [{ date, title, impact: /high|alto/.test(impact) ? 'Alta' : 'Media' }] : [];
+    }).slice(0, 8);
+    return { fetchedAt: new Date().toISOString(), groups, headlines: curateFeed(headlines), agenda };
+  });
+}
 const FRED_SERIES = [
   ['DGS1MO', '1 mes'], ['DGS3MO', '3 meses'], ['DGS6MO', '6 meses'], ['DGS1', '1 año'], ['DGS2', '2 años'], ['DGS5', '5 años'], ['DGS10', '10 años'], ['DGS30', '30 años'],
   ['DFII10', 'Tipo real a 10 años'], ['T10YIE', 'Inflación implícita a 10 años'], ['T10Y2Y', 'Diferencial 10–2 años'], ['BAMLC0A0CM', 'Crédito investment grade (OAS)'], ['BAMLH0A0HYM2', 'Crédito high yield (OAS)'], ['DFF', 'Fed Funds efectivo'],
@@ -220,17 +290,20 @@ export function extractChannels(documents: Article[]): Channel[] {
 }
 export async function businessPanel(ticker: string, env: Env, deps: Dependencies): Promise<BusinessPanel> {
   return cached(`business:${ticker}`, 24 * HOUR, async () => {
-    const [summary, products, geography, profileRaw] = await Promise.all([
+    const [summary, annualProducts, quarterlyProducts, annualGeography, quarterlyGeography, profileRaw] = await Promise.all([
       deps.summary(ticker, 'assetProfile,quoteType'),
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-product-segmentation?symbol=${encodeURIComponent(ticker)}&period=annual&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
+      env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-product-segmentation?symbol=${encodeURIComponent(ticker)}&period=quarter&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-geographic-segmentation?symbol=${encodeURIComponent(ticker)}&period=annual&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
+      env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-geographic-segmentation?symbol=${encodeURIComponent(ticker)}&period=quarter&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
     ]);
     const profile = Array.isArray(profileRaw) ? profileRaw[0] : null;
     const company = profile?.companyName ?? summary?.quoteType?.longName ?? summary?.quoteType?.shortName ?? ticker;
     const description = summary?.assetProfile?.longBusinessSummary ?? profile?.description ?? '';
-    const structuredProducts=segmentPeriods(products), structuredGeography=segmentPeriods(geography);
-    const researchPromise=(!structuredProducts.length||!structuredGeography.length) ? researchBusiness(company,ticker,profile?.website??summary?.assetProfile?.website??'',env.TAVILY_KEY,env.GEMINI_API_KEY??'') : Promise.resolve({products:[],geography:[],context:''});
+    const rows = (...values: (Row | Row[] | null)[]) => values.flatMap(value => Array.isArray(value) ? value : []);
+    const structuredProducts=segmentPeriods(rows(annualProducts, quarterlyProducts)), structuredGeography=segmentPeriods(rows(annualGeography, quarterlyGeography));
+    const researchPromise=(!structuredProducts.length||!structuredGeography.length) ? researchBusiness(company,ticker,profile?.website??summary?.assetProfile?.website??'',env.TAVILY_KEY,env.GEMINI_API_KEY??'',String(profile?.cik ?? '')) : Promise.resolve({products:[],geography:[],context:''});
     const shortCompany = company.replace(/ (inc\.?|corporation|corp\.?)$/i, '');
     const partnershipDomains = [...NEWS_DOMAINS];
     try { if (profile?.website) partnershipDomains.push(new URL(profile.website).hostname); } catch { /* optional company website */ }
@@ -242,6 +315,13 @@ export async function businessPanel(ticker: string, env: Env, deps: Dependencies
     });
     const research=await researchPromise;
     const editorial = await editBusiness([description,research.context].filter(Boolean).join('\n'), company, documents, env.GEMINI_API_KEY ?? '');
-    return { fetchedAt: new Date().toISOString(), description: '', products: structuredProducts.length?structuredProducts:research.products, geography: structuredGeography.length?structuredGeography:research.geography, channels: [], documents, source: '', summary: editorial.summary, partnerships: editorial.partnerships };
+    const products = structuredProducts.length ? structuredProducts : research.products;
+    const geography = structuredGeography.length ? structuredGeography : research.geography;
+    return {
+      fetchedAt: new Date().toISOString(), description: research.context || description, products, geography,
+      productDisclosure: products.length ? '' : 'No se ha publicado un cuadro comparable de ingresos por producto o unidad de negocio para el último período. El modelo de negocio resume el detalle operativo disponible.',
+      geographyDisclosure: geography.length ? '' : 'No se ha publicado un cuadro comparable de ingresos por geografía para el último período. El modelo de negocio resume el detalle operativo disponible.',
+      channels: [], documents, source: '', summary: editorial.summary, partnerships: editorial.partnerships
+    };
   });
 }

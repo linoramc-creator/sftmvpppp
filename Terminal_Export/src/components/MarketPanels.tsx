@@ -3,7 +3,7 @@ import { authenticatedFetch } from "@/lib/beta-api";
 import { cleanHeadline, cleanNewsExcerpt } from "@/lib/editorial";
 import { useEffect, useState, type ReactNode } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
-import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
+import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, MarketFeed, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
 
 const cache = new Map<string, { at: number; data: unknown }>();
 const pending = new Map<string, Promise<unknown>>();
@@ -32,11 +32,12 @@ function usePanel<T>(panel: string, subject = '', sector = false) {
   useEffect(() => {
     let cancelled = false;
     setData(null); setError('');
-    const load = () => request<T>(panel, subject, sector, ['business', 'institutional'].includes(panel) ? 86400000 : 3600000)
+    const ttl = panel === 'feed' ? 300000 : ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
+    const load = () => request<T>(panel, subject, sector, ttl)
       .then(value => { if (!cancelled) { setData(value); setError(''); } })
       .catch(() => { if (!cancelled) setError('No se ha podido actualizar. Inténtalo de nuevo.'); });
     void load();
-    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60000);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(); }, panel === 'feed' ? 300000 : 60000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [panel, subject, sector, retry]);
   return { data, error, retry: () => setRetry(n => n + 1) };
@@ -65,6 +66,26 @@ export function NewsView({ subject, sector = false }: { subject: string; sector?
   const list = (articles: Article[]) => articles.length ? <Documents articles={articles} /> : <p className="text-sm py-4">No hay noticias relevantes disponibles en este período.</p>;
   return <div className="space-y-5 py-3">{state.error && <Status {...state} />}<Box title={sector ? 'NOTICIAS DEL SECTOR' : 'NOTICIAS · ' + subject}>{list(state.data.articles)}</Box>
     {!sector && state.data.sectorName && <Box title={'NOTICIAS DEL SECTOR · ' + state.data.sectorName}>{list(state.data.sectorArticles ?? [])}</Box>}<Stamp at={state.data.fetchedAt} /></div>;
+}
+function feedPrice(price: number | null, currency: string) {
+  if (price === null) return 'N/D';
+  const digits = Math.abs(price) < 10 ? 4 : 2;
+  return `${fmt(price, digits)} ${currency}`;
+}
+export function FeedView() {
+  const state = usePanel<MarketFeed>('feed');
+  if (!state.data) return <Status {...state} />;
+  const data = state.data;
+  return <div className="space-y-6">
+    <div><h1 className="text-xl font-semibold tracking-wide text-primary">PULSO DE MERCADOS</h1><p className="text-sm text-muted-foreground mt-2">Portada para seguir el mercado, los activos clave y la agenda que puede mover las cotizaciones.</p></div>
+    {state.error && <Status {...state} />}
+    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div><p className="text-sm">{item.label}</p><p className="text-[10px] text-muted-foreground">{item.date ?? 'Fecha no disponible'}</p></div><div className="text-right"><p className="text-sm tabular-nums">{feedPrice(item.price, item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}</div>
+    <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
+      <Box title="PORTADAS DEL DÍA">{data.headlines.length ? <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{data.headlines.map(article => <article key={article.url} className="border border-border overflow-hidden flex flex-col"><a href={safeNewsHref(article.url)} target="_blank" rel="noopener noreferrer" className="block hover:text-primary transition-colors">{article.image && <img src={article.image} alt="" className="h-32 w-full object-cover bg-muted" loading="lazy" referrerPolicy="no-referrer" />}<div className="p-4"><p className="text-[10px] text-muted-foreground mb-2">{article.date || 'Fecha no disponible'}</p><h2 className="text-sm leading-relaxed font-semibold">{cleanHeadline(article.title)}</h2>{article.excerpt && <p className="text-xs text-muted-foreground leading-relaxed mt-3">{cleanNewsExcerpt(article.excerpt)}</p>}</div></a></article>)}</div> : <p className="text-sm text-muted-foreground py-6">No hay portadas relevantes disponibles en este momento.</p>}</Box>
+      <Box title="AGENDA MACRO">{data.agenda.length ? <div className="space-y-3">{data.agenda.map(event => <div key={event.date + event.title} className="border-b border-border pb-3 last:border-0"><p className="text-xs text-primary">{event.date} · Impacto {event.impact}</p><p className="text-sm leading-relaxed mt-1">{event.title}</p></div>)}</div> : <p className="text-sm text-muted-foreground py-4">No hay eventos de alta relevancia programados en los próximos días.</p>}</Box>
+    </div>
+    <Stamp at={data.fetchedAt} />
+  </div>;
 }
 const colors = ['#60a5fa', '#a78bfa', '#34d399', '#fb923c'];
 function History({ series, unit = '%' }: { series: Series[]; unit?: string }) {
@@ -113,11 +134,11 @@ export function InstitutionalView({ ticker }: { ticker: string }) {
     <div className="grid sm:grid-cols-2 gap-4"><Box title="PRECIO ACTUAL"><p className="text-2xl">{fmt(data.currentPrice)} {data.currency}</p></Box>{data.consensusTarget !== null && <Box title="PRECIO OBJETIVO · CONSENSO"><p className="text-2xl">{fmt(data.consensusTarget)} {data.currency}</p></Box>}</div>
     <Box title="OPINIÓN DE BANCOS Y ENTIDADES DE ANÁLISIS">{opinions.length ? <div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead><tr>{['Institución', 'Recomendación', 'Revisión', 'Precio objetivo', 'Fecha del objetivo', 'Fecha de opinión'].map(h => <th key={h} className="p-3 whitespace-nowrap">{h}</th>)}</tr></thead><tbody>{opinions.map((o, i) => <tr key={o.institution + i} className="border-t border-border"><td className="p-3 font-semibold">{o.institution}</td><td className={'p-3 ' + (o.recommendation === 'Comprar' ? 'text-emerald-400' : o.recommendation === 'Vender' ? 'text-red-400' : 'text-amber-300')}><div>{o.recommendation}</div>{o.originalRating && <div className="text-xs text-muted-foreground">{o.originalRating}</div>}</td><td className="p-3">{o.action}</td><td className="p-3 whitespace-nowrap">{o.target === null ? 'No publicado' : fmt(o.target) + ' ' + o.currency}{o.previousTarget !== null && <div className="text-xs text-muted-foreground">Anterior: {fmt(o.previousTarget)}</div>}</td><td className="p-3 whitespace-nowrap">{o.targetDate ?? '—'}</td><td className="p-3 whitespace-nowrap">{o.date}</td></tr>)}</tbody></table></div> : <p className="text-sm">No hay recomendaciones o precios objetivo publicados disponibles para este {data.isEtf ? 'ETF' : 'activo'} en el último año.</p>}<p className="text-xs text-muted-foreground mt-3">Las recomendaciones expresan la opinión de cada entidad; no representan operaciones ejecutadas ni garantizan alcanzar un precio.</p></Box><Stamp at={data.fetchedAt} /></div>;
 }
-function Segments({ title, periods }: { title: string; periods: SegmentPeriod[] }) {
+function Segments({ title, periods, disclosure }: { title: string; periods: SegmentPeriod[]; disclosure?: string }) {
   const [selected, setSelected] = useState('');
   const current = periods.find(p => p.date === selected) ?? periods[0];
   const sum = current?.segments.reduce((total, s) => total + s.value, 0) ?? 0;
-  return <Box title={title}>{!current ? <p className="text-sm text-muted-foreground">Desglose de ingresos no disponible.</p> : <>
+  return <Box title={title}>{!current ? <p className="text-sm text-muted-foreground leading-relaxed">{disclosure || 'No se ha publicado un desglose comparable para el período más reciente.'}</p> : <>
     <select className="bg-background border border-border p-2 text-sm mb-3" aria-label={`Período de ${title}`} value={current.date} onChange={e => setSelected(e.target.value)}>{periods.map(p => <option key={p.date} value={p.date}>{p.period === 'quarterly' ? 'Trimestre cerrado' : 'Ejercicio cerrado'}: {p.date} · {p.currency}</option>)}</select>
     <div style={{ height: Math.max(250, current.segments.length * 32) }}><ResponsiveContainer width="100%" height="100%"><BarChart data={current.segments} layout="vertical" margin={{ right: 20 }}><CartesianGrid stroke="#253044" /><XAxis type="number" tickFormatter={compact} tick={{ fontSize: 10 }} /><YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10 }} /><Tooltip formatter={(v: number) => `${fmt(v, 0)} ${current.currency}`} contentStyle={{ background: '#0f172a', color: '#e2e8f0' }} /><Bar dataKey="value" name="Ingresos" fill="#60a5fa" /></BarChart></ResponsiveContainer></div>
     <div className="overflow-x-auto"><table className="w-full text-xs text-left"><thead><tr><th className="p-2">Segmento</th><th className="p-2">{current.currency === '%' ? 'Distribución publicada (%)' : 'Ingresos (' + current.currency + ')' }</th><th className="p-2">% de la suma presentada</th></tr></thead><tbody>{current.segments.map(s => <tr key={s.name} className="border-t border-border"><td className="p-2">{s.name}</td><td className="p-2">{fmt(s.value, 0)}</td><td className="p-2">{sum > 0 ? fmt(s.value / sum * 100) + '%' : 'N/D'}</td></tr>)}</tbody></table></div><p className="text-xs text-muted-foreground mt-3">{current.currency === '%' ? 'Porcentajes publicados, sujetos a redondeo. El resto de mercados se calcula como diferencia hasta el 100 %; no se estima su importe.' : 'Importes del período indicado. Las eliminaciones contables se muestran cuando están publicadas.'}</p>
@@ -128,8 +149,8 @@ export function BusinessView({ ticker }: { ticker: string }) {
   if (!state.data) return <Status {...state} />;
   const data = state.data;
   return <div className="space-y-5 py-3">{state.error && <Status {...state} />}
-    <Box title="MODELO DE NEGOCIO">{data.summary ? <dl className="grid md:grid-cols-3 gap-5 text-sm">{[['Actividad', data.summary.activity], ['Clientes', data.summary.customers], ['Cómo genera ingresos', data.summary.revenueModel]].map(([label, value]) => <div key={label}><dt className="text-primary text-xs font-semibold mb-2">{label}</dt><dd className="leading-relaxed">{value}</dd></div>)}</dl> : <p className="text-sm">Resumen no disponible.</p>}</Box>
-    <div className="grid xl:grid-cols-2 gap-4"><Segments title="INGRESOS POR PRODUCTO O NEGOCIO" periods={data.products} /><Segments title="INGRESOS POR REGIÓN" periods={data.geography} /></div>
+    <Box title="MODELO DE NEGOCIO">{data.summary ? <dl className="grid md:grid-cols-3 gap-5 text-sm">{[['Actividad', data.summary.activity], ['Clientes', data.summary.customers], ['Cómo genera ingresos', data.summary.revenueModel]].map(([label, value]) => <div key={label}><dt className="text-primary text-xs font-semibold mb-2">{label}</dt><dd className="leading-relaxed">{value}</dd></div>)}</dl> : <p className="text-sm leading-relaxed">{data.description || 'Resumen operativo no disponible.'}</p>}</Box>
+    <div className="grid xl:grid-cols-2 gap-4"><Segments title="INGRESOS POR PRODUCTO O NEGOCIO" periods={data.products} disclosure={data.productDisclosure} /><Segments title="INGRESOS POR REGIÓN" periods={data.geography} disclosure={data.geographyDisclosure} /></div>
     <p className="text-xs text-muted-foreground">Productos y regiones son vistas distintas de los mismos ingresos; no se suman entre sí.</p>
     <Box title="SOCIOS Y COLABORACIONES · ÚLTIMOS 12 MESES">{data.partnerships?.length ? <div className="grid md:grid-cols-2 gap-4">{data.partnerships.map(p => <article key={p.partner + p.date} className="border border-border p-4"><h4 className="text-sm text-primary font-semibold">{p.partner}</h4><p className="text-xs text-muted-foreground mt-1">{p.date}</p><p className="text-sm leading-relaxed mt-3">{p.summary}</p></article>)}</div> : <p className="text-sm">No hay acuerdos anunciados disponibles para los últimos 12 meses.</p>}</Box><Stamp at={data.fetchedAt} /></div>;
 }
