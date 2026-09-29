@@ -1,0 +1,2 @@
+mcp_massive @ git+https://github.com/massive-com/mcp_massive@c58ec7e4df7482c53fc4adeb2de0e979f77f3a23
+mcp==1.30.0
