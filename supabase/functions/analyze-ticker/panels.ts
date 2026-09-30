@@ -1,4 +1,4 @@
-import { articleCover, photoUrl } from './news-covers.ts';
+import { articleCover, photoUrl, publisherUrl } from './news-covers.ts';
 import { buildOpinions, editBusiness, recentPartnerships, type OpinionsPanel, type BusinessSummary, type Partnership } from "./editorial.ts";
 import { researchBusiness } from './business-research.ts';
 import { treasury, earnings, type TreasuryPoint, type EarningsEvent } from './feed-extras.ts';
@@ -209,6 +209,14 @@ export async function marketFeedPanel(env: Env): Promise<MarketFeed> {
     const selected=curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url)));
     const enrich=async (article:Article):Promise<Article>=>({...article,image:article.image??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
     const [covers,geoCovers]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich))]);
+    const missing=[...covers,...geoCovers].filter(a=>!a.image&&publisherUrl(a.url));
+    if(env.TAVILY_KEY&&missing.length) {
+      const extracted=await cached('cover-extract:'+missing.map(a=>a.url).sort().join('|'),6*HOUR,()=>get('https://api.tavily.com/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:env.TAVILY_KEY,urls:missing.map(a=>a.url),include_images:true,extract_depth:'basic',timeout:8})}));
+      for(const row of (Array.isArray((extracted as Row)?.results)?(extracted as Row).results:[])) {
+        const article=missing.find(a=>a.url===row.url);
+        if(article&&Array.isArray(row.images)) article.image=row.images.map((image:unknown)=>photoUrl(typeof image==='string'?image:(image as Row)?.url)).find(Boolean);
+      }
+    }
     return { fetchedAt: new Date().toISOString(), groups, headlines:covers, geopolitics:geoCovers, treasury:bonds, earnings:earningsEvents };
   });
 }
