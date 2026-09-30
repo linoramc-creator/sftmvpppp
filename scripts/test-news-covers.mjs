@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {stripTypeScriptTypes} from 'node:module';
+const source=readFileSync(new URL('../supabase/functions/analyze-ticker/news-covers.ts',import.meta.url),'utf8');
+const {photoUrl,publisherUrl,extractCover}=await import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(source)).toString('base64'));
+assert.equal(photoUrl('https://www.reuters.com/resizer/photo.jpg'),'https://www.reuters.com/resizer/photo.jpg');
+assert.equal(photoUrl('https://www.reuters.com/assets/reuters-logo.png'),undefined);
+assert.equal(photoUrl('javascript:alert(1)'),undefined);
+assert.equal(publisherUrl('https://www.reuters.com/world/story'),true);
+for(const url of ['http://reuters.com/a','https://reuters.com.evil.test/a','https://127.0.0.1/a','https://reuters.com:8443/a','https://user@reuters.com/a'])assert.equal(publisherUrl(url),false);
+assert.equal(extractCover(`<meta content="https://cdn.reuters.com/photo.jpg?a=1&amp;b=2" property="og:image">`,'https://reuters.com/a'),'https://cdn.reuters.com/photo.jpg?a=1&b=2');
+assert.equal(extractCover(`<meta name='twitter:image' content='/photos/story.jpg'>`,'https://www.cnbc.com/a'),'https://www.cnbc.com/photos/story.jpg');
+console.log('News cover metadata and request boundaries passed.');

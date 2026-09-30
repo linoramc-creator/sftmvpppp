@@ -1,3 +1,5 @@
+import { WatchlistCard } from "./WatchlistCard";
+import type { MarketData } from "@/lib/analyze";
 import { safeNewsHref } from "@/lib/navigation";
 import {NewsCards,TreasuryCard,EarningsList} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
@@ -73,13 +75,13 @@ function feedPrice(price: number | null, currency: string) {
   const digits = Math.abs(price) < 10 ? 4 : 2;
   return `${fmt(price, digits)} ${currency}`;
 }
-export function FeedView() {
+export function FeedView({stocks,data:quotes,onChange}:{stocks:string[];data:MarketData|null;onChange:(stocks:string[])=>void}) {
   const state = usePanel<MarketFeed>('feed');
   if (!state.data) return <Status {...state} />;
   const data = state.data;
   return <div className="space-y-6">
     {state.error && <Status {...state} />}
-    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div><p className="text-sm">{item.label}</p><p className="text-[10px] text-muted-foreground">{item.date ?? 'Fecha no disponible'}</p></div><div className="text-right"><p className="text-sm tabular-nums">{feedPrice(item.price, item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box></div>
+    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div><p className="text-sm">{item.label}</p><p className="text-[10px] text-muted-foreground">{item.date ?? 'Fecha no disponible'}</p></div><div className="text-right"><p className="text-sm tabular-nums">{feedPrice(item.price, item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} onChange={onChange}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
       <div className="space-y-4"><Box title="PORTADAS DEL DÍA"><NewsCards articles={data.headlines}/></Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS"><NewsCards articles={data.geopolitics??[]} geo/></Box></div>
       <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]}/></Box>

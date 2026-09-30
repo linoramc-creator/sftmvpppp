@@ -75,7 +75,7 @@ const ETF_SECTION_CONFIG: Record<string, { label: string; category: string }> = 
 };
 
 const SECTOR_SECTION_CONFIG: Record<string, { label: string; category: string }> = {
-  "Panorama del Sector":        { label: "PANORAMA",            category: "OVERVIEW"         },
+  "Visión del Sector":        { label: "VISIÓN GENERAL",            category: "OVERVIEW"         },
   "Empresas Líderes":           { label: "EMPRESAS LÍDERES",    category: "TOP COMPANIES"    },
   "Mejores ETFs":               { label: "MEJORES ETFs",        category: "ETF SELECTION"    },
   "Noticias y Tendencias":      { label: "NOTICIAS Y TENDENCIAS", category: "NEWS & TRENDS"  },
@@ -276,14 +276,14 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"feed" | "ticker" | "etf" | "sector" | "comparacion" | "correlacion" | "bonos" | "guardados">("feed");
+  const [navTab, setNavTab] = useState<"feed" | "ticker" | "etf" | "sector" | "comparacion" | "bonos" | "guardados">("feed");
 
   const [clock, setClock] = useState("");
 
   // Market ticker
   const [marketData,    setMarketData]    = useState<MarketData | null>(null);
   const [customStocks,  setCustomStocks]  = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("terminal_stocks_v1") || '["AAPL","MSFT","NVDA"]'); }
+    try { return JSON.parse(localStorage.getItem(`terminal_stocks_v2:${profile.id}`) || '["AAPL","MSFT","NVDA"]'); }
     catch (_) { return ["AAPL", "MSFT", "NVDA"]; }
   });
 
@@ -313,15 +313,16 @@ const Index = () => {
 
   // Fetch market data on mount + every 60s
   useEffect(() => {
-    const load = () => fetchMarketData(customStocks).then(d => { if (d) setMarketData(d); });
+    let active = true;
+    const load = () => fetchMarketData(customStocks).then(d => { if (active && d) setMarketData(d); });
     load();
     const id = setInterval(load, 60_000);
-    return () => clearInterval(id);
+    return () => { active = false; clearInterval(id); };
   }, [customStocks]);
 
   const saveCustomStocks = (stocks: string[]) => {
     setCustomStocks(stocks);
-    try { localStorage.setItem("terminal_stocks_v1", JSON.stringify(stocks)); } catch (_) {}
+    try { localStorage.setItem(`terminal_stocks_v2:${profile.id}`, JSON.stringify(stocks)); } catch (_) {}
   };
 
   const resetSections = () => setActiveSection(EXPECTED_TABS[0]);
@@ -565,12 +566,11 @@ const Index = () => {
             </div>
             <nav className="flex min-w-0 overflow-x-auto" aria-label="Apartados principales">
               {([
-                { label: "HOY",       key: "feed"      },
+                { label: "FEED",       key: "feed"      },
                 { label: "TICKER",    key: "ticker"    },
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
-                { label: "COMPARAR", key: "comparacion" },
-                { label: "CORRELACIÓN", key: "correlacion" },
+                { label: "COMPARAR Y CORRELACIÓN", key: "comparacion" },
                 { label: "BONOS", key: "bonos" },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
@@ -616,9 +616,8 @@ const Index = () => {
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "bonos" && <main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main>}
-      {navTab === "feed" && <main className="max-w-7xl mx-auto px-4 py-6"><FeedView /></main>}
-      {navTab === "comparacion" && <MarketTools initialTab="comparison" compact />}
-      {navTab === "correlacion" && <MarketTools initialTab="correlation" compact />}
+      {navTab === "feed" && <main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} /></main>}
+      {navTab === "comparacion" && <MarketTools />}
       {navTab === "ticker" && (
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
@@ -1329,7 +1328,7 @@ function SectorReportView({
   expanded: Record<string, boolean>;
   onToggle: (key: string) => void;
 }) {
-  const sections = parseSections(content, SECTOR_TABS);
+  const sections = parseSections(content.replace(/Panorama del Sector/gi, "Visión del Sector").replace(/^.*(?:elaborado|preparado|realizado|hecho|redactado) por (?:un |el )?analista financiero.*$/gim, "").replace(/^.*(?:soy|actúo como|como) (?:un )?analista financiero.*$/gim, ""), SECTOR_TABS);
 
   return (
     <div className="space-y-px">

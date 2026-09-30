@@ -1770,10 +1770,10 @@ function buildSectorDataContext(
 
 function buildSectorSystemPrompt(sector: string): string {
   const today = new Date().toISOString().slice(0, 10);
-  return `Eres un analista financiero institucional senior especializado en análisis sectorial. Fecha: ${today}.
+  return `Eres un analista financiero institucional senior especializado en análisis sectorial. Empieza directamente por el primer encabezado solicitado. No incluyas presentaciones personales, autorías, ni frases como elaborado por un analista financiero. Fecha: ${today}.
 
 Genera un informe sectorial completo y detallado sobre el sector "${sector}". Usa EXACTAMENTE estas 7 secciones iniciadas con "## ":
-## Panorama del Sector
+## Visión del Sector
 ## Empresas Líderes
 ## Mejores ETFs
 ## Noticias y Tendencias
@@ -1783,7 +1783,7 @@ Genera un informe sectorial completo y detallado sobre el sector "${sector}". Us
 
 == CONTENIDO POR SECCIÓN ==
 
-## Panorama del Sector
+## Visión del Sector
 - Párrafo 5-7 líneas: descripción del sector, tamaño de mercado (TAM), CAGR histórico y proyectado, segmentos clave, geografías dominantes, fase del ciclo.
 - ### Métricas Clave: tabla Métrica | Valor con: Tamaño Mercado Global, CAGR proyectado, Número empresas cotizadas, Principales índices/benchmarks, Volatilidad relativa.
 - ### Estructura del Sector: 4-5 líneas sobre cómo está organizado el sector (cadena de valor, segmentos, concentración).

@@ -1,3 +1,4 @@
+import { articleCover, photoUrl } from './news-covers.ts';
 import { buildOpinions, editBusiness, recentPartnerships, type OpinionsPanel, type BusinessSummary, type Partnership } from "./editorial.ts";
 import { researchBusiness } from './business-research.ts';
 import { treasury, earnings, type TreasuryPoint, type EarningsEvent } from './feed-extras.ts';
@@ -92,9 +93,9 @@ export function curateNews(articles: Article[], subject: string, now = Date.now(
 async function search(query: string, key: string, news = false, domains: string[] = [], days = 14, maxResults = news ? 5 : 3): Promise<Article[]> {
   if (!key) return [];
   return cached(`search:${news}:${query}:${domains.join(',')}:${days}:${maxResults}`, news ? HOUR : 24 * HOUR, async () => {
-    const raw = await get('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key, query, search_depth: 'basic', max_results: maxResults, include_answer: false, ...(news ? { topic: 'news', days } : {}), ...(domains.length ? { include_domains: domains } : {}) }) });
+    const raw = await get('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key, query, search_depth: 'basic', max_results: maxResults, include_answer: false, include_images: news, ...(news ? { topic: 'news', days } : {}), ...(domains.length ? { include_domains: domains } : {}) }) });
     const rows = (raw as Row)?.results;
-    return Array.isArray(rows) ? rows.filter((r: Row) => /^https?:\/\//.test(r.url ?? '')).map((r: Row) => ({ title: String(r.title ?? ''), url: r.url, source: new URL(r.url).hostname, date: day(r.published_date) ?? '', excerpt: String(r.content ?? '').slice(0, 900) })) : [];
+    return Array.isArray(rows) ? rows.filter((r: Row) => /^https?:\/\//.test(r.url ?? '')).map((r: Row) => ({ title: String(r.title ?? ''), url: r.url, source: new URL(r.url).hostname, date: day(r.published_date) ?? '', excerpt: String(r.content ?? '').slice(0, 900), image: Array.isArray(r.images) ? r.images.map((image:unknown)=>photoUrl(typeof image==='string'?image:(image as Row)?.url)).find(Boolean) : undefined })) : [];
   });
 }
 export async function newsPanel(subject: string, sector: boolean, env: Env, deps?: Dependencies): Promise<NewsPanel> {
@@ -167,11 +168,7 @@ async function feedQuote(symbol: string, label: string): Promise<FeedQuote> {
   const previous = points.filter((point: { date: string }) => point.date < (priceDate ?? '')).at(-1)?.value ?? points.at(-2)?.value ?? null;
   return { symbol, label, price, change: price !== null && previous && previous > 0 ? (price / previous - 1) * 100 : null, date: priceDate, currency: String(meta.currency ?? '') || 'USD' };
 }
-function validFeedImage(value: unknown) {
-  if (typeof value !== 'string' || value.length > 2000) return undefined;
-  if (/logo|favicon|brand|placeholder|default[-_]|reuters/i.test(value)) return undefined;
-  try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? url.href : undefined; } catch { return undefined; }
-}
+const validFeedImage = photoUrl;
 function curateFeed(articles: Article[]): Article[] {
   const important = /\b(geopolitics|ceasefire|conflict|military|shipping|strait|fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos)\b/i;
   const seen = new Set<string>();
@@ -209,7 +206,10 @@ export async function marketFeedPanel(env: Env): Promise<MarketFeed> {
     headlines.push(...web);
     const geoPattern=/war|sanction|ceasefire|tariff|conflict|nato|military|diploma|guerra|sancion|arancel|conflicto|geopol|shipping|strait/i;
     const geopolitics=curateFeed([...geopolitical,...headlines].filter(a=>geoPattern.test(`${a.title} ${a.excerpt??''}`)&&Date.parse(a.date)>=Date.now()-3*86400000)).slice(0,6);
-    return { fetchedAt: new Date().toISOString(), groups, headlines: curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url))), geopolitics, treasury:bonds, earnings:earningsEvents, agenda:[] };
+    const selected=curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url)));
+    const enrich=async (article:Article):Promise<Article>=>({...article,image:article.image??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
+    const [covers,geoCovers]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich))]);
+    return { fetchedAt: new Date().toISOString(), groups, headlines:covers, geopolitics:geoCovers, treasury:bonds, earnings:earningsEvents };
   });
 }
 const FRED_SERIES = [

@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {Globe2,TrendingUp} from 'lucide-react';
+
 import {ResponsiveContainer,LineChart,Line,XAxis,YAxis,Tooltip} from 'recharts';
 import {safeNewsHref} from '@/lib/navigation';
 import {cleanHeadline,cleanNewsExcerpt} from '@/lib/editorial';
@@ -7,12 +7,8 @@ import type {Article,MarketFeed} from '../../../supabase/functions/analyze-ticke
 const number=(v:number|null,digits=2)=>v===null?'—':v.toLocaleString('es-ES',{maximumFractionDigits:digits});
 export function NewsCover({article,geo=false}:{article:Article;geo?:boolean}){
   const [failed,setFailed]=useState(false);
-  const usable=article.image&&!/logo|favicon|brand|default|placeholder|reuters/i.test(article.image)&&!failed;
-  return usable?<img src={article.image} alt="" className="h-36 w-full object-cover bg-muted" loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<300||img.naturalHeight<140||img.naturalWidth/img.naturalHeight<1.3)setFailed(true);}}/>:
-  <div aria-label={geo?'Ilustración editorial de geopolítica':'Ilustración editorial de mercados'} className={`h-36 relative overflow-hidden flex items-center justify-center ${geo?'bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-800':'bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-800'}`}>
-    <div className="absolute inset-4 border border-white/10 rounded-full scale-150"/>{geo?<Globe2 className="w-24 h-24 text-sky-300/50" strokeWidth={.8}/>:<TrendingUp className="w-32 h-24 text-emerald-300/50" strokeWidth={1}/>}
-    <span className="absolute bottom-3 left-4 text-[9px] tracking-[.2em] text-white/65">{geo?'GEOPOLÍTICA':'MERCADOS'} · ILUSTRACIÓN</span>
-  </div>;
+  const usable=article.image&&!failed;
+  return usable?<img src={article.image} alt={cleanHeadline(article.title)} className="h-44 w-full object-cover bg-muted" loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<160||img.naturalHeight<90)setFailed(true);}}/>:null;
 }
 export function NewsCards({articles,geo=false}:{articles:Article[];geo?:boolean}){
   return articles.length?<div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{articles.map(article=><article key={article.url} className="border border-border overflow-hidden"><a href={safeNewsHref(article.url)} target="_blank" rel="noopener noreferrer" className="block hover:text-primary transition-colors"><NewsCover key={article.image??article.url} article={article} geo={geo}/><div className="p-4"><p className="text-[10px] text-muted-foreground mb-2">{article.date}</p><h2 className="text-sm leading-relaxed font-semibold">{cleanHeadline(article.title)}</h2>{article.excerpt&&<p className="text-xs text-muted-foreground leading-relaxed mt-3">{cleanNewsExcerpt(article.excerpt)}</p>}</div></a></article>)}</div>:<p className="text-sm text-muted-foreground">No se han podido obtener noticias recientes en este momento.</p>;
