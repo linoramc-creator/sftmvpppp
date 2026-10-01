@@ -5,7 +5,6 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import { authenticatedFetch } from "@/lib/beta-api";
 
 const ENDPOINT=`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
-const SECTOR_ETFS=["XLK","XLF","XLV","XLY","XLP","XLI","XLE","XLU","XLB","XLRE","XLC"];
 const COLORS=["#18d978","#38bdf8","#c084fc","#fbbf24","#fb7185","#a3e635","#f97316","#22d3ee","#e879f9","#94a3b8","#f43f5e"];
 type ComparisonRow=ExtraAsset&{symbol:string;available:boolean;lastTradeDate?:string;price?:number;change1d?:number|null;change1m?:number|null;volume?:number|null;dollarVolume?:number|null;avgVolume20?:number|null;volumeVsAverage?:number|null;netFundFlows?:number|null;dates?:number[];closes?:number[]};
 type ComparisonData={assets:ComparisonRow[];flowNote:string;fetchedAt:string};
@@ -15,9 +14,9 @@ const compact=(v:number|null|undefined)=>v==null?"—":Intl.NumberFormat("es-ES"
 
 export default function MarketTools(){
 
-  const [symbols,setSymbols]=useState(SECTOR_ETFS.join(", "));
+  const [symbols,setSymbols]=useState("");
   const [compare,setCompare]=useState<ComparisonData|null>(null);
-  const [corrSymbols,setCorrSymbols]=useState("SPY, QQQ, GLD, TLT");
+  const [corrSymbols,setCorrSymbols]=useState("");
   const [range,setRange]=useState("3m");
   const [corr,setCorr]=useState<CorrelationData|null>(null);
   const [busy,setBusy]=useState(false),[error,setError]=useState("");
@@ -34,7 +33,7 @@ export default function MarketTools(){
     <h1 className="text-xl font-semibold">Comparación y correlación de activos</h1>
     {error&&<p role="alert" className="border border-destructive/40 p-3 text-sm text-destructive flex gap-2"><AlertCircle className="w-4 h-4 shrink-0"/>{error}</p>}
     <section className="space-y-5"><h2 className="text-primary text-sm">COMPARACIÓN · RENTABILIDAD Y ACTIVIDAD</h2>
-      <div className="border border-border bg-card p-4 space-y-3"><label className="text-xs tracking-wide block">ETF sectoriales de EE. UU. <span className="text-muted-foreground">(edita los tickers separados por comas; máximo 12)</span><textarea aria-label="ETF sectoriales" rows={2} value={symbols} onChange={e=>setSymbols(e.target.value)} className="mt-2 w-full resize-y bg-background border border-border px-3 py-2 text-sm"/></label><button disabled={busy||parsed.length<2} onClick={()=>void load("comparison")} className="inline-flex items-center gap-2 bg-primary text-black px-4 py-2 text-xs font-bold tracking-widest disabled:opacity-50">{busy?<Loader2 className="w-4 h-4 animate-spin"/>:<RefreshCw className="w-4 h-4"/>} ACTUALIZAR COMPARACIÓN</button></div>
+      <div className="border border-border bg-card p-4 space-y-3"><label className="text-xs tracking-wide block"><span className="sr-only">Activos para comparar, separados por comas; máximo 12</span><textarea aria-label="Activos para comparar" placeholder="Escribe los tickers separados por comas" rows={2} value={symbols} onChange={e=>setSymbols(e.target.value)} className="mt-2 w-full resize-y bg-background border border-border px-3 py-2 text-sm"/></label><button disabled={busy||parsed.length<2} onClick={()=>void load("comparison")} className="inline-flex items-center gap-2 bg-primary text-black px-4 py-2 text-xs font-bold tracking-widest disabled:opacity-50">{busy?<Loader2 className="w-4 h-4 animate-spin"/>:<RefreshCw className="w-4 h-4"/>} ACTUALIZAR COMPARACIÓN</button></div>
       {!compare?<p className="text-sm text-muted-foreground py-12 text-center border border-border">Carga la comparación para ver rentabilidad, volumen y actividad diaria.</p>:<>
         <div className="grid lg:grid-cols-2 gap-4"><div className="border border-border bg-card p-4"><h2 className="text-xs tracking-widest mb-4">RENDIMIENTO AJUSTADO · ÚLTIMOS 6 MESES</h2><div className="h-72"><ResponsiveContainer width="100%" height="100%"><LineChart data={comparisonChart}><CartesianGrid stroke="#26303b" strokeDasharray="3 3"/><XAxis dataKey="date" minTickGap={25} tick={{fontSize:9}}/><YAxis tick={{fontSize:9}} unit="%"/><Tooltip/><Legend/><Line dataKey="_hide" hide/>{compare.assets.filter(a=>a.available&&a.dates&&a.closes).map((a,i)=><Line key={a.symbol} dataKey={a.symbol} name={a.symbol} stroke={COLORS[i%COLORS.length]} dot={false} connectNulls={false} type="linear"/> )}</LineChart></ResponsiveContainer></div></div>
           <div className="border border-border bg-card p-4"><h2 className="text-xs tracking-widest mb-4">VOLUMEN NEGOCIADO · MONEDA DEL ACTIVO</h2><div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={compare.assets.filter(a=>a.available).map(a=>({symbol:a.symbol,usd:a.dollarVolume??null}))}><CartesianGrid stroke="#26303b" strokeDasharray="3 3"/><XAxis dataKey="symbol" tick={{fontSize:9}}/><YAxis tick={{fontSize:9}} tickFormatter={compact}/><Tooltip formatter={(v:number)=>`$${compact(v)}`}/><Bar dataKey="usd" name="Última sesión" fill="#18d978"/></BarChart></ResponsiveContainer></div></div></div>

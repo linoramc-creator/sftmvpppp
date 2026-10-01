@@ -1,3 +1,4 @@
+import { ReportLoading } from "@/components/ReportLoading";
 import { safeNewsHref } from "@/lib/navigation";
 import { accountApi } from "@/lib/beta-api";
 import { useProfile } from "@/components/AuthGate";
@@ -697,12 +698,7 @@ const Index = () => {
           )}
 
           {/* Loading placeholder */}
-          {isLoading && !activeAnalysis && (
-            <div className="flex items-center gap-3 py-10 text-muted-foreground text-[11px] tracking-widest">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              RECOPILANDO DATOS DE MERCADO...
-            </div>
-          )}
+          {isLoading && <ReportLoading subject={activeTicker} streaming={Boolean(activeAnalysis)} />}
 
           {/* Empty state */}
           {!activeAnalysis && !isLoading && !error && (
@@ -795,12 +791,7 @@ const Index = () => {
           )}
 
           {/* Loading placeholder */}
-          {isEtfLoading && !etfAnalysis && (
-            <div className="flex items-center gap-3 py-10 text-muted-foreground text-[11px] tracking-widest">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              RECOPILANDO DATOS DEL FONDO...
-            </div>
-          )}
+          {isEtfLoading && <ReportLoading subject={etfInput} streaming={Boolean(etfAnalysis)} />}
 
           {/* Empty state */}
           {!etfAnalysis && !isEtfLoading && !etfError && !etfNotFund && (
@@ -882,12 +873,7 @@ const Index = () => {
           )}
 
           {/* Loading */}
-          {isSectorLoading && !sectorAnalysis && (
-            <div className="flex items-center gap-3 py-10 text-muted-foreground text-[11px] tracking-widest">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              ANALIZANDO SECTOR — RECOPILANDO DATOS...
-            </div>
-          )}
+          {isSectorLoading && <ReportLoading subject={sectorInput} streaming={Boolean(sectorAnalysis)} />}
 
           {/* Empty state */}
           {!sectorAnalysis && !isSectorLoading && !sectorError && (

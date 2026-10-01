@@ -25,3 +25,8 @@ test('anonymous, foreign origin and non-POST calls never reach provider code',as
  const cors=await secureRequest(new Request('https://example.test',{method:'OPTIONS',headers:{Origin:'https://sftmvpppp.vercel.app'}}),dispatch);
  assert.equal(cors.status,204);assert.equal(cors.headers.get('Access-Control-Allow-Origin'),'https://sftmvpppp.vercel.app');assert.equal(calls,0);
 });
+
+test('mixed operations cannot bypass expensive request budgets',()=>{
+ for(const body of [{macroCalendar:true,etf:true,ticker:'SPY'},{panel:'business',subject:'AAPL',marketData:true},{accountAction:'profile',panel:'feed'},{fundamentals:true,optionsAction:'chain',ticker:'AAPL'},{panel:'correlation',symbols:['SPY','QQQ'],range:'max'}])assert.throws(()=>classify(body),BetaError);
+ assert.equal(classify({panel:'institutional',subject:'AAPL'}).request_class,'expensive');
+});

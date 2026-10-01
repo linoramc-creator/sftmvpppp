@@ -15,8 +15,14 @@ async function json(url: string, body: unknown, headers: Record<string,string> =
 }
 async function text(url: string, headers: Record<string, string> = {}, timeout = 18000): Promise<string> {
   try {
-    const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeout) });
-    return response.ok ? (await response.text()).slice(0, 900000) : '';
+    const parsed=new URL(url);
+    if(parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.port||!['www.sec.gov','data.sec.gov'].includes(parsed.hostname))return '';
+    const response = await fetch(url, { headers, redirect:'error', signal: AbortSignal.timeout(timeout) });
+    if(!response.ok){await response.body?.cancel();return '';}
+    const reader=response.body?.getReader();if(!reader)return '';
+    const decoder=new TextDecoder();let result='',bytes=0;
+    try{while(bytes<900000){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.length;result+=decoder.decode(chunk.value,{stream:true});}}finally{await reader.cancel();}
+    return result.slice(0,900000);
   } catch { return ''; }
 }
 function allowedDocument(url: string, domains: string[]) {
@@ -111,7 +117,11 @@ export async function researchBusiness(company:string,ticker:string,website:stri
     const links = await googleGroundedUrls(company, ticker, domains, gemini);
     for (const link of links) {
       if (docs.some(doc => doc.url === link.url)) continue;
-      const documentText = await text(link.url, { 'User-Agent': 'SFTM research contact@sftmvpppp.vercel.app' }, 28000);
+      // Non-regulatory pages are extracted by the existing provider; never let
+      // model-returned URLs redirect this server into private infrastructure.
+      const regulatory=await text(link.url, { 'User-Agent': 'SFTM research contact@sftmvpppp.vercel.app' }, 28000);
+      const extracted=!regulatory&&tavily?await json('https://api.tavily.com/extract',{api_key:tavily,urls:[link.url],extract_depth:'basic'}):null;
+      const documentText=regulatory||String(extracted?.results?.find((r:Row)=>r.url===link.url)?.raw_content??'').slice(0,900000);
       if (documentText) docs.push({ ...link, text: documentText });
     }
   }
