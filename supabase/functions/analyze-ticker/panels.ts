@@ -1,3 +1,4 @@
+import { massiveNews, sectorMassiveNews } from './massive-news.ts';
 import { articleCover, photoUrl, publisherUrl } from './news-covers.ts';
 import { buildOpinions, editBusiness, recentPartnerships, type OpinionsPanel, type BusinessSummary, type Partnership } from "./editorial.ts";
 import { researchBusiness } from './business-research.ts';
@@ -20,7 +21,7 @@ export type FeedQuote = { symbol: string; label: string; price: number | null; c
 export type FeedGroup = { label: string; items: FeedQuote[] };
 export type FeedEvent = { date: string; title: string; impact: string };
 export type MarketFeed = { fetchedAt: string; groups: FeedGroup[]; headlines: Article[]; geopolitics:Article[]; treasury:TreasuryPoint[]; earnings:EarningsEvent[] };
-type Env = { FMP_KEY: string; FRED_KEY: string; TAVILY_KEY: string; FINNHUB_KEY: string; GEMINI_API_KEY?: string };
+type Env = { MASSIVE_API_KEY?: string; FMP_KEY: string; FRED_KEY: string; TAVILY_KEY: string; FINNHUB_KEY: string; GEMINI_API_KEY?: string };
 type Dependencies = { summary: (ticker: string, modules: string) => Promise<Row | null> };
 const cache = new Map<string, { expires: number; value: unknown }>();
 const pending = new Map<string, Promise<unknown>>();
@@ -102,17 +103,19 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
   return cached(`news:${sector}:${subject}`, HOUR, async () => {
     const aliases: Record<string, string> = { semiconductores: 'semiconductors semiconductor chips', 'inteligencia artificial': 'artificial intelligence AI', 'energía': 'energy oil gas', salud: 'healthcare pharmaceutical biotech', defensa: 'defense aerospace', consumo: 'consumer retail', 'tecnología': 'technology software', bancos: 'banks banking', 'inmobiliario': 'real estate REIT' };
     const topic = sector ? `${subject} ${aliases[subject.toLowerCase()] ?? ''}` : subject;
-    const [raw, profile, finnhubNews, fmpNews] = await Promise.all([
+    const [raw, profile, finnhubNews, fmpNews, massive] = await Promise.all([
       get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(topic)}&newsCount=15&quotesCount=${sector ? 0 : 1}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       !sector && deps ? cached(`news-name:${subject}`, 24 * HOUR, () => deps.summary(subject, 'quoteType,assetProfile,fundProfile')) : null,
       !sector && env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(subject)}&from=${new Date(Date.now()-90*86400000).toISOString().slice(0,10)}&to=${new Date().toISOString().slice(0,10)}&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
       !sector && env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(subject)}&limit=50&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
+      massiveNews(env.MASSIVE_API_KEY,sector?'':subject),
     ]);
     const data = raw as Row;
     const company = sector ? topic : profile?.quoteType?.longName ?? profile?.quoteType?.shortName ?? data?.quotes?.[0]?.longname ?? data?.quotes?.[0]?.shortname ?? subject;
     const rows: Article[] = (data?.news ?? []).map((r: Row) => ({ title: r.title, url: r.link, source: r.publisher, date: day(r.providerPublishTime) ?? '' }));
     for(const r of Array.isArray(finnhubNews)?finnhubNews:[])if(r.url&&r.headline)rows.push({title:r.headline,url:r.url,source:r.source??'',date:day(r.datetime)??'',excerpt:r.summary??''});
     for(const r of Array.isArray(fmpNews)?fmpNews:[])if(r.url&&r.title)rows.push({title:r.title,url:r.url,source:r.publisher??'',date:day(r.publishedDate)??'',excerpt:r.text??''});
+    rows.push(...(sector?sectorMassiveNews(massive,subject):massive));
     const allowedDomains = [...NEWS_DOMAINS];
     try { if(profile?.assetProfile?.website) allowedDomains.push(new URL(profile.assetProfile.website).hostname.replace(/^www\./,'')); } catch {}
     const thematic = sector || profile?.quoteType?.quoteType === 'ETF';
@@ -175,6 +178,7 @@ function curateFeed(articles: Article[]): Article[] {
   const words: Set<string>[] = [];
   return articles.filter(article => {
     const stamp = Date.parse(article.date);
+    if (/stocks? to buy|should you buy|investing radar|prediction:|sponsored|motley fool/i.test(article.title+' '+article.source)) return false;
     if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 5 * 86400000 || stamp > Date.now() + 86400000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)) return false;
     try { const url = new URL(article.url); if (!['http:', 'https:'].includes(url.protocol)) return false; url.search = ''; url.hash = ''; if (seen.has(url.href)) return false; seen.add(url.href); } catch { return false; }
     const current = new Set(article.title.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
@@ -186,24 +190,33 @@ function curateFeed(articles: Article[]): Article[] {
     words.push(current); return true;
   }).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 9).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) }));
 }
-export async function marketFeedPanel(env: Env): Promise<MarketFeed> {
-  const cacheKey = `feed:${new Date().toISOString().slice(0, 13)}`;
+export async function feedMarketsPanel(env:Env):Promise<MarketFeed>{
+  return cached('feed-markets-v1',300000,async()=>{
+    const [groups,bonds,events]=await Promise.all([
+      Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>feedQuote(symbol,label)))}))),
+      treasury(env.FRED_KEY),earnings(env.FMP_KEY,env.FINNHUB_KEY)
+    ]);
+    return {fetchedAt:new Date().toISOString(),groups,treasury:bonds,earnings:events,headlines:[],geopolitics:[]};
+  });
+}
+export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Promise<MarketFeed> {
+  const cacheKey = `feed:${part}:${new Date().toISOString().slice(0, 13)}`;
   return cached(cacheKey, 5 * 60000, async () => {
-    const [groups, yahoo, finnhub, fmp, web, bonds, earningsEvents, geopolitical] = await Promise.all([
-      Promise.all(FEED_MARKETS.map(async group => ({ label: group.label, items: await Promise.all(group.items.map(([symbol, label]) => feedQuote(symbol, label))) }))),
+    const [market, yahoo, finnhub, fmp, web, geopolitical, massive] = await Promise.all([
+      part==="all"?feedMarketsPanel(env):null,
       get('https://query1.finance.yahoo.com/v1/finance/search?q=global%20markets%20oil%20gold%20currencies&newsCount=25&quotesCount=0', { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 5, 18),
-      treasury(env.FRED_KEY),
-      earnings(env.FMP_KEY,env.FINNHUB_KEY),
+
       search('geopolitics war sanctions ceasefire trade tariffs shipping energy security latest',env.TAVILY_KEY,true,NEWS_DOMAINS,2,15),
+      massiveNews(env.MASSIVE_API_KEY),
     ]);
     const headlines: Article[] = [];
     for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.[0]?.url) });
     for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
     for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
-    headlines.push(...web);
+    headlines.push(...web,...massive);
     const geoPattern=/war|sanction|ceasefire|tariff|conflict|nato|military|diploma|guerra|sancion|arancel|conflicto|geopol|shipping|strait/i;
     const geopolitics=curateFeed([...geopolitical,...headlines].filter(a=>geoPattern.test(`${a.title} ${a.excerpt??''}`)&&Date.parse(a.date)>=Date.now()-3*86400000)).slice(0,6);
     const selected=curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url)));
@@ -217,7 +230,7 @@ export async function marketFeedPanel(env: Env): Promise<MarketFeed> {
         if(article&&Array.isArray(row.images)) article.image=row.images.map((image:unknown)=>photoUrl(typeof image==='string'?image:(image as Row)?.url)).find(Boolean);
       }
     }
-    return { fetchedAt: new Date().toISOString(), groups, headlines:covers, geopolitics:geoCovers, treasury:bonds, earnings:earningsEvents };
+    return { fetchedAt: new Date().toISOString(), groups:market?.groups??[], headlines:covers, geopolitics:geoCovers, treasury:market?.treasury??[], earnings:market?.earnings??[] };
   });
 }
 const FRED_SERIES = [

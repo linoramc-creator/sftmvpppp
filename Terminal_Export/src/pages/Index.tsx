@@ -6,7 +6,7 @@ import { cleanReportText } from "@/lib/editorial";
 import { RevenueGrowthSection } from "@/components/charts/RevenueGrowthChart";
 import { buildGrowthChartData } from "@/lib/revenue-growth";
 import { BondsView, BusinessView, FeedView, InstitutionalView, NewsView } from "@/components/MarketPanels";
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
@@ -19,8 +19,8 @@ import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
 import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
-import { downloadAnalysisPdf } from "@/lib/reportPdf";
-import MarketTools from "@/pages/MarketTools";
+
+const MarketTools = lazy(() => import("@/pages/MarketTools"));
 import type { EtfResponse } from "@/types/etf";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ const Index = () => {
   // Nav
   const [navTab, setNavTab] = useState<"feed" | "ticker" | "etf" | "sector" | "comparacion" | "bonos" | "guardados">("feed");
 
-  const [clock, setClock] = useState("");
+
 
   // Market ticker
   const [marketData,    setMarketData]    = useState<MarketData | null>(null);
@@ -299,25 +299,12 @@ const Index = () => {
     return()=>{active=false;abortRef.current?.abort();etfAbortRef.current?.abort();sectorAbortRef.current?.abort();};
   },[profile.id]);
 
-  // Live clock
-  useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      const d = now.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }).toUpperCase();
-      const t = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-      setClock(`${d} ${t}`);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, []);
-
   // Fetch market data on mount + every 60s
   useEffect(() => {
     let active = true;
     const load = () => fetchMarketData(customStocks).then(d => { if (active && d) setMarketData(d); });
     load();
-    const id = setInterval(load, 60_000);
+    const id = setInterval(() => { if(document.visibilityState==='visible')void load(); }, 60_000);
     return () => { active = false; clearInterval(id); };
   }, [customStocks]);
 
@@ -510,6 +497,7 @@ const Index = () => {
       const result=await accountApi<{summary:string}>('summarizeReport',{id:viewingReport.id});
       const updated={...viewingReport,aiSummary:result.summary};setViewingReport(updated);
       setSavedReports(previous=>previous.map(r=>r.id===updated.id?updated:r));
+      const {downloadAnalysisPdf}=await import("@/lib/reportPdf");
       downloadAnalysisPdf(result.summary,`${viewingReport.ticker} · resumen ejecutivo`,printWindow);
     }catch(e){printWindow.close();toast({title:"No se pudo generar el PDF",description:e instanceof Error?e.message:"Inténtalo de nuevo."});}
     finally{setSummaryBusy(false);}
@@ -603,7 +591,7 @@ const Index = () => {
             <span className="text-primary/70">·</span>
             <span className="text-primary/70 tracking-widest">LIVE</span>
             <span className="text-primary/70">·</span>
-            <span>{clock}</span>
+            <span><TerminalClock /></span>
           </div>
         </div>
       </header>
@@ -618,7 +606,7 @@ const Index = () => {
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "bonos" && <main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main>}
       {navTab === "feed" && <main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} /></main>}
-      {navTab === "comparacion" && <MarketTools />}
+      {navTab === "comparacion" && <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Cargando comparación…</p>}><MarketTools /></Suspense>}
       {navTab === "ticker" && (
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
@@ -1961,3 +1949,12 @@ function renderInline(text: string): React.ReactNode {
 }
 
 export default Index;
+
+function TerminalClock(){
+  const [value,setValue]=useState('');
+  useEffect(()=>{
+    const tick=()=>{const now=new Date();setValue(`${now.toLocaleDateString('en-US',{month:'short',day:'2-digit',year:'numeric'}).toUpperCase()} ${now.toLocaleTimeString('en-US',{hour12:false})}`);};
+    tick();const timer=window.setInterval(()=>{if(document.visibilityState==='visible')tick();},1000);return()=>window.clearInterval(timer);
+  },[]);
+  return <>{value}</>;
+}

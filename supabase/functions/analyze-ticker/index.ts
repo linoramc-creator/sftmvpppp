@@ -1,7 +1,9 @@
+import { sharedFeed } from './feed-cache.ts';
+import { massiveContext } from './massive-news.ts';
 import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
 import { researchPeers } from './business-research.ts';
 import { comparison, correlations } from './market-analytics.ts';
-import { bondsPanel, businessPanel, institutionalPanel, newsPanel, marketFeedPanel, curateNews, cached, fmpHolders } from "./panels.ts";
+import { bondsPanel, businessPanel, institutionalPanel, newsPanel, marketFeedPanel, feedMarketsPanel, curateNews, cached, fmpHolders } from "./panels.ts";
 // ============================================================
 // UNIFIED ANALYZE FUNCTION
 // Handles both TICKER analysis (body: { ticker: "AAPL" })
@@ -1909,6 +1911,7 @@ REGLAS DE FORMATO:
 // =====================================================
 
 interface EnvKeys {
+  MASSIVE_API_KEY?: string;
   GEMINI_API_KEY: string;
   FINNHUB_KEY: string;
   TAVILY_KEY: string;
@@ -1995,6 +1998,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
           competitiveSearch,
           risksCatalystsSearch,
           catalystCalendar,
+          massiveNewsContext,
         ] = await Promise.all([
           etfMode ? Promise.resolve([]) : fetchYahooQuarterlyFinancials(cleanTicker),
           !etfMode && env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
@@ -2024,6 +2028,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
             ? fetchTavilySearch(`${companyName} ${cleanTicker} ${etfMode ? "ETF flows holdings outlook" : "risks catalysts growth headwinds"} ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 4, 30, "news", 160)
             : Promise.resolve(null),
           etfMode ? Promise.resolve(null) : fetchCatalystCalendar(cleanTicker, env.FMP_KEY),
+          massiveContext(env.MASSIVE_API_KEY,cleanTicker),
         ]);
 
         // Step 3: Merge quarterly data from all structured sources (Yahoo first)
@@ -2076,7 +2081,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
           finnhubData, peerData, quarterlyHistory, geoContext, sectorNews, tickerNews,
           earningsSearch, competitiveSearch, risksCatalystsSearch,
           fredContext, fmpContext, twelveDataContext, technicalContext,
-        );
+        ) + massiveNewsContext;
 
         console.log("Ticker data loaded:", {
           ticker: cleanTicker,
@@ -2170,6 +2175,7 @@ async function handleSectorAnalysis(sector: string, env: EnvKeys): Promise<Respo
           macroNews,
           regulatoryContext,
           fredContext,
+          massiveNewsContext,
         ] = await Promise.all([
           env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector news latest ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 6, 30, "news", 180) : Promise.resolve({ answer: "", results: [] }),
           env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector outlook trends growth forecast ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 5, undefined, undefined, 180) : Promise.resolve({ answer: "", results: [] }),
@@ -2178,12 +2184,13 @@ async function handleSectorAnalysis(sector: string, env: EnvKeys): Promise<Respo
           env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector interest rates inflation tariffs macro impact ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 4, 60, undefined, 160) : Promise.resolve({ answer: "", results: [] }),
           env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector regulation policy geopolitical risk ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 3, 90, undefined, 150) : Promise.resolve({ answer: "", results: [] }),
           fetchFredData(env.FRED_KEY),
+          massiveContext(env.MASSIVE_API_KEY,cleanSector,true),
         ]);
 
         const dataContext = buildSectorDataContext(
           cleanSector, sectorNews, sectorTrends, topCompanies,
           sectorETFs, macroNews, regulatoryContext, fredContext,
-        );
+        ) + massiveNewsContext;
 
         console.log("Sector data loaded:", {
           sector: cleanSector,
@@ -3973,6 +3980,7 @@ async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
 Deno.serve((req) => secureRequest(req, async (body) => {
   try {
     const env: EnvKeys = {
+      MASSIVE_API_KEY: Deno.env.get("MASSIVE_API_KEY") ?? "",
       GEMINI_API_KEY: (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini") || Deno.env.get("GOOGLE_API_KEY")) ?? "",
       FINNHUB_KEY:    (Deno.env.get("FINNHUB_API_KEY") || Deno.env.get("Finhub")) ?? "",
       TAVILY_KEY:     (Deno.env.get("TAVILY_API_KEY")  || Deno.env.get("Tavily")) ?? "",
@@ -3983,7 +3991,9 @@ Deno.serve((req) => secureRequest(req, async (body) => {
 
     if (typeof body.panel === "string") {
       const deps = { summary: eYahooQuoteSummary };
-      if (body.panel === "feed") return panelJson(await marketFeedPanel(env));
+      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v2",()=>feedMarketsPanel(env)));
+      if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v2",()=>marketFeedPanel(env,"news")));
+      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v2",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       if (body.panel === "comparison") return panelJson(await comparison(body.symbols.map((s:string)=>s.trim().toUpperCase()),env.FMP_KEY));
       if (body.panel === "correlation") return panelJson(await correlations(body.symbols.map((s:string)=>s.trim().toUpperCase()),typeof body.range==="string"?body.range:"3m"));

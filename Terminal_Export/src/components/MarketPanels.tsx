@@ -29,21 +29,24 @@ function request<T>(panel: string, subject: string, sector: boolean, ttl: number
   return promise;
 }
 function usePanel<T>(panel: string, subject = '', sector = false) {
-  const [data, setData] = useState<T | null>(null);
+  const [data, setData] = useState<T | null>(() => (cache.get(`${panel}:${subject}:${sector}`)?.data as T) ?? null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    setData(null); setError('');
-    const ttl = panel === 'feed' ? 300000 : ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
+    const previous=cache.get(`${panel}:${subject}:${sector}`);
+    setData(previous&&Date.now()-previous.at<86400000?previous.data as T:null); setError('');
+    const ttl = panel.startsWith('feed') ? 300000 : ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
     const load = () => request<T>(panel, subject, sector, ttl)
       .then(value => { if (!cancelled) { setData(value); setError(''); } })
       .catch(() => { if (!cancelled) setError('No se ha podido actualizar. Inténtalo de nuevo.'); });
     void load();
-    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(); }, panel === 'feed' ? 300000 : 60000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    const visible=()=>{if(document.visibilityState==='visible')void load();};
+    const timer = window.setInterval(visible, ttl);
+    document.addEventListener('visibilitychange',visible);
+    return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange',visible); };
   }, [panel, subject, sector, retry]);
-  return { data, error, retry: () => setRetry(n => n + 1) };
+  return { data, error, retry: () => { cache.delete(`${panel}:${subject}:${sector}`); setRetry(n => n + 1); } };
 }
 const fmt = (n: number | null | undefined, digits = 2) => n == null ? 'N/D' : n.toLocaleString('es-ES', { maximumFractionDigits: digits });
 const compact = (n: number) => Intl.NumberFormat('es-ES', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
@@ -76,17 +79,18 @@ function feedPrice(price: number | null, currency: string) {
   return `${fmt(price, digits)} ${currency}`;
 }
 export function FeedView({stocks,data:quotes,onChange}:{stocks:string[];data:MarketData|null;onChange:(stocks:string[])=>void}) {
-  const state = usePanel<MarketFeed>('feed');
-  if (!state.data) return <Status {...state} />;
-  const data = state.data;
+  const market=usePanel<MarketFeed>('feedMarkets');
+  const state = usePanel<MarketFeed>('feedNews');
+  const data = market.data ?? {groups:[],treasury:[],earnings:[],fetchedAt:''};
   return <div className="space-y-6">
-    {state.error && <Status {...state} />}
+    {(!market.data||market.error) && <Status {...market} />}
     <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div><p className="text-sm">{item.label}</p><p className="text-[10px] text-muted-foreground">{item.date ?? 'Fecha no disponible'}</p></div><div className="text-right"><p className="text-sm tabular-nums">{feedPrice(item.price, item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} onChange={onChange}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
-      <div className="space-y-4"><Box title="PORTADAS DEL DÍA"><NewsCards articles={data.headlines}/></Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS"><NewsCards articles={data.geopolitics??[]} geo/></Box></div>
+      <div className="space-y-4"><Box title="PORTADAS DEL DÍA">{state.data&&<div className="mb-3"><Stamp at={state.data.fetchedAt}/></div>}{state.data?<NewsCards articles={state.data.headlines}/>:<Status {...state}/>}</Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS">{state.data?<NewsCards articles={state.data.geopolitics??[]} geo/>:<Status {...state}/>}</Box></div>
       <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]}/></Box>
     </div>
-    <Stamp at={data.fetchedAt} />
+    {state.error&&state.data&&<Status {...state}/>}
+    {data.fetchedAt&&<Stamp at={data.fetchedAt} />}
   </div>;
 }
 const colors = ['#60a5fa', '#a78bfa', '#34d399', '#fb923c'];

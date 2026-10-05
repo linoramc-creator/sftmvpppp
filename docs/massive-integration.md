@@ -70,3 +70,15 @@ permisos de datos apropiados. No exponer este MCP local públicamente.
 
 Documentación: https://github.com/massive-com/mcp_massive y
 https://massive.com/docs/ai-tools/clients/codex .
+
+## Integración de noticias en producción (05-10-2026)
+
+`/v2/reference/news` está integrado por REST en Supabase como fuente adicional
+para feed, paneles e informes. Verificado mediante MCP y REST. El secreto
+`MASSIVE_API_KEY` permanece exclusivamente en el servidor. El MCP local sigue
+siendo una herramienta de desarrollo; no se expone a los usuarios.
+
+Consulta acotada, timeout, caché y degradación a las otras fuentes ante errores.
+Los sectores se seleccionan por tema sobre noticias generales: no existe un
+filtro sectorial nativo en este endpoint. Las fuentes originales y fechas se
+conservan internamente; no se fabrican noticias para completar una cuota.
