@@ -43,11 +43,11 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.subject!==undefined&&!['bonds','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction) return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   if(body.panel){
-    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','comparison','correlation'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','comparison','correlation'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
     if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>12||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 12 ETF válidos.');
     if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
-    if(['news','institutional','business'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
-    return {request_class:['feed','feedNews','news','business','institutional'].includes(body.panel)?'expensive':'data'};
+    if(['news','institutional','business','assetSnapshot'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
+    return {request_class:['feed','feedNews','news','business','institutional','assetSnapshot'].includes(body.panel)?'expensive':'data'};
   }
   if(body.marketData===true){if(body.symbols!==undefined&&(!Array.isArray(body.symbols)||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Lista de activos inválida.');return {request_class:'data'};}
   if(body.macroCalendar===true)return {request_class:'data'};

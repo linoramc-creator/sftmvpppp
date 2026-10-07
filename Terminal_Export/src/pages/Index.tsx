@@ -20,6 +20,7 @@ import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
 
+const AssetDetail = lazy(() => import("@/components/AssetDetail"));
 const MarketTools = lazy(() => import("@/pages/MarketTools"));
 import type { EtfResponse } from "@/types/etf";
 
@@ -277,9 +278,12 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"feed" | "ticker" | "etf" | "sector" | "comparacion" | "bonos" | "guardados">("feed");
+  const [navTab, setNavTab] = useState<"feed" | "ticker" | "etf" | "sector" | "comparacion" | "seguimiento" | "bonos" | "guardados">("feed");
 
 
+
+  const [watchSymbol,setWatchSymbol]=useState("");
+  const openWatchAsset=(symbol:string)=>{setWatchSymbol(symbol);setNavTab("seguimiento");};
 
   // Market ticker
   const [marketData,    setMarketData]    = useState<MarketData | null>(null);
@@ -605,7 +609,8 @@ const Index = () => {
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       {navTab === "bonos" && <main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main>}
-      {navTab === "feed" && <main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} /></main>}
+      {navTab === "feed" && <main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} /></main>}
+      {navTab === "seguimiento" && <Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol} symbol={watchSymbol} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={symbol=>{setTicker(symbol);setNavTab("ticker");}}/></Suspense>}
       {navTab === "comparacion" && <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Cargando comparación…</p>}><MarketTools /></Suspense>}
       {navTab === "ticker" && (
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">

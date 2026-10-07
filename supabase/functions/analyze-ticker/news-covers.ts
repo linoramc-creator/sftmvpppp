@@ -6,11 +6,14 @@ export function publisherUrl(value:string):boolean {
 export function photoUrl(value:unknown):string|undefined {
   if(typeof value!=='string'||value.length>4000)return;
   try {const u=new URL(value.replace(/&amp;/g,'&'));if(u.protocol!=='https:'||u.username||u.password)return;
-    if(/(?:^|[\/_.-])(logo|favicon|placeholder|default|brand)(?:[\/_.-]|$)/i.test(u.pathname))return;
+    // Providers often wrap the original image inside an encoded query string.
+    let decoded=u.href;for(let i=0;i<3;i++){try{const next=decodeURIComponent(decoded);if(next===decoded)break;decoded=next;}catch{break;}}
+    if(/logo|favicon|placeholder|default[_\/-]?(?:article|image|\d)|brand[_\/-]|apple-touch-icon|sprite|avatar|masthead|cnbc[^/]*share|social[_-](?:share|card)|profile[_\/-]?image|\/icons?\/|\.svg(?:[?#]|$)/i.test(decoded))return;
     return u.href;
   }catch{return;}
 }
 export function extractCover(html:string,base:string):string|undefined {
+  if(/(?:property|name)=["']og:image:alt["'][^>]*content=["'][^"']*(?:logo|brand mark)|content=["'][^"']*(?:logo|brand mark)[^"']*["'][^>]*(?:property|name)=["']og:image:alt/i.test(html))return;
   for(const tag of html.match(/<meta\b[^>]*>/gi)??[]) {
     const attrs:Record<string,string>={};
     for(const m of tag.matchAll(/([\w:-]+)\s*=\s*(["'])(.*?)\2/gs))attrs[m[1].toLowerCase()]=m[3];

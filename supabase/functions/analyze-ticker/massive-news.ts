@@ -8,7 +8,7 @@ export function normalizeMassiveNews(raw:any,now=Date.now()):News[]{
   return (Array.isArray(raw?.results)?raw.results:[]).flatMap((r:any)=>{
     if(typeof r.title!=='string'||typeof r.article_url!=='string'||!Number.isFinite(Date.parse(r.published_utc))||Date.parse(r.published_utc)>now+60000)return [];
     try{const u=new URL(r.article_url);if(u.protocol!=='https:'||u.username||u.password||seen.has(u.href))return [];seen.add(u.href);}catch{return [];}
-    return [{title:r.title.slice(0,500),url:r.article_url,source:String(r.publisher?.name??'').slice(0,100),date:r.published_utc.slice(0,10),excerpt:String(r.description??'').slice(0,900),image:photoUrl(r.image_url),tickers:Array.isArray(r.tickers)?r.tickers.filter((v:unknown)=>typeof v==='string'):[],keywords:Array.isArray(r.keywords)?r.keywords.filter((v:unknown)=>typeof v==='string'):[]}];
+    return [{title:r.title.slice(0,500),url:r.article_url,source:String(r.publisher?.name??'').slice(0,100),date:r.published_utc.slice(0,10),publishedAt:r.published_utc,excerpt:String(r.description??'').slice(0,900),image:photoUrl(r.image_url),tickers:Array.isArray(r.tickers)?r.tickers.filter((v:unknown)=>typeof v==='string'):[],keywords:Array.isArray(r.keywords)?r.keywords.filter((v:unknown)=>typeof v==='string'):[]}];
   });
 }
 export async function massiveNews(key:string|undefined,ticker=''):Promise<News[]>{

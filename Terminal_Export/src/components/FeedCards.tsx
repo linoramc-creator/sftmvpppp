@@ -1,3 +1,4 @@
+import { photoUrl } from '../../../supabase/functions/analyze-ticker/news-covers';
 import {useState} from 'react';
 
 import {ResponsiveContainer,LineChart,Line,XAxis,YAxis,Tooltip} from 'recharts';
@@ -7,11 +8,11 @@ import type {Article,MarketFeed} from '../../../supabase/functions/analyze-ticke
 const number=(v:number|null,digits=2)=>v===null?'—':v.toLocaleString('es-ES',{maximumFractionDigits:digits});
 export function NewsCover({article,geo=false}:{article:Article;geo?:boolean}){
   const [failed,setFailed]=useState(false);
-  const usable=article.image&&!failed;
-  return usable?<img src={article.image} alt={cleanHeadline(article.title)} className="h-44 w-full object-cover bg-muted" loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<160||img.naturalHeight<90)setFailed(true);}}/>:null;
+  const usable=photoUrl(article.image)&&!failed;
+  return usable?<img src={article.image} alt={cleanHeadline(article.title)} className="aspect-[16/9] w-full object-cover bg-muted" loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<400||img.naturalHeight<220||img.naturalWidth/img.naturalHeight<1.25||img.naturalWidth/img.naturalHeight>2.6)setFailed(true);}}/>:null;
 }
 export function NewsCards({articles,geo=false}:{articles:Article[];geo?:boolean}){
-  return articles.length?<div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{articles.map(article=><article key={article.url} className="border border-border overflow-hidden"><a href={safeNewsHref(article.url)} target="_blank" rel="noopener noreferrer" className="block hover:text-primary transition-colors"><NewsCover key={article.image??article.url} article={article} geo={geo}/><div className="p-4"><p className="text-[10px] text-muted-foreground mb-2">{article.date}</p><h2 className="text-sm leading-relaxed font-semibold">{cleanHeadline(article.title)}</h2>{article.excerpt&&<p className="text-xs text-muted-foreground leading-relaxed mt-3">{cleanNewsExcerpt(article.excerpt)}</p>}</div></a></article>)}</div>:<p className="text-sm text-muted-foreground">No se han podido obtener noticias recientes en este momento.</p>;
+  return articles.length?<div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{articles.map(article=><article key={article.url} className="border border-border overflow-hidden"><a href={safeNewsHref(article.url)} target="_blank" rel="noopener noreferrer" className="block hover:text-primary transition-colors"><NewsCover key={article.image??article.url} article={article} geo={geo}/><div className="p-4"><p className="text-[10px] text-muted-foreground mb-2">{article.date}{article.access==='likely-open'&&<span className="ml-2 text-emerald-400">ACCESO HABITUALMENTE LIBRE</span>}{article.access==='subscription'&&<span className="ml-2 text-amber-400">PUEDE REQUERIR SUSCRIPCIÓN</span>}</p><h2 className="text-sm leading-relaxed font-semibold">{cleanHeadline(article.title)}</h2>{article.excerpt&&<p className="text-xs text-muted-foreground leading-relaxed mt-3">{cleanNewsExcerpt(article.excerpt)}</p>}</div></a></article>)}</div>:<p className="text-sm text-muted-foreground">No se han podido obtener noticias recientes en este momento.</p>;
 }
 export function TreasuryCard({points}:{points:MarketFeed['treasury']}){
   const dated=points.filter(p=>p.yield!==null);const common=dated.length===4&&new Set(dated.map(p=>p.date)).size===1;

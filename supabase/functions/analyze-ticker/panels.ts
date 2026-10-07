@@ -1,3 +1,4 @@
+import { balanceAccess, type NewsAccess } from './news-access.ts';
 import { massiveNews, sectorMassiveNews } from './massive-news.ts';
 import { articleCover, photoUrl, publisherUrl } from './news-covers.ts';
 import { buildOpinions, editBusiness, recentPartnerships, type OpinionsPanel, type BusinessSummary, type Partnership } from "./editorial.ts";
@@ -7,7 +8,7 @@ export type { OpinionsPanel } from "./editorial.ts";
 // On-demand panels with bounded per-isolate cache and request coalescing.
 type Row = Record<string, any>;
 export type Point = { date: string; value: number };
-export type Article = { title: string; url: string; source: string; date: string; excerpt?: string; image?: string };
+export type Article = { title: string; url: string; source: string; date: string; excerpt?: string; image?: string; publishedAt?: string; access?: NewsAccess };
 export type Series = { id: string; label: string; unit: string; source: string; points: Point[] };
 export type BondFund = { symbol: string; label: string; price: number | null; change: number | null; date: string | null; currency: string; points: Point[]; distributionYield: number | null; expenseRatio: number | null; assets: number | null };
 export type BondsPanel = { fetchedAt: string; series: Series[]; etfs: BondFund[] };
@@ -96,7 +97,7 @@ async function search(query: string, key: string, news = false, domains: string[
   return cached(`search:${news}:${query}:${domains.join(',')}:${days}:${maxResults}`, news ? HOUR : 24 * HOUR, async () => {
     const raw = await get('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key, query, search_depth: 'basic', max_results: maxResults, include_answer: false, include_images: news, ...(news ? { topic: 'news', days } : {}), ...(domains.length ? { include_domains: domains } : {}) }) });
     const rows = (raw as Row)?.results;
-    return Array.isArray(rows) ? rows.filter((r: Row) => /^https?:\/\//.test(r.url ?? '')).map((r: Row) => ({ title: String(r.title ?? ''), url: r.url, source: new URL(r.url).hostname, date: day(r.published_date) ?? '', excerpt: String(r.content ?? '').slice(0, 900), image: Array.isArray(r.images) ? r.images.map((image:unknown)=>photoUrl(typeof image==='string'?image:(image as Row)?.url)).find(Boolean) : undefined })) : [];
+    return Array.isArray(rows) ? rows.filter((r: Row) => /^https?:\/\//.test(r.url ?? '')).map((r: Row) => ({ title: String(r.title ?? ''), url: r.url, source: new URL(r.url).hostname, date: day(r.published_date) ?? '', excerpt: String(r.content ?? '').slice(0, 900), image: undefined })) : [];
   });
 }
 export async function newsPanel(subject: string, sector: boolean, env: Env, deps?: Dependencies): Promise<NewsPanel> {
@@ -172,12 +173,13 @@ async function feedQuote(symbol: string, label: string): Promise<FeedQuote> {
   return { symbol, label, price, change: price !== null && previous && previous > 0 ? (price / previous - 1) * 100 : null, date: priceDate, currency: String(meta.currency ?? '') || 'USD' };
 }
 const validFeedImage = photoUrl;
-function curateFeed(articles: Article[]): Article[] {
+function curateFeed(articles: Article[], limit=9): Article[] {
   const important = /\b(geopolitics|ceasefire|conflict|military|shipping|strait|fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos)\b/i;
   const seen = new Set<string>();
   const words: Set<string>[] = [];
-  return articles.filter(article => {
+  return balanceAccess(articles.filter(article => {
     const stamp = Date.parse(article.date);
+    if(/globenewswire\.com|businesswire\.com|prnewswire\.com|news\.google\.com|\/video\//i.test(article.url)||/CCTV Script|transcript|press release|investor deadline/i.test(article.title))return false;
     if (/stocks? to buy|should you buy|investing radar|prediction:|sponsored|motley fool/i.test(article.title+' '+article.source)) return false;
     if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 5 * 86400000 || stamp > Date.now() + 86400000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)) return false;
     try { const url = new URL(article.url); if (!['http:', 'https:'].includes(url.protocol)) return false; url.search = ''; url.hash = ''; if (seen.has(url.href)) return false; seen.add(url.href); } catch { return false; }
@@ -188,7 +190,7 @@ function curateFeed(articles: Article[]): Article[] {
     });
     if (duplicate) return false;
     words.push(current); return true;
-  }).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 9).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) }));
+  }).sort((a, b) => b.date.localeCompare(a.date)).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) })),limit);
 }
 export async function feedMarketsPanel(env:Env):Promise<MarketFeed>{
   return cached('feed-markets-v1',300000,async()=>{
@@ -202,7 +204,7 @@ export async function feedMarketsPanel(env:Env):Promise<MarketFeed>{
 export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Promise<MarketFeed> {
   const cacheKey = `feed:${part}:${new Date().toISOString().slice(0, 13)}`;
   return cached(cacheKey, 5 * 60000, async () => {
-    const [market, yahoo, finnhub, fmp, web, geopolitical, massive] = await Promise.all([
+    const [market, yahoo, finnhub, fmp, web, geopolitical, massive, openWeb] = await Promise.all([
       part==="all"?feedMarketsPanel(env):null,
       get('https://query1.finance.yahoo.com/v1/finance/search?q=global%20markets%20oil%20gold%20currencies&newsCount=25&quotesCount=0', { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
@@ -211,25 +213,18 @@ export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Pro
 
       search('geopolitics war sanctions ceasefire trade tariffs shipping energy security latest',env.TAVILY_KEY,true,NEWS_DOMAINS,2,15),
       massiveNews(env.MASSIVE_API_KEY),
+      search('markets economy geopolitics oil interest rates latest news',env.TAVILY_KEY,true,['apnews.com','bbc.com','cnbc.com','theguardian.com','aljazeera.com','euronews.com'],2,20),
     ]);
     const headlines: Article[] = [];
     for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.[0]?.url) });
     for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
     for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
-    headlines.push(...web,...massive);
+    headlines.push(...web,...massive,...openWeb);
     const geoPattern=/war|sanction|ceasefire|tariff|conflict|nato|military|diploma|guerra|sancion|arancel|conflicto|geopol|shipping|strait/i;
-    const geopolitics=curateFeed([...geopolitical,...headlines].filter(a=>geoPattern.test(`${a.title} ${a.excerpt??''}`)&&Date.parse(a.date)>=Date.now()-3*86400000)).slice(0,6);
+    const geopolitics=curateFeed([...geopolitical,...headlines].filter(a=>geoPattern.test(`${a.title} ${a.excerpt??''}`)&&Date.parse(a.date)>=Date.now()-3*86400000),6);
     const selected=curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url)));
-    const enrich=async (article:Article):Promise<Article>=>({...article,image:article.image??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
+    const enrich=async (article:Article):Promise<Article>=>({...article,image:validFeedImage(article.image)??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
     const [covers,geoCovers]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich))]);
-    const missing=[...covers,...geoCovers].filter(a=>!a.image&&publisherUrl(a.url));
-    if(env.TAVILY_KEY&&missing.length) {
-      const extracted=await cached('cover-extract:'+missing.map(a=>a.url).sort().join('|'),6*HOUR,()=>get('https://api.tavily.com/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:env.TAVILY_KEY,urls:missing.map(a=>a.url),include_images:true,extract_depth:'basic',timeout:8})}));
-      for(const row of (Array.isArray((extracted as Row)?.results)?(extracted as Row).results:[])) {
-        const article=missing.find(a=>a.url===row.url);
-        if(article&&Array.isArray(row.images)) article.image=row.images.map((image:unknown)=>photoUrl(typeof image==='string'?image:(image as Row)?.url)).find(Boolean);
-      }
-    }
     return { fetchedAt: new Date().toISOString(), groups:market?.groups??[], headlines:covers, geopolitics:geoCovers, treasury:market?.treasury??[], earnings:market?.earnings??[] };
   });
 }
