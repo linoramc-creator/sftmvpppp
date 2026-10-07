@@ -1,8 +1,9 @@
+import {assetRisk,type RiskData} from './asset-risk.ts';
 import {cached} from './panels.ts';
 import {prices,type PriceSeries} from './market-analytics.ts';
 const SECTORS:Record<string,string>={'communication services':'XLC','consumer cyclical':'XLY','consumer defensive':'XLP','energy':'XLE','financial services':'XLF','healthcare':'XLV','industrials':'XLI','technology':'XLK','basic materials':'XLB','real estate':'XLRE','utilities':'XLU'};
 export type AssetEvent={kind:'earnings'|'ex_dividend'|'payment';date:string;session?:string;amount?:number;currency?:string};
-export type AssetContext={symbol:string;sector:string|null;benchmark:string|null;series:PriceSeries[];missing:string[];events:AssetEvent[];fetchedAt:string};
+export type AssetContext={symbol:string;sector:string|null;benchmark:string|null;series:PriceSeries[];missing:string[];events:AssetEvent[];risk:RiskData;fetchedAt:string};
 async function get(url:string){try{const r=await fetch(url,{signal:AbortSignal.timeout(8000)});return r.ok?await r.json():null;}catch{return null;}}
 export function upcomingEvents(symbol:string,earnings:any[],dividends:any[],calendar:any,now=new Date()):AssetEvent[]{
  const start=now.toISOString().slice(0,10),end=new Date(now.getTime()+180*86400000).toISOString().slice(0,10),out=new Map<string,AssetEvent>();
@@ -14,16 +15,10 @@ export function upcomingEvents(symbol:string,earnings:any[],dividends:any[],cale
  return [...out.values()].sort((a,b)=>a.date.localeCompare(b.date)).slice(0,12);
 }
 export async function assetContext(symbol:string,benchmark:string|undefined,env:{FMP_KEY:string;FINNHUB_KEY:string},summary:(s:string,m:string)=>Promise<any>):Promise<AssetContext>{
- return cached(`asset-context:${symbol}:${benchmark??'auto'}`,300000,async()=>{
- const start=new Date().toISOString().slice(0,10),end=new Date(Date.now()+90*86400000).toISOString().slice(0,10);
- const [profile,calendar,earn,divs]=await Promise.all([
- cached('asset-profile:'+symbol,86400000,()=>summary(symbol,'quoteType,assetProfile,fundProfile')),
- cached('asset-calendar:'+symbol,3600000,()=>summary(symbol,'calendarEvents')),
- env.FINNHUB_KEY?cached('asset-earnings:'+symbol,3600000,()=>get(`https://finnhub.io/api/v1/calendar/earnings?symbol=${encodeURIComponent(symbol)}&from=${start}&to=${end}&token=${encodeURIComponent(env.FINNHUB_KEY)}`)):null,
- env.FMP_KEY?cached('asset-dividends:'+start,3600000,()=>get(`https://financialmodelingprep.com/stable/dividends-calendar?from=${start}&to=${end}&apikey=${encodeURIComponent(env.FMP_KEY)}`)):null,
- ]);
+ return cached(`asset-context-risk:${symbol}:${benchmark??'auto'}`,300000,async()=>{
+ const profile=await cached('asset-profile:'+symbol,86400000,()=>summary(symbol,'quoteType,assetProfile,fundProfile'));
  const sector=profile?.assetProfile?.sector??null,reference=benchmark===undefined?SECTORS[String(sector??'').toLowerCase()]??null:benchmark||null;
- const symbols=[...new Set([symbol,'SPY',...(reference?[reference]:[])])];const data=await Promise.all(symbols.map(s=>prices(s,'1y')));
- return {symbol,sector,benchmark:reference,series:data.filter((p):p is PriceSeries=>!!p),missing:symbols.filter((_,i)=>!data[i]),events:upcomingEvents(symbol,earn?.earningsCalendar??[],Array.isArray(divs)?divs:[],calendar?.calendarEvents),fetchedAt:new Date().toISOString()};
+ const symbols=[...new Set([symbol,'SPY',...(reference?[reference]:[])])];const [data,risk]=await Promise.all([Promise.all(symbols.map(s=>prices(s,'1y'))),assetRisk(symbol)]);
+ return {symbol,sector,benchmark:reference,series:data.filter((p):p is PriceSeries=>!!p),missing:symbols.filter((_,i)=>!data[i]),events:[],risk,fetchedAt:new Date().toISOString()};
  });
 }

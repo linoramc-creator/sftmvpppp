@@ -1,4 +1,3 @@
-import {ALERT_KINDS,alertQuote,alertValue,isTriggered} from './asset-alerts.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -74,25 +73,11 @@ const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,
 async function account(body: Body,user: User): Promise<Response> {
   switch(body.accountAction){
     case 'listAlerts':return json(await service(`beta_alerts?user_id=eq.${user.id}&select=*&order=created_at.desc&limit=50`));
-    case 'createAlert':{
-      const symbol=String(body.symbol??'').trim().toUpperCase();
-      if(!SYMBOL.test(symbol)||!ALERT_KINDS.includes(body.kind)||typeof body.threshold!=='number'||!Number.isFinite(body.threshold)||body.threshold<=0||body.threshold>=1e9)throw new BetaError(400,'Alerta inválida.');
-      return json(await rpc('beta_create_alert',{uid:user.id,asset:symbol,alert_kind:body.kind,target:body.threshold}));
-    }
+    case 'createAlert':throw new BetaError(410,'Las alertas no están disponibles.');
+    case 'checkAlerts':throw new BetaError(410,'Las alertas no están disponibles.');
     case 'deleteAlert':{
       if(!UUID.test(body.id??''))throw new BetaError(400,'Alerta inválida.');
       await service(`beta_alerts?id=eq.${body.id}&user_id=eq.${user.id}`,{method:'DELETE'});return json({ok:true});
-    }
-    case 'checkAlerts':{
-      const alerts=await service(`beta_alerts?user_id=eq.${user.id}&triggered_at=is.null&select=*&limit=20`);
-      const symbols=[...new Set(alerts.map((a:any)=>a.symbol))] as string[];
-      const quotes=new Map(await Promise.all(symbols.map(async s=>[s,await alertQuote(s)] as const)));
-      const triggered=[];
-      for(const a of alerts){const q=quotes.get(a.symbol)!;if(!isTriggered(a.kind,a.threshold,q))continue;
-        const changed=await service(`beta_alerts?id=eq.${a.id}&user_id=eq.${user.id}&triggered_at=is.null`,{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({triggered_at:new Date().toISOString(),observed_value:alertValue(a.kind,q),observed_at:q.at})});
-        if(changed?.length)triggered.push(changed[0]);
-      }
-      return json({triggered,checkedAt:new Date().toISOString(),unavailable:symbols.filter(s=>quotes.get(s)?.price===null)});
     }
     case 'profile':return json({id:user.id,email:user.email,isAdmin:await rpc('beta_is_admin',{uid:user.id}),dailyReportLimit:20});
     case 'listReports':return json(await service(`beta_reports?user_id=eq.${user.id}&select=id,kind,subject,saved_at&order=saved_at.desc&limit=100`));

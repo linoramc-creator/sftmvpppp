@@ -1,4 +1,3 @@
-import {AlertMonitor} from '@/components/AssetAlerts';
 import AuthGate from "@/components/AuthGate";
 import { lazy, Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -18,7 +17,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <AuthGate><AlertMonitor/><Suspense fallback={<p className="p-8 text-sm">Cargando terminal…</p>}><Routes>
+        <AuthGate><Suspense fallback={<p className="p-8 text-sm">Cargando terminal…</p>}><Routes>
           <Route path="/" element={<Index />} />
           <Route path="/admin" element={<Admin />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
