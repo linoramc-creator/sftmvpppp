@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {hourlyToFourHours,lastDayNews} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
+import {chartCandles,hourlyToFourHours,lastDayNews} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
 import {balanceAccess,newsAccess} from '../supabase/functions/analyze-ticker/news-access.ts';
 import {photoUrl,extractCover} from '../supabase/functions/analyze-ticker/news-covers.ts';
 test('four-hour candles preserve OHLC and volume without crossing sessions',()=>{
@@ -15,10 +15,22 @@ test('24-hour news uses timestamps and never pads with old or undated news',()=>
 });
 test('open access target preserves top paid story without inventing access guarantees',()=>{
  const articles=['https://www.ft.com/a','https://www.wsj.com/b','https://www.bloomberg.com/c','https://www.reuters.com/d','https://apnews.com/e','https://www.bbc.com/f','https://www.cnbc.com/g'].map((url,i)=>({title:`News ${i}`,url,source:'',date:'2026-10-07'}));
- const balanced=balanceAccess(articles,4);assert.equal(balanced[0].url,articles[0].url);assert.equal(balanced.filter(a=>a.access==='likely-open').length,2);assert.equal(newsAccess('https://www.cnbc.com/pro/a'),'subscription');assert.equal(newsAccess('https://unknown.example/a'),'unknown');
+ const balanced=balanceAccess(articles,4);assert.equal(balanced[0].url,articles[0].url);assert.equal(balanced.filter(a=>a.access==='likely-open').length,3);assert.equal(newsAccess('https://www.cnbc.com/pro/a'),'subscription');assert.equal(newsAccess('https://unknown.example/a'),'unknown');
 });
 test('wrapped logos and generic article thumbnails are rejected',()=>{
  for(const url of ['https://example.com/default53.jpg','https://example.com/images/logos/company.png','https://example.com/photo?url=https%3A%2F%2Fcdn.test%2Fcompany-logo.jpg','https://example.com/avatar123.jpg'])assert.equal(photoUrl(url),undefined);
  assert.ok(photoUrl('https://www.reuters.com/resizer/markets-photo.jpg'));
  assert.equal(extractCover('<meta property="og:image:alt" content="Company logo"><meta property="og:image" content="https://example.com/photo.jpg">','https://example.com'),undefined);
+});
+
+test('native hourly, daily and weekly candles preserve OHLC without inventing missing bars',()=>{
+ const time=Date.parse('2026-09-01T13:30Z');
+ const chart={timestamp:[time/1000,(time+86400000)/1000,(time+7*86400000)/1000],indicators:{quote:[{open:[10,null,20],high:[12,12,23],low:[9,9,19],close:[11,11,22],volume:[50,50,100]}]}};
+ for(const duration of [3600000,86400000,7*86400000]){const result=chartCandles(chart,duration);assert.equal(result.length,2);assert.equal(result[1].time,time+7*86400000);assert.equal(result[1].volume,100);assert.equal(result[1].close,22);}
+});
+
+test('weekly live quote is not rendered as a duplicate candle',()=>{
+ const monday=Date.parse('2026-10-05T13:30Z')/1000,tuesday=Date.parse('2026-10-06T20:00Z')/1000;
+ const chart={meta:{exchangeTimezoneName:'America/New_York',regularMarketTime:tuesday},timestamp:[monday,tuesday],indicators:{quote:[{open:[10,11],high:[13,12],low:[9,10],close:[12,11],volume:[100,20]}]}};
+ assert.equal(chartCandles(chart,7*86400000).length,1);assert.equal(chartCandles(chart,86400000).length,2);
 });

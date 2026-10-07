@@ -13,7 +13,7 @@ export function newsAccess(value:string):NewsAccess{
 export function balanceAccess(articles:Article[],limit:number):Article[]{
   const rows=articles.map(a=>({...a,access:newsAccess(a.url)}));
   const selected=rows.slice(0,limit);
-  const goal=Math.ceil(selected.length/2);
+  const goal=Math.ceil(selected.length*.75);
   const alternatives=rows.slice(limit).filter(a=>a.access==='likely-open');
   for(const open of alternatives){
     if(selected.filter(a=>a.access==='likely-open').length>=goal)break;
