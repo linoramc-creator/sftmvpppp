@@ -1,3 +1,4 @@
+import {assetContext} from './asset-context.ts';
 import { assetSnapshot } from './asset-snapshot.ts';
 import { sharedFeed } from './feed-cache.ts';
 import { massiveContext } from './massive-news.ts';
@@ -3992,6 +3993,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
 
     if (typeof body.panel === "string") {
       const deps = { summary: eYahooQuoteSummary };
+      if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
       if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v2",()=>feedMarketsPanel(env)));
       if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v2",()=>marketFeedPanel(env,"news")));

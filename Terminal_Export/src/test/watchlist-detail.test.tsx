@@ -4,6 +4,8 @@ import {WatchlistCard} from '../components/WatchlistCard';
 import AssetDetail from '../components/AssetDetail';
 const api=vi.hoisted(()=>vi.fn());
 vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api}));
+vi.mock('../components/AssetAlerts',()=>({default:()=>null}));
+vi.mock('../components/AssetContext',()=>({default:()=>null}));
 it('opens the selected ticker without removing it',()=>{
  const select=vi.fn(),change=vi.fn();render(<WatchlistCard stocks={['AAPL']} data={null} onSelect={select} onChange={change}/>);
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de AAPL'}));expect(select).toHaveBeenCalledWith('AAPL');expect(change).not.toHaveBeenCalled();

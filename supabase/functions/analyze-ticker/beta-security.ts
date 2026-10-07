@@ -1,3 +1,4 @@
+import {ALERT_KINDS,alertQuote,alertValue,isTriggered} from './asset-alerts.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -37,16 +38,18 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   // One operation per request: classification and dispatch must agree on cost.
   const operations=['accountAction','panel','marketData','macroCalendar','optionsAction','fundamentals','risk','etf','technicals'];
   if(operations.filter(key=>body[key]!==undefined&&body[key]!==false).length>1)throw new BetaError(400,'Solo se permite una operación por petición.');
+  if(body.panel==='assetContext'&&body.benchmark!==undefined&&!['','XLC','XLY','XLP','XLE','XLF','XLV','XLI','XLK','XLB','XLRE','XLU'].includes(body.benchmark))throw new BetaError(400,'Referencia inválida.');
   if(body.panel==='correlation'&&body.range!==undefined&&!['1m','3m','6m','1y'].includes(body.range))throw new BetaError(400,'Ventana inválida.');
   const symbol = (v: unknown) => typeof v==='string'&&SYMBOL.test(v.trim().toUpperCase());
   if(body.ticker!==undefined&&!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');
   if(body.subject!==undefined&&!['bonds','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction) return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   if(body.panel){
-    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','comparison','correlation'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','assetContext','comparison','correlation'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
     if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>12||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 12 ETF válidos.');
-    if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
-    if(['news','institutional','business','assetSnapshot'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
+    if(body.panel==='assetContext'&&body.benchmark!==undefined&&!['','XLC','XLY','XLP','XLE','XLF','XLV','XLI','XLK','XLB','XLRE','XLU'].includes(body.benchmark))throw new BetaError(400,'Referencia inválida.');
+  if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
+    if(['news','institutional','business','assetSnapshot','assetContext'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
     return {request_class:['feed','feedNews','news','business','institutional','assetSnapshot'].includes(body.panel)?'expensive':'data'};
   }
   if(body.marketData===true){if(body.symbols!==undefined&&(!Array.isArray(body.symbols)||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Lista de activos inválida.');return {request_class:'data'};}
@@ -70,6 +73,27 @@ async function userFrom(req: Request): Promise<User> {
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
 async function account(body: Body,user: User): Promise<Response> {
   switch(body.accountAction){
+    case 'listAlerts':return json(await service(`beta_alerts?user_id=eq.${user.id}&select=*&order=created_at.desc&limit=50`));
+    case 'createAlert':{
+      const symbol=String(body.symbol??'').trim().toUpperCase();
+      if(!SYMBOL.test(symbol)||!ALERT_KINDS.includes(body.kind)||typeof body.threshold!=='number'||!Number.isFinite(body.threshold)||body.threshold<=0||body.threshold>=1e9)throw new BetaError(400,'Alerta inválida.');
+      return json(await rpc('beta_create_alert',{uid:user.id,asset:symbol,alert_kind:body.kind,target:body.threshold}));
+    }
+    case 'deleteAlert':{
+      if(!UUID.test(body.id??''))throw new BetaError(400,'Alerta inválida.');
+      await service(`beta_alerts?id=eq.${body.id}&user_id=eq.${user.id}`,{method:'DELETE'});return json({ok:true});
+    }
+    case 'checkAlerts':{
+      const alerts=await service(`beta_alerts?user_id=eq.${user.id}&triggered_at=is.null&select=*&limit=20`);
+      const symbols=[...new Set(alerts.map((a:any)=>a.symbol))] as string[];
+      const quotes=new Map(await Promise.all(symbols.map(async s=>[s,await alertQuote(s)] as const)));
+      const triggered=[];
+      for(const a of alerts){const q=quotes.get(a.symbol)!;if(!isTriggered(a.kind,a.threshold,q))continue;
+        const changed=await service(`beta_alerts?id=eq.${a.id}&user_id=eq.${user.id}&triggered_at=is.null`,{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({triggered_at:new Date().toISOString(),observed_value:alertValue(a.kind,q),observed_at:q.at})});
+        if(changed?.length)triggered.push(changed[0]);
+      }
+      return json({triggered,checkedAt:new Date().toISOString(),unavailable:symbols.filter(s=>quotes.get(s)?.price===null)});
+    }
     case 'profile':return json({id:user.id,email:user.email,isAdmin:await rpc('beta_is_admin',{uid:user.id}),dailyReportLimit:20});
     case 'listReports':return json(await service(`beta_reports?user_id=eq.${user.id}&select=id,kind,subject,saved_at&order=saved_at.desc&limit=100`));
     case 'getReport':{if(!UUID.test(body.id??''))throw new BetaError(400,'Informe inválido.');const rows=await service(`beta_reports?id=eq.${body.id}&user_id=eq.${user.id}&select=*&limit=1`);if(!rows.length)throw new BetaError(404,'Informe no encontrado.');return json(rows[0]);}

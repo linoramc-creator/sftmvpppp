@@ -997,6 +997,7 @@ function MarketTickerBar({
   onChangeStocks: (stocks: string[]) => void;
 }) {
   const [editing, setEditing]   = useState(false);
+  const [paused,setPaused] = useState(false);
   const [draft,   setDraft]     = useState(customStocks.join(", "));
 
   const fmtChange = (n: number | null, suffix = "%") =>
@@ -1015,9 +1016,10 @@ function MarketTickerBar({
 
   return (
     <div className="border-b border-border/50 bg-card/30">
-      <div className="overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-        <div className="flex items-center h-8 px-4 min-w-max gap-0">
-
+      <div className="flex items-center">
+        <div className="ticker-marquee flex-1 min-w-0 overflow-hidden" aria-label="Cotizaciones del mercado">
+          <div className="ticker-marquee-track flex w-max" style={{animationPlayState:editing||paused?'paused':undefined}}>
+            {[0,1].map(copy=><div key={copy} aria-hidden={copy===1?true:undefined} className="ticker-marquee-copy flex items-center h-8 px-4 shrink-0">
           {/* Fixed indices */}
           {(data?.indices ?? []).map((idx) => (
             <div key={idx.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
@@ -1073,13 +1075,12 @@ function MarketTickerBar({
             <span className="text-[9px] text-muted-foreground/25 tracking-widest">CARGANDO...</span>
           )}
 
-          {/* Edit stocks button */}
-          <button
-            onClick={() => { setDraft(customStocks.join(", ")); setEditing(e => !e); }}
-            className="ml-auto pl-3 text-[9px] tracking-widest text-muted-foreground/30 hover:text-primary transition-colors shrink-0"
-          >
-            {editing ? "✕" : "EDITAR"}
-          </button>
+            </div>)}
+          </div>
+        </div>
+        <div className="flex shrink-0 gap-3 px-3 bg-card text-[9px]">
+          <button aria-label={paused?'Reanudar cotizaciones':'Pausar cotizaciones'} onClick={()=>setPaused(p=>!p)} className="text-muted-foreground hover:text-primary">{paused?'▶':'Ⅱ'}</button>
+          <button onClick={()=>{setDraft(customStocks.join(', '));setEditing(e=>!e);}} className="text-muted-foreground hover:text-primary">{editing?'CERRAR':'EDITAR'}</button>
         </div>
       </div>
 

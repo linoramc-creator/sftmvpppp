@@ -146,3 +146,16 @@
   animation: terminal-blink 1s infinite;
   color: hsl(var(--primary));
 }
+
+@keyframes ticker-scroll-right {
+  from { transform: translateX(-50%); }
+  to { transform: translateX(0); }
+}
+.ticker-marquee-track { animation: ticker-scroll-right 70s linear infinite; will-change: transform; }
+.ticker-marquee:hover .ticker-marquee-track,
+.ticker-marquee:focus-within .ticker-marquee-track { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+ .ticker-marquee { overflow-x: auto; }
+ .ticker-marquee-track { animation: none; transform: none; }
+ .ticker-marquee-copy[aria-hidden="true"] { display: none; }
+}
