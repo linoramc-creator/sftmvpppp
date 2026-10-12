@@ -5,7 +5,7 @@ import {normalizeExtended} from '../supabase/functions/analyze-ticker/extended-h
 const now=Date.parse('2026-10-12T17:00Z');
 test('geopolitical feed requires recent conflict or policy decisions with market impact',()=>{
  const base={date:'2026-10-12',publishedAt:'2026-10-12T16:00Z',source:'test',url:'https://apnews.com/a'};
- const rows=[{...base,title:'Oil rises after missile attacks disrupt shipping in the Red Sea'},{...base,title:'President announces new chip export restrictions to China'},{...base,title:'Stock market rallies after earnings beat'},{...base,title:'War anniversary: history of oil markets'},{...base,title:'Ukraine ceasefire eases gas supply fears',publishedAt:'2026-10-10T16:00Z'},{...base,title:'Local president opens school',excerpt:'Government congratulates students'}];
+ const rows=[{...base,title:'Oil rises after missile attacks disrupt shipping in the Red Sea'},{...base,title:'President announces new chip export restrictions to China'},{...base,title:'Stock market rallies after earnings beat'},{...base,title:'War anniversary: history of oil markets'},{...base,title:'Ukraine ceasefire eases gas supply fears',publishedAt:'2026-10-10T16:00Z'},{...base,title:'Local president opens school',excerpt:'Government congratulates students'},{...base,title:'Russia oil company stocks rise after earnings'},{...base,title:'Streaming war sends entertainment stocks lower'}];
  assert.equal(geopoliticalNews(rows,now).length,2);
 });
 test('extended quotes preserve their session date and reject invalid or stale data',()=>{
