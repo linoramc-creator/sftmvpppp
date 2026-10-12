@@ -1,4 +1,4 @@
-import {renderBrief,type ChartSpec} from './render.ts';
+import {renderBrief,CHART_COLORS,type ChartSpec} from './render.ts';
 import type {BriefData} from './data.ts';
 import {Buffer} from 'node:buffer';
 const env=(key:string)=>Deno.env.get(key)??'';
@@ -9,8 +9,9 @@ async function rasterChart(chart:ChartSpec):Promise<Uint8Array>{
  const {PNG}=await import('npm:pngjs@7.0.0'),width=760,height=200,padding=12;
  const png=new PNG({width,height,colorType:2});
  const pixel=(x:number,y:number,r:number,g:number,b:number)=>{if(x<0||y<0||x>=width||y>=height)return;const i=(y*width+x)*4;png.data[i]=r;png.data[i+1]=g;png.data[i+2]=b;png.data[i+3]=255;};
- for(let y=0;y<height;y++)for(let x=0;x<width;x++)pixel(x,y,248,250,252);
- for(const y of [50,100,150])for(let x=padding;x<width-padding;x++)if(x%8<3)pixel(x,y,226,232,240);
+ const rgb=(hex:string)=>hex.match(/[a-f0-9]{2}/gi)!.map(v=>parseInt(v,16));const bg=rgb(CHART_COLORS.background),grid=rgb(CHART_COLORS.grid);
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++)pixel(x,y,bg[0],bg[1],bg[2]);
+ for(const y of [50,100,150])for(let x=padding;x<width-padding;x++)if(x%8<3)pixel(x,y,grid[0],grid[1],grid[2]);
  const min=Math.min(...chart.points.map(p=>p.value)),max=Math.max(...chart.points.map(p=>p.value)),span=max-min||Math.max(Math.abs(max)*.01,1),left=chart.x?.[0]??0,right=chart.x?.at(-1)??chart.points.length-1;
  const pos=chart.points.map((p,i)=>({x:padding+((chart.x?.[i]??i)-left)/Math.max(right-left,1)*(width-2*padding),y:height-padding-(p.value-min)/span*(height-2*padding)}));
  const color=chart.color.match(/[a-f0-9]{2}/gi)!.map(v=>parseInt(v,16));
@@ -20,7 +21,7 @@ async function rasterChart(chart:ChartSpec):Promise<Uint8Array>{
 export async function prepareBriefMail(data:BriefData){
  const charts:ChartSpec[]=[],html=renderBrief(data,chart=>{charts.push(chart);return `<img src="cid:${chart.id}@terminal" alt="${chart.title.replace(/[&<>"']/g,'')}" width="760" style="display:block;width:100%;height:auto"/>`;});
  const attachments=await Promise.all(charts.map(async chart=>({filename:chart.id+'.png',content:await rasterChart(chart),contentType:'image/png',cid:chart.id+'@terminal'})));
- const subject=`${data.preview?'Prueba · ':''}Brief de mercados · ${data.date}`;
+ const subject=`${data.preview?'Prueba · ':''}Terminal · Mercados · ${data.date}`;
  const text=`Brief de mercados · ${data.date}\n\n${data.lead}\n\n${data.takeaways.map(t=>t.title+'\n'+t.text).join('\n\n')}\n\n${data.watchlist.map(a=>a.symbol+'\n'+a.note).join('\n\n')}\n\nAbre la terminal para ver los gráficos y el informe completo: https://sftmvpppp.vercel.app/`;
  return {subject,html,text,attachments};
 }
