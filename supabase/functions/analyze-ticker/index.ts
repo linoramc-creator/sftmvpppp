@@ -1,3 +1,4 @@
+import {extendedHours} from './extended-hours.ts';
 import {assetContext} from './asset-context.ts';
 import { assetSnapshot } from './asset-snapshot.ts';
 import { sharedFeed } from './feed-cache.ts';
@@ -3993,6 +3994,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
 
     if (typeof body.panel === "string") {
       const deps = { summary: eYahooQuoteSummary };
+      if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
       if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v2",()=>feedMarketsPanel(env)));

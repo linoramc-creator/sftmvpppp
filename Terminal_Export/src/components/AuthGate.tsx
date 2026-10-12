@@ -1,9 +1,9 @@
 import { Eye, EyeOff, Activity, Loader2, LockKeyhole } from 'lucide-react';
-import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Link } from 'react-router-dom';
 import { supabase, isPasswordRecovery } from '@/integrations/supabase/client';
-import { type Profile } from '@/lib/beta-api';
+import { accountApi,type Profile } from '@/lib/beta-api';
 const Context = createContext<Profile | null>(null);
 export const useProfile = () => useContext(Context)!;
 export default function AuthGate({children}: {children:ReactNode}) {
@@ -16,13 +16,15 @@ export default function AuthGate({children}: {children:ReactNode}) {
   const [recovery,setRecovery]=useState(isPasswordRecovery);
   useEffect(()=>{let active=true;supabase.auth.getSession().then(({data,error})=>{if(active){setSession(data.session);setReady(true);if(error)setError('No se pudo recuperar la sesión.');}});
     const {data:{subscription}}=supabase.auth.onAuthStateChange((event,value)=>{if(event==='PASSWORD_RECOVERY'){setRecovery(true);setSettings(true);}setSession(value);setReady(true);});return()=>{active=false;subscription.unsubscribe();};},[]);
-  useEffect(()=>{let active=true;setProfile(null);setError('');if(!session)return;
+  useEffect(()=>{let active=true;setProfile(previous=>previous?.id===session?.user?.id?previous:null);setError('');if(!session)return;
     // Profile uses the normal authenticated request but not the global 403
     // listener, avoiding an access-check loop for revoked accounts.
     const load=async()=>{try{const r=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`,apikey:import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY},body:JSON.stringify({accountAction:'profile'}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)throw new Error(data.error||'No se pudo comprobar el acceso.');if(active)setProfile(data);}catch(e){if(active)setError((e as Error).message);}};
     void load();const check=()=>{void load();};window.addEventListener('beta-access-check',check);
     const interval=window.setInterval(()=>{if(document.visibilityState==='visible')void load();},60000);
     return()=>{active=false;window.clearInterval(interval);window.removeEventListener('beta-access-check',check);};},[session?.access_token,retry]);
+  const recordedAccess=useRef(new Map<string,string>());
+  useEffect(()=>{if(!profile)return;let visit=recordedAccess.current.get(profile.id);if(visit)return;visit=crypto.randomUUID();recordedAccess.current.set(profile.id,visit);void accountApi('recordAccess',{visitId:visit}).catch(()=>{recordedAccess.current.delete(profile.id);});},[profile?.id]);
   const signOut=async()=>{await supabase.auth.signOut({scope:'local'});window.location.assign('/');};
   async function enter(event:FormEvent){event.preventDefault();if(busy)return;setBusy(true);setError('');
     try {

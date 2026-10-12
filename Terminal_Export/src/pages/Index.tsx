@@ -1,3 +1,5 @@
+import ExtendedHours from '@/components/ExtendedHours';
+import KeepPanel from '@/components/KeepPanel';
 import { ReportLoading } from "@/components/ReportLoading";
 import { safeNewsHref } from "@/lib/navigation";
 import { accountApi } from "@/lib/beta-api";
@@ -608,11 +610,11 @@ const Index = () => {
       />
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
-      {navTab === "bonos" && <main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main>}
-      {navTab === "feed" && <main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} /></main>}
-      {navTab === "seguimiento" && <Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol} symbol={watchSymbol} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={symbol=>{setTicker(symbol);setNavTab("ticker");}}/></Suspense>}
-      {navTab === "comparacion" && <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Cargando comparación…</p>}><MarketTools /></Suspense>}
-      {navTab === "ticker" && (
+      <KeepPanel active={navTab === "bonos"}><main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main></KeepPanel>
+      <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} /></main></KeepPanel>
+      <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol} symbol={watchSymbol} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={symbol=>{setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Cargando comparación…</p>}><MarketTools /></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "ticker"}>
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
 
@@ -660,6 +662,7 @@ const Index = () => {
           )}
 
           {/* Detected ETF → redirect to the dedicated apartado */}
+          {currentTicker&&<ExtendedHours symbol={currentTicker}/>}
           {tickerIsEtf && (
             <div className="mb-4 px-4 py-3 border border-primary/30 bg-primary/5 flex items-center justify-between gap-3 flex-wrap">
               <span className="text-[11px] text-foreground/80 font-mono">
@@ -723,10 +726,10 @@ const Index = () => {
             <IndexChartsPanel marketData={marketData} />
           </aside>
         </div>
-      )}
+      </KeepPanel>
 
       {/* ── ETF tab (dedicated apartado — funds only) ───────────────── */}
-      {navTab === "etf" && (
+      <KeepPanel active={navTab === "etf"}>
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
 
@@ -784,6 +787,7 @@ const Index = () => {
           )}
 
           {/* Loading placeholder */}
+          {currentEtf&&<ExtendedHours symbol={currentEtf}/>}
           {isEtfLoading && <ReportLoading subject={etfInput} streaming={Boolean(etfAnalysis)} />}
 
           {/* Empty state */}
@@ -825,10 +829,10 @@ const Index = () => {
             <IndexChartsPanel marketData={marketData} />
           </aside>
         </div>
-      )}
+      </KeepPanel>
 
       {/* ── SECTOR tab ──────────────────────────────────────────────── */}
-      {navTab === "sector" && (
+      <KeepPanel active={navTab === "sector"}>
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
 
@@ -907,10 +911,10 @@ const Index = () => {
             <IndexChartsPanel marketData={marketData} />
           </aside>
         </div>
-      )}
+      </KeepPanel>
 
       {/* ── GUARDADOS tab ───────────────────────────────────────────── */}
-      {navTab === "guardados" && (
+      <KeepPanel active={navTab === "guardados"}>
         <div className="max-w-5xl mx-auto px-4 pt-5 pb-16">
           <div className="flex items-center gap-3 mb-4">
             <span className="w-1.5 h-1.5 bg-primary inline-block" />
@@ -939,7 +943,7 @@ const Index = () => {
             ))}
           </div>
         </div>
-      )}
+      </KeepPanel>
     </div>
   );
 };

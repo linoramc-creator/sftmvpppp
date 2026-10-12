@@ -1,10 +1,11 @@
+import {usePanelActive} from './KeepPanel';
 import { WatchlistCard } from "./WatchlistCard";
 import type { MarketData } from "@/lib/analyze";
 import { safeNewsHref } from "@/lib/navigation";
 import {NewsCards,TreasuryCard,EarningsList} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
 import { cleanHeadline, cleanNewsExcerpt } from "@/lib/editorial";
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
 import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, MarketFeed, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
 
@@ -29,13 +30,18 @@ function request<T>(panel: string, subject: string, sector: boolean, ttl: number
   return promise;
 }
 function usePanel<T>(panel: string, subject = '', sector = false) {
+  const active=usePanelActive();
+  const previousKey=useRef(`${panel}:${subject}:${sector}`);
   const [data, setData] = useState<T | null>(() => (cache.get(`${panel}:${subject}:${sector}`)?.data as T) ?? null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   useEffect(() => {
+    if(!active)return;
     let cancelled = false;
     const previous=cache.get(`${panel}:${subject}:${sector}`);
-    setData(previous&&Date.now()-previous.at<86400000?previous.data as T:null); setError('');
+    const key=`${panel}:${subject}:${sector}`;
+    if(previous&&Date.now()-previous.at<86400000)setData(previous.data as T);else if(previousKey.current!==key)setData(null);
+    previousKey.current=key;setError('');
     const ttl = panel.startsWith('feed') ? 300000 : ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
     const load = () => request<T>(panel, subject, sector, ttl)
       .then(value => { if (!cancelled) { setData(value); setError(''); } })
@@ -45,7 +51,7 @@ function usePanel<T>(panel: string, subject = '', sector = false) {
     const timer = window.setInterval(visible, ttl);
     document.addEventListener('visibilitychange',visible);
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange',visible); };
-  }, [panel, subject, sector, retry]);
+  }, [panel, subject, sector, retry,active]);
   return { data, error, retry: () => { cache.delete(`${panel}:${subject}:${sector}`); setRetry(n => n + 1); } };
 }
 const fmt = (n: number | null | undefined, digits = 2) => n == null ? 'N/D' : n.toLocaleString('es-ES', { maximumFractionDigits: digits });

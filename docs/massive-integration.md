@@ -82,3 +82,17 @@ Consulta acotada, timeout, caché y degradación a las otras fuentes ante errore
 Los sectores se seleccionan por tema sobre noticias generales: no existe un
 filtro sectorial nativo en este endpoint. Las fuentes originales y fechas se
 conservan internamente; no se fabrican noticias para completar una cuota.
+
+## Precios fuera de horario (12-10-2026)
+
+Las fichas y los informes muestran premarket/postmarket únicamente cuando hay
+un precio positivo con sesión y fecha válidas. Se usan las cotizaciones de
+sesión disponibles y, como respaldo, `/v1/open-close/{ticker}/{date}` de
+Massive. Este endpoint diario se verificó mediante MCP para AAPL; el snapshot
+unificado devolvió 403 para el plan actual y no se presenta como tiempo real.
+
+El respaldo conserva la fecha original y no inventa una hora de negociación.
+El postmarket se compara con el cierre regular de esa misma fecha; el premarket
+no incluye un porcentaje si no se dispone de su referencia. Si falta una sesión
+del día, puede mostrarse la última sesión disponible con su fecha explícita.
+Timeout, caché de dos minutos y ausencia de datos conservada como ausencia.

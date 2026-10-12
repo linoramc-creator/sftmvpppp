@@ -1,3 +1,4 @@
+import {geopoliticalNews} from './geopolitical-news.ts';
 import { balanceAccess, type NewsAccess } from './news-access.ts';
 import { massiveNews, sectorMassiveNews } from './massive-news.ts';
 import { articleCover, photoUrl, publisherUrl } from './news-covers.ts';
@@ -94,10 +95,10 @@ export function curateNews(articles: Article[], subject: string, now = Date.now(
 }
 async function search(query: string, key: string, news = false, domains: string[] = [], days = 14, maxResults = news ? 5 : 3): Promise<Article[]> {
   if (!key) return [];
-  return cached(`search:${news}:${query}:${domains.join(',')}:${days}:${maxResults}`, news ? HOUR : 24 * HOUR, async () => {
+  return cached(`search:${news}:${query}:${domains.join(',')}:${days}:${maxResults}`, news ? (days===1?300000:HOUR) : 24 * HOUR, async () => {
     const raw = await get('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key, query, search_depth: 'basic', max_results: maxResults, include_answer: false, include_images: news, ...(news ? { topic: 'news', days } : {}), ...(domains.length ? { include_domains: domains } : {}) }) });
     const rows = (raw as Row)?.results;
-    return Array.isArray(rows) ? rows.filter((r: Row) => /^https?:\/\//.test(r.url ?? '')).map((r: Row) => ({ title: String(r.title ?? ''), url: r.url, source: new URL(r.url).hostname, date: day(r.published_date) ?? '', excerpt: String(r.content ?? '').slice(0, 900), image: undefined })) : [];
+    return Array.isArray(rows) ? rows.filter((r: Row) => /^https?:\/\//.test(r.url ?? '')).map((r: Row) => ({ title: String(r.title ?? ''), url: r.url, source: new URL(r.url).hostname, date: day(r.published_date) ?? '', publishedAt:typeof r.published_date==='string'&&Number.isFinite(Date.parse(r.published_date))&&/T|\d{2}:\d{2}/.test(r.published_date)?new Date(r.published_date).toISOString():undefined, excerpt: String(r.content ?? '').slice(0, 900), image: undefined })) : [];
   });
 }
 export async function newsPanel(subject: string, sector: boolean, env: Env, deps?: Dependencies): Promise<NewsPanel> {
@@ -211,17 +212,16 @@ export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Pro
       env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 5, 18),
 
-      search('geopolitics war sanctions ceasefire trade tariffs shipping energy security latest',env.TAVILY_KEY,true,NEWS_DOMAINS,2,15),
+      search('latest war ceasefire attacks oil gas shipping stock markets political announcements sanctions tariffs',env.TAVILY_KEY,true,[...NEWS_DOMAINS,'bbc.com','theguardian.com','aljazeera.com','euronews.com'],1,20),
       massiveNews(env.MASSIVE_API_KEY),
       search('markets economy geopolitics oil interest rates latest news',env.TAVILY_KEY,true,['apnews.com','bbc.com','cnbc.com','theguardian.com','aljazeera.com','euronews.com'],2,20),
     ]);
     const headlines: Article[] = [];
-    for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.[0]?.url) });
-    for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
-    for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
+    for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', publishedAt:typeof row.providerPublishTime==='number'?new Date(row.providerPublishTime*1000).toISOString():undefined, excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.[0]?.url) });
+    for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', publishedAt:typeof row.datetime==='number'?new Date(row.datetime*1000).toISOString():undefined, excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
+    for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', publishedAt:typeof row.publishedDate==='string'&&Number.isFinite(Date.parse(row.publishedDate))?new Date(row.publishedDate).toISOString():undefined, excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
     headlines.push(...web,...massive,...openWeb);
-    const geoPattern=/war|sanction|ceasefire|tariff|conflict|nato|military|diploma|guerra|sancion|arancel|conflicto|geopol|shipping|strait/i;
-    const geopolitics=curateFeed([...geopolitical,...headlines].filter(a=>geoPattern.test(`${a.title} ${a.excerpt??''}`)&&Date.parse(a.date)>=Date.now()-3*86400000),6);
+    const geopolitics=curateFeed(geopoliticalNews([...geopolitical,...headlines]),6).sort((a,b)=>Date.parse(b.publishedAt??b.date)-Date.parse(a.publishedAt??a.date));
     const selected=curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url)));
     const enrich=async (article:Article):Promise<Article>=>({...article,image:validFeedImage(article.image)??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
     const [covers,geoCovers]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich))]);

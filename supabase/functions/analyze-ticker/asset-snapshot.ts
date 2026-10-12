@@ -1,3 +1,4 @@
+import {extendedHours,type ExtendedHours} from './extended-hours.ts';
 import {cached,curateNews,type Article} from './panels.ts';
 import {massiveNews} from './massive-news.ts';
 import {photoUrl} from './news-covers.ts';
@@ -5,7 +6,7 @@ import {newsAccess} from './news-access.ts';
 export type Candle={time:number;open:number;high:number;low:number;close:number;volume:number|null;partial?:boolean};
 export type CandleInterval='1h'|'4h'|'1d'|'1w';
 export type CandleSeries={candles:Candle[];timezone:string;session:string};
-export type AssetSnapshot={symbol:string;name:string;description:string;currency:string;exchange:string;timezone:string;price:number|null;change:number|null;quoteAt:string|null;candles:Candle[];series?:Partial<Record<CandleInterval,CandleSeries>>;session:string;news:Article[];newsSince:string;fetchedAt:string};
+export type AssetSnapshot={symbol:string;name:string;description:string;currency:string;exchange:string;timezone:string;price:number|null;change:number|null;quoteAt:string|null;extendedHours?:ExtendedHours;candles:Candle[];series?:Partial<Record<CandleInterval,CandleSeries>>;session:string;news:Article[];newsSince:string;fetchedAt:string};
 type Env={MASSIVE_API_KEY?:string;FINNHUB_KEY:string;FMP_KEY:string;GEMINI_API_KEY?:string};
 const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
 async function get(url:string,headers:Record<string,string>={}){try{const r=await fetch(url,{headers,redirect:'error',signal:AbortSignal.timeout(8000)});return r.ok?await r.json():null;}catch{return null;}}
@@ -85,8 +86,10 @@ export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string
     const rows:Article[]=[...massive];
     for(const r of Array.isArray(finnhub)?finnhub:[])if(finite(r.datetime)&&r.url)rows.push({title:r.headline??'',url:r.url,source:r.source??'',date:new Date(r.datetime*1000).toISOString().slice(0,10),publishedAt:new Date(r.datetime*1000).toISOString(),excerpt:r.summary??'',image:photoUrl(r.image)});
     for(const r of search?.news??[])if(finite(r.providerPublishTime)&&r.link)rows.push({title:r.title??'',url:r.link,source:r.publisher??'',date:new Date(r.providerPublishTime*1000).toISOString().slice(0,10),publishedAt:new Date(r.providerPublishTime*1000).toISOString(),image:photoUrl(r.thumbnail?.resolutions?.[0]?.url)});
-    const description=await brief(symbol,profile?.assetProfile?.longBusinessSummary??fmp?.description??'',env.GEMINI_API_KEY);
+    const marketDate=(t:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(t);
+    const previous=finite(meta.regularMarketTime)?series['1d']?.candles.filter(c=>marketDate(c.time)<marketDate(meta.regularMarketTime*1000)).at(-1):undefined;
+    const [hours,description]=await Promise.all([extendedHours(symbol,env.MASSIVE_API_KEY,summary,meta.regularMarketTime,previous?marketDate(previous.time):undefined),brief(symbol,profile?.assetProfile?.longBusinessSummary??fmp?.description??'',env.GEMINI_API_KEY)]);
     const price=finite(meta.regularMarketPrice)?meta.regularMarketPrice:null;
-    return {symbol,name,description,currency:meta.currency??fmp?.currency??'',exchange:meta.exchangeName??fmp?.exchangeShortName??'',timezone:fromMassive.length?'America/New_York':meta.exchangeTimezoneName??'UTC',price,change:price!==null&&finite(meta.previousClose)&&meta.previousClose>0?(price/meta.previousClose-1)*100:null,series,quoteAt:finite(meta.regularMarketTime)?new Date(meta.regularMarketTime*1000).toISOString():null,candles,session:fromMassive.length?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial',news:lastDayNews(rows,`${symbol} ${name}`),newsSince:since,fetchedAt:new Date().toISOString()};
+    return {symbol,name,description,extendedHours:hours,currency:meta.currency??fmp?.currency??'',exchange:meta.exchangeName??fmp?.exchangeShortName??'',timezone:fromMassive.length?'America/New_York':meta.exchangeTimezoneName??'UTC',price,change:price!==null&&finite(meta.previousClose)&&meta.previousClose>0?(price/meta.previousClose-1)*100:null,series,quoteAt:finite(meta.regularMarketTime)?new Date(meta.regularMarketTime*1000).toISOString():null,candles,session:fromMassive.length?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial',news:lastDayNews(rows,`${symbol} ${name}`),newsSince:since,fetchedAt:new Date().toISOString()};
   });
 }
