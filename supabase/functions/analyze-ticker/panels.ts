@@ -243,10 +243,7 @@ export async function bondsPanel(env: Env, deps?: Dependencies): Promise<BondsPa
       return { id, label, unit: ['T10Y2Y', 'BAMLC0A0CM', 'BAMLH0A0HYM2'].includes(id) ? 'pp' : '%', source: `https://fred.stlouisfed.org/series/${id}`, points };
     }));
     const etfs = await Promise.all(BOND_ETFS.map(async ([symbol, label]): Promise<BondFund> => {
-      const [raw, summary] = await Promise.all([
-        get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
-        null,
-      ]);
+      const raw = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       const chart = (raw as Row)?.chart?.result?.[0];
       const close = chart?.indicators?.quote?.[0]?.close ?? [];
       const points: Point[] = (chart?.timestamp ?? []).map((t: number, i: number) => ({ date: day(t)!, value: num(close[i]) })).filter((p: Point) => p.value !== null && p.date);
@@ -254,9 +251,7 @@ export async function bondsPanel(env: Env, deps?: Dependencies): Promise<BondsPa
       const price = num(meta.regularMarketPrice);
       const quoteDay = day(meta.regularMarketTime);
       const previous = points.filter(p => quoteDay && p.date < quoteDay).at(-1)?.value ?? null;
-      const yieldValue = num(summary?.summaryDetail?.trailingAnnualDividendYield);
-      const expense = num(summary?.fundProfile?.feesExpensesInvestment?.annualReportExpenseRatio);
-      return { symbol, label, price, change: price !== null && previous && previous > 0 ? (price / previous - 1) * 100 : null, date: day(meta.regularMarketTime), currency: meta.currency ?? 'USD', points, distributionYield: yieldValue !== null ? yieldValue * 100 : null, expenseRatio: expense !== null ? expense * 100 : null, assets: num(summary?.summaryDetail?.totalAssets) };
+      return { symbol, label, price, change: price !== null && previous && previous > 0 ? (price / previous - 1) * 100 : null, date: day(meta.regularMarketTime), currency: meta.currency ?? 'USD', points, distributionYield: null, expenseRatio: null, assets: null };
     }));
     return { fetchedAt: new Date().toISOString(), series, etfs };
   });

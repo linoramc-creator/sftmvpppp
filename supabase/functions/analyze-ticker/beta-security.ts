@@ -72,6 +72,11 @@ async function userFrom(req: Request): Promise<User> {
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
 async function account(body: Body,user: User): Promise<Response> {
   switch(body.accountAction){
+    case 'getWatchlist':{const rows=await service(`beta_watchlists?user_id=eq.${user.id}&select=symbols&limit=1`);return json({symbols:rows[0]?.symbols??null});}
+    case 'saveWatchlist':{
+      if(!Array.isArray(body.symbols)||body.symbols.length>6||body.symbols.some((value:unknown)=>typeof value!=='string'||!SYMBOL.test(value.trim().toUpperCase())))throw new BetaError(400,'Lista de seguimiento inválida.');
+      const symbols=[...new Set(body.symbols.map((value:string)=>value.trim().toUpperCase()))];await service('beta_watchlists?on_conflict=user_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({user_id:user.id,symbols,updated_at:new Date().toISOString()})});return json({symbols});
+    }
     case 'listAlerts':return json(await service(`beta_alerts?user_id=eq.${user.id}&select=*&order=created_at.desc&limit=50`));
     case 'createAlert':throw new BetaError(410,'Las alertas no están disponibles.');
     case 'checkAlerts':throw new BetaError(410,'Las alertas no están disponibles.');

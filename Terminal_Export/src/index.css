@@ -137,6 +137,9 @@
 }
 
 /* Cursor blink */
+@keyframes report-loading-travel { from { transform: translateX(-110%); } to { transform: translateX(410%); } }
+.report-loading-line { animation: report-loading-travel 2.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .report-loading-line { animation: none; width: 100%; opacity: .4; } }
 @keyframes terminal-blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }

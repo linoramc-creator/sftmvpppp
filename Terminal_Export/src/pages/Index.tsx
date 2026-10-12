@@ -47,6 +47,8 @@ function reportFromRow(row: any): SavedReport {
   return { id:row.id,kind:row.kind,ticker:row.subject,savedAt:new Date(row.saved_at).toLocaleDateString('es-ES'),analysis:row.payload?.analysis??'',aiSummary:row.payload?.aiSummary,quarterlyData:row.payload?.quarterlyData??[],etfDeep:row.payload?.etfDeep??null };
 }
 
+const DailyBrief = lazy(() => import('@/components/DailyBrief'));
+
 // ── Section configs ────────────────────────────────────────────────────
 
 const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
@@ -280,7 +282,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"feed" | "ticker" | "etf" | "sector" | "comparacion" | "seguimiento" | "bonos" | "guardados">("feed");
+  const [navTab, setNavTab] = useState<"feed" | "brief" | "ticker" | "etf" | "sector" | "comparacion" | "seguimiento" | "bonos" | "guardados">("feed");
 
 
 
@@ -298,6 +300,10 @@ const Index = () => {
   const etfAbortRef    = useRef<AbortController | null>(null);
   const sectorAbortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
+  const watchlistEdited=useRef(false);
+  const watchlistQueue=useRef<Promise<unknown>>(Promise.resolve());
+  const persistWatchlist=(symbols:string[])=>{const task=watchlistQueue.current.catch(()=>{}).then(()=>accountApi('saveWatchlist',{symbols}));watchlistQueue.current=task;return task;};
+  useEffect(()=>{let active=true;accountApi<{symbols:string[]|null}>('getWatchlist').then(({symbols})=>{if(!active||watchlistEdited.current)return;const localKey=`terminal_stocks_v2:${profile.id}`,syncKey=`terminal_stocks_synced_v1:${profile.id}`;let importLocal=false;try{importLocal=localStorage.getItem(localKey)!==null&&!localStorage.getItem(syncKey);}catch{}if(importLocal||symbols===null){void persistWatchlist(customStocks).then(()=>{try{localStorage.setItem(syncKey,'1');}catch{}}).catch(()=>{});}else{setCustomStocks(symbols);try{localStorage.setItem(localKey,JSON.stringify(symbols));localStorage.setItem(syncKey,'1');}catch{}}}).catch(()=>{});return()=>{active=false;};},[profile.id]);
 
   useEffect(() => {
     let active=true;
@@ -315,8 +321,10 @@ const Index = () => {
   }, [customStocks]);
 
   const saveCustomStocks = (stocks: string[]) => {
+    watchlistEdited.current=true;
     setCustomStocks(stocks);
     try { localStorage.setItem(`terminal_stocks_v2:${profile.id}`, JSON.stringify(stocks)); } catch (_) {}
+    void persistWatchlist(stocks).catch(()=>{toast({title:'No se ha podido sincronizar tu watchlist',description:'La lista se conserva en este navegador. Vuelve a intentarlo antes del próximo brief.'});});
   };
 
   const resetSections = () => setActiveSection(EXPECTED_TABS[0]);
@@ -562,6 +570,7 @@ const Index = () => {
             <nav className="flex min-w-0 overflow-x-auto" aria-label="Apartados principales">
               {([
                 { label: "FEED",       key: "feed"      },
+                ...(profile.isAdmin?[{label:"BRIEF",key:"brief"} as const]:[]),
                 { label: "TICKER",    key: "ticker"    },
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
@@ -612,6 +621,7 @@ const Index = () => {
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       <KeepPanel active={navTab === "bonos"}><main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main></KeepPanel>
       <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} /></main></KeepPanel>
+      <KeepPanel active={navTab === "brief"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo brief…</p>}><DailyBrief/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol} symbol={watchSymbol} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={symbol=>{setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Cargando comparación…</p>}><MarketTools /></Suspense></KeepPanel>
       <KeepPanel active={navTab === "ticker"}>

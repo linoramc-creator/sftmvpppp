@@ -4,3 +4,8 @@ project_id = "zeimhqybhsrmfljrdkwk"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/analyze-ticker/index.ts"
+
+[functions.daily-brief]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/daily-brief/index.ts"

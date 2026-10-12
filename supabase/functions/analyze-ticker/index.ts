@@ -2834,7 +2834,7 @@ async function oHandleTermStructure(ticker: string, maxExpiries = 8) {
 async function oHandleSurface(ticker: string, maxExpiries = 8, mMin = 0.7, mMax = 1.3) {
   const meta = await oGetMeta(ticker);
   const expiries = meta.expirationDates.slice(0, maxExpiries).map(oIsoFromEpoch);
-  const points = []; const used: string[] = [];
+  const points: { strike: number; expiry: string; daysToExpiry: number; moneyness: number; iv: number; type: OptType }[] = []; const used: string[] = [];
   for (const expiry of expiries) {
     try {
       const c = await oBuildChain(ticker, expiry);
