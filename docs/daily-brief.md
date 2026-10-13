@@ -16,8 +16,8 @@ retroceso del histórico disponible se calculan en código. Se separan los
 precios de sesión aún abierta. Los futuros continuos se identifican como tales.
 La curva 2/5/10/20 años solo se dibuja si sus fechas coinciden.
 
-Una llamada acotada a Gemini 2.5 Flash (`gemini-2.5-flash`) redacta el resumen a partir de los datos reunidos;
-las evidencias se contrastan con los identificadores suministrados. Si falla,
+Una llamada acotada a Gemini 3 Flash (`gemini-3-flash-preview`, razonamiento mínimo) redacta el resumen y el cierre geopolítico a partir de los datos reunidos;
+se deduplican artículos y se excluyen imágenes e históricos del contexto de IA. El máximo de salida es 4.600 tokens. Las evidencias se contrastan con los identificadores suministrados. Si falla,
 se conserva una lectura determinista y los datos, sin inventar análisis.
 La edición se guarda por usuario/fecha y no se regenera al volver a abrirla.
 Las reclamaciones atómicas evitan trabajos paralelos; máximo tres intentos
@@ -79,3 +79,27 @@ compilado como ESM (esbuild, plataforma neutral, destino es2022, `npm:*` y
 `node:*` externos) y `verify_jwt:false`. La función conserva su validación
 manual de sesión e identidad. La credencial de gestión se lee solo dentro
 del proceso; no se incluye en el bundle ni en los registros.
+
+## Edición compacta (13 de octubre de 2026)
+
+Los 19 activos generales y la curva del Tesoro se distribuyen en dos láminas
+de diez recuadros: índices, ETF y volatilidad; materias primas, divisas, Bitcoin
+y renta fija. La watchlist conserva su detalle independiente. Los saltos A4
+reservan una página para cada lámina; el correo muestra los mismos bloques y
+en móvil se apilan para conservar la lectura. Las fotos geopolíticas miden
+146 x 98 píxeles en escritorio y 88 x 64 en móvil.
+
+El cierre internacional reúne hechos políticos, posibles canales de transmisión
+y riesgos de las noticias del informe. Se valida que cite evidencias suministradas
+y, cuando existen noticias políticas, al menos una de ellas. Para archivos
+anteriores sin este campo se utiliza el contenido ya guardado, sin llamar a IA.
+Se distinguen titulares intradiarios, fechas de cierre y consecuencias hipotéticas.
+
+Solo una respuesta explícita 404, 429 o de indisponibilidad del servicio permite
+intentar Gemini 2.5 Flash como reserva. Un timeout o JSON inválido no dispara
+otra generación. Se guarda el modelo realmente utilizado y el uso de tokens.
+El coste estimado aplica las tarifas estándar de texto consultadas el 13/10/2026:
+3 Flash, 0,50 USD de entrada y 3 USD de salida por millón; 2.5 Flash, 0,30 y
+2,50 USD. Incluye tokens de razonamiento; excluye APIs, correo, impuestos y
+descuentos del plan. No se presenta como facturación real.
+Referencia: https://ai.google.dev/gemini-api/docs/pricing.

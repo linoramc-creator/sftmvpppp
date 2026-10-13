@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {briefWindow,zonedTime,normalizeAsset,datedNews,marketNews,watchNewsFor,marketLead,watchContext,type BriefData} from '../supabase/functions/daily-brief/data.ts';
-import {deliveryTime,editionDate} from '../supabase/functions/daily-brief/preferences.ts';
-import {chartSvg,renderBrief} from '../supabase/functions/daily-brief/render.ts';
+import {briefWindow,zonedTime,normalizeAsset,datedNews,marketNews,watchNewsFor,marketLead,watchContext,MARKETS,briefAiInput,applyBriefSummary,writeBriefSummary,type BriefData} from '../supabase/functions/daily-brief/data.ts';
+import {deliveryTime,editionDate,BRIEF_MODEL,BRIEF_FALLBACK_MODEL,BRIEF_OUTPUT_TOKENS} from '../supabase/functions/daily-brief/preferences.ts';
+import {chartSvg,renderBrief,renderMarketPages} from '../supabase/functions/daily-brief/render.ts';
 import {extractCover,publisherUrl} from '../supabase/functions/analyze-ticker/news-covers.ts';
 test('morning brief follows Madrid daylight saving and yesterday rather than subtracting 24 hours',()=>{
  assert.equal(new Date(zonedTime('2026-10-12','07:00')).toISOString(),'2026-10-12T05:00:00.000Z');
@@ -12,6 +12,33 @@ test('morning brief follows Madrid daylight saving and yesterday rather than sub
  assert.equal(new Date(zonedTime('2026-03-29','02:30')).toISOString(),'2026-03-29T01:30:00.000Z');
  assert.equal(new Date(zonedTime('2026-10-25','02:30')).toISOString(),'2026-10-25T01:30:00.000Z');
  const midnight=briefWindow(Date.parse('2026-10-12T21:55Z'),false,'00:00','2026-10-13');assert.equal(midnight.date,'2026-10-13');assert.equal(midnight.previousDay,'2026-10-12');assert.equal(midnight.cutoff,Date.parse('2026-10-12T21:55Z'));
+});
+
+function edition():BriefData{return {date:'2026-10-13',previousDay:'2026-10-12',cutoff:'2026-10-13T05:00Z',generatedAt:'2026-10-13T04:55Z',preview:true,assets:MARKETS.map(([symbol,name,group])=>({...normalizeAsset(symbol,name,group,null,0),date:'2026-10-12',close:100,points:[{date:'2026-10-09',value:99},{date:'2026-10-12',value:100}]})),watchlist:[],treasury:[2,5,10,20].map(years=>({years,yield:4,date:'2026-10-12',changeBp:0})),news:[],politics:[{title:'Oil supply and ceasefire talks',source:'test',url:'https://www.reuters.com/world/story',date:'2026-10-12',publishedAt:'2026-10-12T10:00Z',excerpt:'Energy supply talks continue.',image:'https://www.reuters.com/photos/story.jpg'}],lead:'Calculated summary.',takeaways:[],ai:false};}
+
+test('general markets occupy two separate compact sheets, preserving every asset and the Treasury curve',()=>{
+ const data=edition(),before=JSON.stringify(data.watchlist),charts:string[]=[];
+ const pages=renderMarketPages(data,c=>{charts.push(c.id);assert.equal(c.height,120);return '<svg></svg>';});
+ assert.equal((pages.match(/data-market-page=/g)??[]).length,2);assert.equal((pages.match(/class="market-card/g)??[]).length,20);
+ for(let i=0;i<MARKETS.length;i++)assert.equal((pages.match(new RegExp(`id="asset-market-${i}"`,'g'))??[]).length,1);
+ assert.equal(charts.length,20);assert.equal(JSON.stringify(data.watchlist),before);
+ const html=renderBrief(data);assert.ok(html.includes('width="146" height="98"'));assert.ok(!html.includes('width="700"'));assert.ok(html.indexOf('id="entorno"')>html.indexOf('id="politica"'));assert.ok(html.includes('@page{size:A4'));
+});
+
+test('AI input deduplicates articles and excludes chart and image payloads; geopolitical text requires supplied evidence',()=>{
+ const data=edition(),article=data.politics[0];data.news=[article];
+ const input=briefAiInput(data);assert.equal(input.articles.length,1);assert.deepEqual(input.politics,[article.url]);assert.ok(!JSON.stringify(input).includes('photos/story.jpg'));assert.ok(!JSON.stringify(input).includes('points'));
+ const paragraph=Array.from({length:60},()=> 'contexto').join(' ');
+ applyBriefSummary(data,{geopoliticalSummary:{paragraphs:[paragraph,paragraph],evidence:['https://invented.example/story']}});assert.ok(!data.geopoliticalSummary?.evidence.includes('https://invented.example/story'));
+ applyBriefSummary(data,{geopoliticalSummary:{paragraphs:[paragraph,paragraph],evidence:[article.url]}});assert.deepEqual(data.geopoliticalSummary?.paragraphs,[paragraph,paragraph]);assert.equal(data.ai,true);
+});
+
+test('brief uses one bounded Gemini generation, with cheaper fallback only after an explicit unavailable response',async()=>{
+ const data=edition(),calls:{url:string;body:any}[]=[],paragraph=Array.from({length:60},()=> 'contexto').join(' ');
+ const fetcher:typeof fetch=async(url,init)=>{calls.push({url:String(url),body:JSON.parse(init!.body as string)});return new Response(JSON.stringify({usageMetadata:{promptTokenCount:1000,candidatesTokenCount:500,thoughtsTokenCount:20},candidates:[{content:{parts:[{text:JSON.stringify({geopoliticalSummary:{paragraphs:[paragraph,paragraph],evidence:[data.politics[0].url]}})}]}}]}));};
+ await writeBriefSummary(data,'test-key',fetcher);assert.equal(calls.length,1);assert.ok(calls[0].url.includes(BRIEF_MODEL));assert.equal(calls[0].body.generationConfig.maxOutputTokens,BRIEF_OUTPUT_TOKENS);assert.deepEqual(calls[0].body.generationConfig.thinkingConfig,{thinkingLevel:'minimal'});assert.equal(data.model,BRIEF_MODEL);assert.equal(data.usage?.estimatedUsd,.00206);
+ let attempts=0;const fallback=edition();await writeBriefSummary(fallback,'test-key',async(url,init)=>++attempts===1?new Response('{}',{status:429}):fetcher(url,init));assert.equal(attempts,2);assert.equal(fallback.model,BRIEF_FALLBACK_MODEL);
+ let timeouts=0;await writeBriefSummary(edition(),'test-key',async()=>{timeouts++;throw new Error('timeout');});assert.equal(timeouts,1);
 });
 test('brief separates incomplete sessions from close history and does not fabricate risk metrics',()=>{
  const cutoff=Date.parse('2026-10-12T05:00Z');
