@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {parsePublisherRss,newsOrder,newsKey,reportNewsContext,fundNewsPattern} from '../supabase/functions/analyze-ticker/news-sources.ts';
 import {isGeopolitical,geopoliticalNews} from '../supabase/functions/analyze-ticker/geopolitical-news.ts';
 import {extractArticleDetails} from '../supabase/functions/analyze-ticker/news-covers.ts';
+import {curateFeed} from '../supabase/functions/analyze-ticker/panels.ts';
 const now=Date.parse('2026-10-14T18:00Z');
 test('publisher RSS preserves actual dates and rejects unsafe, future and old stories',()=>{
  const item=(url:string,date:string)=>`<item><title><![CDATA[Markets &amp; oil &#x1F4C8;]]></title><link>${url}</link><pubDate>${date}</pubDate><description>Energy supply outlook</description></item>`;
@@ -38,4 +39,9 @@ test('ETF coverage requires the fund, its index or a verified holding instead of
  const pattern=fundNewsPattern('QQQ',[{symbol:'MSFT',holdingName:'Microsoft Corporation'},{symbol:'AMZN',holdingName:'Amazon.com, Inc.'}],['Nasdaq']);
  for(const title of ['Nasdaq earnings rise','Microsoft invests in new capacity','Amazon quarterly sales beat forecasts','QQQ announces fee reduction'])assert.ok(pattern.test(title));
  for(const title of ['Anthropic announces new revenue','SpaceX receives AI subpoena','Character.ai files for bankruptcy','QQQE launch'])assert.equal(pattern.test(title),false);
+});
+test('verified Spanish geopolitical decisions survive English market-keyword filtering',()=>{
+ const date=new Date().toISOString();
+ const article={title:'EEUU amenaza con imponer una tasa a los barcos españoles y prohibir la exportación de aceite',date:date.slice(0,10),publishedAt:date,source:'elEconomista',url:'https://www.eleconomista.es/economia/noticias/1/noticia.html'};
+ assert.ok(isGeopolitical(article));assert.equal(curateFeed([article]).length,1);
 });

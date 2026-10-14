@@ -175,7 +175,7 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
     const stamp = articleTime(article);
     if(/globenewswire\.com|businesswire\.com|prnewswire\.com|news\.google\.com|\/video\//i.test(article.url)||/CCTV Script|transcript|press release|investor deadline/i.test(article.title))return false;
     if (/stocks? to buy|should you buy|investing radar|prediction:|sponsored|motley fool/i.test(article.title+' '+article.source)) return false;
-    if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 3 * 86400000 || stamp > Date.now() + 60000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)) return false;
+    if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 3 * 86400000 || stamp > Date.now() + 60000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)&&!isGeopolitical(article)) return false;
     try { const url = new URL(article.url); if (!['http:', 'https:'].includes(url.protocol)) return false; const key=newsKey(url.href); if (seen.has(key)) return false; seen.add(key); } catch { return false; }
     const current = new Set(article.title.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
     const duplicate = words.some(other => {
