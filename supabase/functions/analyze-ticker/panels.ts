@@ -1,6 +1,6 @@
 import {feedSessionQuote,type SessionQuote} from './feed-quotes.ts';
 import {geopoliticalNews,isGeopolitical} from './geopolitical-news.ts';
-import {NEWS_DOMAINS,PRIMARY_NEWS_DOMAINS,SPANISH_NEWS_DOMAINS,publisherNews,articleTime,newsKey,newsOrder} from './news-sources.ts';
+import {NEWS_DOMAINS,PRIMARY_NEWS_DOMAINS,SPANISH_NEWS_DOMAINS,publisherNews,articleTime,newsKey,newsOrder,fundNewsPattern} from './news-sources.ts';
 import { balanceAccess, type NewsAccess } from './news-access.ts';
 import { massiveNews, sectorMassiveNews } from './massive-news.ts';
 import { articleCover, photoUrl, publisherUrl } from './news-covers.ts';
@@ -111,7 +111,7 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     const topic = sector ? `${subject} ${aliases[subject.toLowerCase()] ?? ''}` : subject;
     const [raw, profile, finnhubNews, fmpNews, massive, rss] = await Promise.all([
       get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(topic)}&newsCount=15&quotesCount=${sector ? 0 : 1}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
-      !sector && deps ? cached(`news-name:${subject}`, 24 * HOUR, () => deps.summary(subject, 'quoteType,assetProfile,fundProfile')) : null,
+      !sector && deps ? cached(`news-name:${subject}`, 24 * HOUR, () => deps.summary(subject, 'quoteType,assetProfile,fundProfile,topHoldings')) : null,
       !sector && env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(subject)}&from=${new Date(Date.now()-90*86400000).toISOString().slice(0,10)}&to=${new Date().toISOString().slice(0,10)}&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
       !sector && env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(subject)}&limit=50&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       massiveNews(env.MASSIVE_API_KEY,sector?'':subject),
@@ -125,11 +125,13 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     rows.push(...(sector?sectorMassiveNews(massive,subject):massive),...rss);
     const allowedDomains = [...NEWS_DOMAINS];
     try { if(profile?.assetProfile?.website) allowedDomains.push(new URL(profile.assetProfile.website).hostname.replace(/^www\./,'')); } catch {}
-    const thematic = sector || profile?.quoteType?.quoteType === 'ETF';
+    const thematic = sector || profile?.quoteType?.quoteType === 'ETF' || data?.quotes?.[0]?.quoteType === 'ETF';
     const category = profile?.fundProfile?.categoryName ?? '';
     const broadUsMarket = thematic && /^(SPY|VOO|IVV|VTI|ITOT|SCHB)$/.test(subject);
     const nasdaqFund=thematic&&/^(QQQ|QQQM)$/.test(subject);
-    const fundTopic=nasdaqFund?'QQQ Nasdaq 100 technology AI semiconductor Nvidia Microsoft Apple Amazon Alphabet Broadcom':`${subject} ${company}`;
+    const fundHoldings=Array.isArray(profile?.topHoldings?.holdings)?profile.topHoldings.holdings:[];
+    const fundTopic=`${nasdaqFund?'QQQ Nasdaq 100 technology semiconductor':`${subject} ${company}`} ${fundHoldings.slice(0,15).map((h:Row)=>h.holdingName??h.symbol??'').join(' ')}`;
+    const fundRequired=fundNewsPattern(subject,fundHoldings,nasdaqFund?['Nasdaq']:broadUsMarket?['S&P 500','S.P.500']:[]);
     const sectorName = sector ? subject : broadUsMarket ? 'Bolsa de EE. UU.' : nasdaqFund?'Tecnología y Nasdaq 100':profile?.assetProfile?.sector || category || (thematic ? company : '');
     const sectorContexts: Record<string, string> = { Technology: 'technology software semiconductor chips AI Nvidia Microsoft Apple cloud', 'Bolsa de EE. UU.': 'S&P 500 Nasdaq equities stocks market Fed inflation', Healthcare: 'healthcare pharmaceutical biotech FDA drugs', Financials: 'banks banking insurance financial', 'Financial Services': 'banks banking insurance financial', Energy: 'energy oil gas OPEC', 'Consumer Cyclical': 'consumer retail automotive sales', 'Consumer Defensive': 'consumer staples retail food', Industrials: 'industrial manufacturing aerospace transport electricity power hydrogen fuel cells infrastructure', 'Real Estate': 'real estate REIT property housing', Utilities: 'utilities electricity power', 'Basic Materials': 'materials metals mining chemicals', 'Communication Services': 'telecom streaming advertising media' };
     async function selection(name:string,initial:Article[],theme:boolean,query=name,required?:RegExp){
@@ -152,7 +154,7 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     const literal=subject.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
     const companyRequired=new RegExp(`${brand}|\\(${literal}\\)${subject.length>=3&&!/^(ALL|ARE|CAN|FOR|YOU|THE)$/.test(subject)?`|\\b${literal}\\b`:''}`,'i');
     const [articles, sectorArticles] = await Promise.all([
-      selection(fundTopic, rows, thematic, nasdaqFund?'Nasdaq 100 technology stocks earnings markets':broadUsMarket ? `${subject} S&P 500 ETF` : company, nasdaqFund?/\bQQQ\w*\b|Nasdaq|Nvidia|Microsoft|Apple|Amazon|Alphabet|Broadcom|semiconductor|\bAI\b/i:broadUsMarket ? /\bSPY\b|\bSPDR\b|\bVOO\b|\bIVV\b|\bVTI\b|S&P\s*500|S.P.500/i : !thematic && company !== subject ? companyRequired : thematic&&!sector?new RegExp(`\\b${literal}\\b`,'i'):undefined),
+      selection(fundTopic, rows, thematic, nasdaqFund?'Nasdaq 100 technology stocks earnings markets':broadUsMarket ? `${subject} S&P 500 ETF` : company, thematic&&!sector?fundRequired:!thematic&&company!==subject?companyRequired:undefined),
       !sector && sectorName ? selection(`${sectorContexts[sectorName] ?? sectorName} ${profile?.assetProfile?.industry ?? ''}`, [], true, broadUsMarket ? 'US stock market' : `${profile?.assetProfile?.industry || sectorName} industry`) : Promise.resolve([]),
     ]);
     return { fetchedAt: new Date().toISOString(), articles, sectorArticles, sectorName };

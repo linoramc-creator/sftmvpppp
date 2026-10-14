@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parsePublisherRss,newsOrder,newsKey,reportNewsContext} from '../supabase/functions/analyze-ticker/news-sources.ts';
+import {parsePublisherRss,newsOrder,newsKey,reportNewsContext,fundNewsPattern} from '../supabase/functions/analyze-ticker/news-sources.ts';
 import {isGeopolitical,geopoliticalNews} from '../supabase/functions/analyze-ticker/geopolitical-news.ts';
 import {extractArticleDetails} from '../supabase/functions/analyze-ticker/news-covers.ts';
 const now=Date.parse('2026-10-14T18:00Z');
@@ -33,4 +33,9 @@ test('grounded discovery relies on publisher publication metadata, never the mod
  assert.equal(extractArticleDetails('<meta property="og:title" content="No date">','https://www.cnbc.com/article').publishedAt,undefined);
  const ld=extractArticleDetails('<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2026-10-14T16:00:00Z"}</script>','https://www.bbc.com/article');
  assert.equal(ld.publishedAt,'2026-10-14T16:00:00.000Z');
+});
+test('ETF coverage requires the fund, its index or a verified holding instead of generic AI mentions',()=>{
+ const pattern=fundNewsPattern('QQQ',[{symbol:'MSFT',holdingName:'Microsoft Corporation'},{symbol:'AMZN',holdingName:'Amazon.com, Inc.'}],['Nasdaq']);
+ for(const title of ['Nasdaq earnings rise','Microsoft invests in new capacity','Amazon quarterly sales beat forecasts','QQQ announces fee reduction'])assert.ok(pattern.test(title));
+ for(const title of ['Anthropic announces new revenue','SpaceX receives AI subpoena','Character.ai files for bankruptcy','QQQE launch'])assert.equal(pattern.test(title),false);
 });
