@@ -1,9 +1,13 @@
-import {geopoliticalNews} from './geopolitical-news.ts';
+import {feedSessionQuote,type SessionQuote} from './feed-quotes.ts';
+import {geopoliticalNews,isGeopolitical} from './geopolitical-news.ts';
+import {NEWS_DOMAINS,PRIMARY_NEWS_DOMAINS,SPANISH_NEWS_DOMAINS,publisherNews,articleTime,newsKey,newsOrder} from './news-sources.ts';
 import { balanceAccess, type NewsAccess } from './news-access.ts';
 import { massiveNews, sectorMassiveNews } from './massive-news.ts';
 import { articleCover, photoUrl, publisherUrl } from './news-covers.ts';
 import { buildOpinions, editBusiness, recentPartnerships, type OpinionsPanel, type BusinessSummary, type Partnership } from "./editorial.ts";
 import { researchBusiness } from './business-research.ts';
+import { tavilyJson,tavilyLimited } from './tavily-client.ts';
+import { groundedNews } from './grounded-news.ts';
 import { treasury, earnings, type TreasuryPoint, type EarningsEvent } from './feed-extras.ts';
 export type { OpinionsPanel } from "./editorial.ts";
 // On-demand panels with bounded per-isolate cache and request coalescing.
@@ -19,10 +23,10 @@ export type SegmentPeriod = { date: string; currency: string; period?: 'annual' 
 export type Channel = { name: string; evidence: string; url: string };
 export type BusinessPanel = { fetchedAt: string; description: string; products: SegmentPeriod[]; geography: SegmentPeriod[]; productDisclosure: string; geographyDisclosure: string; channels: Channel[]; documents: Article[]; source: string; summary: BusinessSummary | null; partnerships: Partnership[] };
 export type NewsPanel = { fetchedAt: string; articles: Article[]; sectorArticles?: Article[]; sectorName?: string };
-export type FeedQuote = { symbol: string; label: string; price: number | null; change: number | null; date: string | null; currency: string };
+export type FeedQuote = SessionQuote;
 export type FeedGroup = { label: string; items: FeedQuote[] };
 export type FeedEvent = { date: string; title: string; impact: string };
-export type MarketFeed = { fetchedAt: string; groups: FeedGroup[]; headlines: Article[]; geopolitics:Article[]; treasury:TreasuryPoint[]; earnings:EarningsEvent[] };
+export type MarketFeed = { fetchedAt: string; groups: FeedGroup[]; headlines: Article[]; geopolitics:Article[]; treasury:TreasuryPoint[]; earnings:EarningsEvent[];watchlist?:FeedQuote[] };
 type Env = { MASSIVE_API_KEY?: string; FMP_KEY: string; FRED_KEY: string; TAVILY_KEY: string; FINNHUB_KEY: string; GEMINI_API_KEY?: string };
 type Dependencies = { summary: (ticker: string, modules: string) => Promise<Row | null> };
 const cache = new Map<string, { expires: number; value: unknown }>();
@@ -41,7 +45,6 @@ export async function cached<T>(key: string, ttl: number, fn: () => Promise<T>):
   return promise;
 }
 const HOUR = 3600000;
-const NEWS_DOMAINS = ['reuters.com', 'apnews.com', 'bloomberg.com', 'ft.com', 'wsj.com', 'cnbc.com', 'marketwatch.com', 'barrons.com', 'finance.yahoo.com', 'federalreserve.gov', 'businesswire.com', 'globenewswire.com', 'prnewswire.com', 'utilitydive.com', 'industryweek.com', 'investors.com'];
 const num = (v: unknown): number | null => {
   if (v && typeof v === 'object' && 'raw' in v) return num((v as Row).raw);
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -62,20 +65,21 @@ export function curateNews(articles: Article[], subject: string, now = Date.now(
   const stop = new Set(['news', 'latest', 'sector', 'etf', 'inc', 'corp', 'the', 'and', 'of', 'de', 'del', 'la', 'trust', 'fund', 'funds', 'large', 'blend', 'index', 'state', 'street']);
   const tokens = subject.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter(t => t.length > 1 && !stop.has(t)) ?? [];
   const noise = /\b(stock market today|dow jones futures|eye buy points|stock forecast & analyst predictions|investor deadline|lead plaintiff|substantial losses|opportunity to lead|class action alert|ran the numbers|industry outlook|market size|market companies|market research|weekly review|what does she know|forecasts suggests?|will be worth|stocks? to buy|should you buy|best stocks|millionaire|motley fool|sponsored|promoted|price prediction|top \d+ stocks|buy now|worth buying|stock alert|urgent message|emmy|oscars|what you give up|here.s exactly)\b/i;
-  const catalyst = /\b(upgrades?|downgrades?|price target|ratings?|partnership|capacity|investment|earnings|revenue|guidance|merger|acquisition|regulat\w*|tariff\w*|lawsuits?|approval|contracts?|dividends?|buybacks?|rates?|inflation|flows?|holdings?|launch\w*|unveil\w*|debut\w*|results?|profits?|sales|yields?|policy|outflows?|inflows?|resultados|ingresos|beneficios?|tipos|fusi[oó]n|arancel\w*|demanda\w*|contrato\w*|inversi[oó]n|recort\w*|crecimiento|producci[oó]n)\b/i;
+  const catalyst = /\b(upgrades?|downgrades?|price target|ratings?|partnership|capacity|investment|earnings|revenue|guidance|merger|acquisition|regulat\w*|tariff\w*|lawsuits?|approval|contracts?|dividends?|buybacks?|rates?|inflation|flows?|holdings?|launch\w*|unveil\w*|debut\w*|results?|profits?|sales|yields?|policy|outflows?|inflows?|cyberattack|data breach|recall|bankrupt\w*|layoffs?|resigns?|CEO|chief executive|fraud|investigation|sanctions?|supply|export\w*|resultados|ingresos|beneficios?|tipos|fusi[oó]n|arancel\w*|demanda\w*|contrato\w*|inversi[oó]n|recort\w*|crecimiento|producci[oó]n|ciberataque|dimisi[oó]n|despid\w*|quiebra|fraude|investigaci[oó]n|adquisici[oó]n|sancion\w*|sanci[oó]n\w*)\b/i;
   const seenUrls = new Set<string>();
   const launches = new Map<string, number>();
   const titles: Set<string>[] = [];
   return articles.filter(a => {
-    const date = Date.parse(a.date);
-    if (!a.title || !Number.isFinite(date) || date < now - maxAgeDays * 86400000 || date > now + 86400000 || noise.test(a.title) || /\/video\/|\/livecoverage\//i.test(a.url) || /^letter:/i.test(a.title)) return false;
+    const date = articleTime(a);
+    if(/Jim Cramer|Morning Squawk|Mad Money|Investing Club/i.test(a.title))return false;
+    if (!a.title || !Number.isFinite(date) || date < now - maxAgeDays * 86400000 || date > now + 60000 || noise.test(a.title) || /motley fool|fool\.com|stocktwits|zacks|24\/7 wall|247wallst|prnewswire\.com|businesswire\.com|globenewswire\.com/i.test(a.source+' '+a.url) || /\b(festival|presented by|sponsors?|sponsorship|stocks? is a better buy|monthly investment.*could grow|investing radar|take profits|hold on for the ride|ETFs? to benefit|I.m getting|I.m buying|I.m selling)\b/i.test(a.title) || /\/video\/|\/livecoverage\//i.test(a.url) || /^letter:/i.test(a.title)) return false;
     try { if (!['http:', 'https:'].includes(new URL(a.url).protocol)) return false; } catch { return false; }
     const content = `${a.title} ${(a.excerpt ?? '').slice(0, 300)}`.toLowerCase();
     // A passing mention in a market roundup is not direct coverage of the subject.
     const relevantText = thematic ? `${a.title} ${(a.excerpt ?? '').slice(0, 300)}` : a.title;
     const words = new Set(relevantText.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
     return tokens.some(t => words.has(t)) && catalyst.test(content);
-  }).sort((a, b) => b.date.localeCompare(a.date) || Number(b.url.includes('reuters.com')) - Number(a.url.includes('reuters.com'))).filter(a => {
+  }).sort(newsOrder).filter(a => {
     const url = new URL(a.url); url.search = ''; url.hash = '';
     const words = new Set(a.title.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
     const duplicate = seenUrls.has(url.href) || titles.some(other => {
@@ -95,62 +99,60 @@ export function curateNews(articles: Article[], subject: string, now = Date.now(
 }
 async function search(query: string, key: string, news = false, domains: string[] = [], days = 14, maxResults = news ? 5 : 3): Promise<Article[]> {
   if (!key) return [];
-  return cached(`search:${news}:${query}:${domains.join(',')}:${days}:${maxResults}`, news ? (days===1?300000:HOUR) : 24 * HOUR, async () => {
-    const raw = await get('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: key, query, search_depth: 'basic', max_results: maxResults, include_answer: false, include_images: news, ...(news ? { topic: 'news', days } : {}), ...(domains.length ? { include_domains: domains } : {}) }) });
+  return cached(`search:${news}:${query}:${domains.join(',')}:${days}:${maxResults}`, news ? (days<=7?600000:HOUR) : 24 * HOUR, async () => {
+    const raw = await tavilyJson({query,search_depth:'basic',max_results:maxResults,include_answer:false,include_images:news,...(news?{topic:'news',days}:{}),...(domains.length?{include_domains:domains}:{})},key);
     const rows = (raw as Row)?.results;
     return Array.isArray(rows) ? rows.filter((r: Row) => /^https?:\/\//.test(r.url ?? '')).map((r: Row) => ({ title: String(r.title ?? ''), url: r.url, source: new URL(r.url).hostname, date: day(r.published_date) ?? '', publishedAt:typeof r.published_date==='string'&&Number.isFinite(Date.parse(r.published_date))&&/T|\d{2}:\d{2}/.test(r.published_date)?new Date(r.published_date).toISOString():undefined, excerpt: String(r.content ?? '').slice(0, 900), image: undefined })) : [];
   });
 }
 export async function newsPanel(subject: string, sector: boolean, env: Env, deps?: Dependencies): Promise<NewsPanel> {
-  return cached(`news:${sector}:${subject}`, HOUR, async () => {
-    const aliases: Record<string, string> = { semiconductores: 'semiconductors semiconductor chips', 'inteligencia artificial': 'artificial intelligence AI', 'energía': 'energy oil gas', salud: 'healthcare pharmaceutical biotech', defensa: 'defense aerospace', consumo: 'consumer retail', 'tecnología': 'technology software', bancos: 'banks banking', 'inmobiliario': 'real estate REIT' };
+  return cached(`news:v3:${sector}:${subject}`, 600000, async () => {
+    const aliases: Record<string, string> = { semiconductores: 'semiconductors semiconductor chips Nvidia Micron AMD Broadcom Intel TSMC ASML memory DRAM NAND', 'inteligencia artificial': 'artificial intelligence AI', 'energía': 'energy oil gas', salud: 'healthcare pharmaceutical biotech', defensa: 'defense aerospace', consumo: 'consumer retail', 'tecnología': 'technology software', bancos: 'banks banking', 'inmobiliario': 'real estate REIT' };
     const topic = sector ? `${subject} ${aliases[subject.toLowerCase()] ?? ''}` : subject;
-    const [raw, profile, finnhubNews, fmpNews, massive] = await Promise.all([
+    const [raw, profile, finnhubNews, fmpNews, massive, rss] = await Promise.all([
       get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(topic)}&newsCount=15&quotesCount=${sector ? 0 : 1}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       !sector && deps ? cached(`news-name:${subject}`, 24 * HOUR, () => deps.summary(subject, 'quoteType,assetProfile,fundProfile')) : null,
       !sector && env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(subject)}&from=${new Date(Date.now()-90*86400000).toISOString().slice(0,10)}&to=${new Date().toISOString().slice(0,10)}&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
       !sector && env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(subject)}&limit=50&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       massiveNews(env.MASSIVE_API_KEY,sector?'':subject),
+      cached('publisher-rss-v2',300000,publisherNews),
     ]);
     const data = raw as Row;
     const company = sector ? topic : profile?.quoteType?.longName ?? profile?.quoteType?.shortName ?? data?.quotes?.[0]?.longname ?? data?.quotes?.[0]?.shortname ?? subject;
-    const rows: Article[] = (data?.news ?? []).map((r: Row) => ({ title: r.title, url: r.link, source: r.publisher, date: day(r.providerPublishTime) ?? '' }));
-    for(const r of Array.isArray(finnhubNews)?finnhubNews:[])if(r.url&&r.headline)rows.push({title:r.headline,url:r.url,source:r.source??'',date:day(r.datetime)??'',excerpt:r.summary??''});
-    for(const r of Array.isArray(fmpNews)?fmpNews:[])if(r.url&&r.title)rows.push({title:r.title,url:r.url,source:r.publisher??'',date:day(r.publishedDate)??'',excerpt:r.text??''});
-    rows.push(...(sector?sectorMassiveNews(massive,subject):massive));
+    const rows: Article[] = (data?.news ?? []).map((r: Row) => ({ title: r.title, url: r.link, source: r.publisher, date: day(r.providerPublishTime) ?? '', publishedAt:typeof r.providerPublishTime==='number'?new Date(r.providerPublishTime*1000).toISOString():undefined }));
+    for(const r of Array.isArray(finnhubNews)?finnhubNews:[])if(r.url&&r.headline)rows.push({title:r.headline,url:r.url,source:r.source??'',date:day(r.datetime)??'',publishedAt:typeof r.datetime==='number'?new Date(r.datetime*1000).toISOString():undefined,excerpt:r.summary??''});
+    for(const r of Array.isArray(fmpNews)?fmpNews:[])if(r.url&&r.title)rows.push({title:r.title,url:r.url,source:r.publisher??'',date:day(r.publishedDate)??'',publishedAt:Number.isFinite(Date.parse(r.publishedDate))?new Date(r.publishedDate).toISOString():undefined,excerpt:r.text??''});
+    rows.push(...(sector?sectorMassiveNews(massive,subject):massive),...rss);
     const allowedDomains = [...NEWS_DOMAINS];
     try { if(profile?.assetProfile?.website) allowedDomains.push(new URL(profile.assetProfile.website).hostname.replace(/^www\./,'')); } catch {}
     const thematic = sector || profile?.quoteType?.quoteType === 'ETF';
     const category = profile?.fundProfile?.categoryName ?? '';
     const broadUsMarket = thematic && /^(SPY|VOO|IVV|VTI|ITOT|SCHB)$/.test(subject);
-    const sectorName = sector ? subject : broadUsMarket ? 'Bolsa de EE. UU.' : profile?.assetProfile?.sector || category || (thematic ? company : '');
+    const nasdaqFund=thematic&&/^(QQQ|QQQM)$/.test(subject);
+    const fundTopic=nasdaqFund?'QQQ Nasdaq 100 technology AI semiconductor Nvidia Microsoft Apple Amazon Alphabet Broadcom':`${subject} ${company}`;
+    const sectorName = sector ? subject : broadUsMarket ? 'Bolsa de EE. UU.' : nasdaqFund?'Tecnología y Nasdaq 100':profile?.assetProfile?.sector || category || (thematic ? company : '');
     const sectorContexts: Record<string, string> = { Technology: 'technology software semiconductor chips AI Nvidia Microsoft Apple cloud', 'Bolsa de EE. UU.': 'S&P 500 Nasdaq equities stocks market Fed inflation', Healthcare: 'healthcare pharmaceutical biotech FDA drugs', Financials: 'banks banking insurance financial', 'Financial Services': 'banks banking insurance financial', Energy: 'energy oil gas OPEC', 'Consumer Cyclical': 'consumer retail automotive sales', 'Consumer Defensive': 'consumer staples retail food', Industrials: 'industrial manufacturing aerospace transport electricity power hydrogen fuel cells infrastructure', 'Real Estate': 'real estate REIT property housing', Utilities: 'utilities electricity power', 'Basic Materials': 'materials metals mining chemicals', 'Communication Services': 'telecom streaming advertising media' };
-    async function selection(name: string, initial: Article[], theme: boolean, query = name, required?: RegExp) {
-      let candidates = initial;
-      const choose = (days: number) => curateNews(required ? candidates.filter(a => required.test(a.title)) : candidates, name, Date.now(), 6, theme, days);
-      let selected = choose(30);
-      if (selected.length < 6) {
-        candidates = [...candidates, ...await search(query + ' results contracts partnerships', env.TAVILY_KEY, true, allowedDomains, 30, 18)];
-        selected = choose(30);
-      }
-      if (selected.length < 6) {
-        candidates = [...candidates, ...await search(query + ' earnings outlook contracts investment', env.TAVILY_KEY, true, allowedDomains, 90, 18)];
-        selected = choose(90);
-      }
-      if (selected.length < 6) {
-        // Broader discovery only when the initial financial press coverage is thin.
-        // Dates, direct relevance, event significance and deduplication still apply.
-        candidates = [...candidates, ...await search(query + ' revenue growth partnership capacity results', env.TAVILY_KEY, true, [], 90, 20)];
-        selected = choose(90);
-      }
-      if (selected.length < 6) {
-        candidates = [...candidates, ...await search(query + ' announced partnership contract agreement', env.TAVILY_KEY, true, [], 180, 20)];
-        selected = choose(180);
-      }
+    async function selection(name:string,initial:Article[],theme:boolean,query=name,required?:RegExp){
+      // Refresh direct CNBC/Yahoo discovery even when an older provider already
+      // supplies six stories. Never fill a recent-news quota with six-month news.
+      const [primary,broad]=await Promise.all([
+        search(query+' latest earnings business market news',env.TAVILY_KEY,true,PRIMARY_NEWS_DOMAINS,7,14),
+        search(query+' latest important news results regulation contracts',env.TAVILY_KEY,true,allowedDomains,7,16),
+      ]);
+      let candidates=[...initial,...primary,...broad];
+      if(tavilyLimited()&&!primary.length&&!broad.length)candidates.push(...await groundedNews(query,allowedDomains,env.GEMINI_API_KEY??''));
+      const trustworthy=(a:Article)=>{try{const host=new URL(a.url).hostname;return allowedDomains.some(d=>host===d||host.endsWith('.'+d));}catch{return false;}};
+      const choose=(days:number)=>balanceAccess(curateNews(candidates.filter(a=>trustworthy(a)&&(!required||required.test(a.title))),name,Date.now(),24,theme,days),6);
+      let selected=choose(14);
+      if(selected.length<5){candidates.push(...await search(query+' earnings results contracts regulation',env.TAVILY_KEY,true,allowedDomains,30,14));selected=choose(30);}
       return selected;
     }
+    const companyWords=company.replace(/\b(incorporated|corporation|corp|inc|ltd)\b\.?/gi,'').trim().split(/\s+/);
+    const brand=companyWords.slice(0,companyWords[0]?.length>=5?1:2).join(' ').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const literal=subject.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const companyRequired=new RegExp(`${brand}|\\(${literal}\\)${subject.length>=3&&!/^(ALL|ARE|CAN|FOR|YOU|THE)$/.test(subject)?`|\\b${literal}\\b`:''}`,'i');
     const [articles, sectorArticles] = await Promise.all([
-      selection(`${subject} ${company}`, rows, thematic, broadUsMarket ? `${subject} S&P 500 ETF` : company, broadUsMarket ? /\bSPY\b|\bSPDR\b|\bVOO\b|\bIVV\b|\bVTI\b|S&P\s*500|S.P.500/i : !thematic && company !== subject ? new RegExp(company.replace(/\b(incorporated|corporation|corp|inc|ltd)\b\.?/gi,'').trim().split(/\s+/).slice(0,2).join(' ').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i') : undefined),
+      selection(fundTopic, rows, thematic, nasdaqFund?'Nasdaq 100 technology stocks earnings markets':broadUsMarket ? `${subject} S&P 500 ETF` : company, nasdaqFund?/\bQQQ\w*\b|Nasdaq|Nvidia|Microsoft|Apple|Amazon|Alphabet|Broadcom|semiconductor|\bAI\b/i:broadUsMarket ? /\bSPY\b|\bSPDR\b|\bVOO\b|\bIVV\b|\bVTI\b|S&P\s*500|S.P.500/i : !thematic && company !== subject ? companyRequired : thematic&&!sector?new RegExp(`\\b${literal}\\b`,'i'):undefined),
       !sector && sectorName ? selection(`${sectorContexts[sectorName] ?? sectorName} ${profile?.assetProfile?.industry ?? ''}`, [], true, broadUsMarket ? 'US stock market' : `${profile?.assetProfile?.industry || sectorName} industry`) : Promise.resolve([]),
     ]);
     return { fetchedAt: new Date().toISOString(), articles, sectorArticles, sectorName };
@@ -162,28 +164,17 @@ const FEED_MARKETS: { label: string; items: [string, string][] }[] = [
   { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['BTC-USD', 'Bitcoin']] },
   { label: 'ETF PRINCIPALES', items: [['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM']] },
 ];
-async function feedQuote(symbol: string, label: string): Promise<FeedQuote> {
-  const raw = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-  const chart = (raw as Row)?.chart?.result?.[0];
-  const meta = chart?.meta ?? {};
-  const close = chart?.indicators?.quote?.[0]?.close ?? [];
-  const points = (chart?.timestamp ?? []).map((time: number, index: number) => ({ date: day(time), value: num(close[index]) })).filter((point: { date: string | null; value: number | null }) => point.date && point.value !== null);
-  const price = num(meta.regularMarketPrice) ?? points.at(-1)?.value ?? null;
-  const priceDate = day(meta.regularMarketTime) ?? points.at(-1)?.date ?? null;
-  const previous = points.filter((point: { date: string }) => point.date < (priceDate ?? '')).at(-1)?.value ?? points.at(-2)?.value ?? null;
-  return { symbol, label, price, change: price !== null && previous && previous > 0 ? (price / previous - 1) * 100 : null, date: priceDate, currency: String(meta.currency ?? '') || 'USD' };
-}
 const validFeedImage = photoUrl;
-function curateFeed(articles: Article[], limit=9): Article[] {
-  const important = /\b(geopolitics|ceasefire|conflict|military|shipping|strait|fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos)\b/i;
+export function curateFeed(articles: Article[], limit=9): Article[] {
+  const important = /\b(geopolitics|ceasefire|conflict|military|shipping|strait|fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos|ibex|bolsas?|acciones|resultados|beneficios|deuda|renta variable)\b/i;
   const seen = new Set<string>();
   const words: Set<string>[] = [];
   return balanceAccess(articles.filter(article => {
-    const stamp = Date.parse(article.date);
+    const stamp = articleTime(article);
     if(/globenewswire\.com|businesswire\.com|prnewswire\.com|news\.google\.com|\/video\//i.test(article.url)||/CCTV Script|transcript|press release|investor deadline/i.test(article.title))return false;
     if (/stocks? to buy|should you buy|investing radar|prediction:|sponsored|motley fool/i.test(article.title+' '+article.source)) return false;
-    if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 5 * 86400000 || stamp > Date.now() + 86400000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)) return false;
-    try { const url = new URL(article.url); if (!['http:', 'https:'].includes(url.protocol)) return false; url.search = ''; url.hash = ''; if (seen.has(url.href)) return false; seen.add(url.href); } catch { return false; }
+    if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 3 * 86400000 || stamp > Date.now() + 60000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)) return false;
+    try { const url = new URL(article.url); if (!['http:', 'https:'].includes(url.protocol)) return false; const key=newsKey(url.href); if (seen.has(key)) return false; seen.add(key); } catch { return false; }
     const current = new Set(article.title.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
     const duplicate = words.some(other => {
       const overlap = [...current].filter(word => other.has(word)).length;
@@ -191,38 +182,44 @@ function curateFeed(articles: Article[], limit=9): Article[] {
     });
     if (duplicate) return false;
     words.push(current); return true;
-  }).sort((a, b) => b.date.localeCompare(a.date)).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) })),limit);
+  }).sort(newsOrder).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) })),limit);
 }
-export async function feedMarketsPanel(env:Env):Promise<MarketFeed>{
-  return cached('feed-markets-v1',300000,async()=>{
-    const [groups,bonds,events]=await Promise.all([
-      Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>feedQuote(symbol,label)))}))),
-      treasury(env.FRED_KEY),earnings(env.FMP_KEY,env.FINNHUB_KEY)
+export async function feedMarketsPanel(env:Env,symbols:string[]=[]):Promise<MarketFeed>{
+  const quote=(symbol:string,label:string,extended:boolean)=>cached(`feed-price-v3:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
+  return cached('feed-markets-v3:'+symbols.join(','),45000,async()=>{
+    const [groups,bonds,events,watchlist]=await Promise.all([
+      Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>quote(symbol,label,group.label==='ETF PRINCIPALES')))}))),
+      cached('feedTreasury-v1',600000,()=>treasury(env.FRED_KEY)),cached('feedEarnings-v1',3600000,()=>earnings(env.FMP_KEY,env.FINNHUB_KEY)),
+      Promise.all(symbols.map(symbol=>quote(symbol,symbol,!symbol.startsWith('^')&&!symbol.includes('=')&&!symbol.endsWith('-USD'))))
     ]);
-    return {fetchedAt:new Date().toISOString(),groups,treasury:bonds,earnings:events,headlines:[],geopolitics:[]};
+    return {fetchedAt:new Date().toISOString(),groups,treasury:bonds,earnings:events,watchlist,headlines:[],geopolitics:[]};
   });
 }
 export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Promise<MarketFeed> {
   const cacheKey = `feed:${part}:${new Date().toISOString().slice(0, 13)}`;
   return cached(cacheKey, 5 * 60000, async () => {
-    const [market, yahoo, finnhub, fmp, web, geopolitical, massive, openWeb] = await Promise.all([
+    const [market, yahoo, finnhub, fmp, web, geopolitical, massive, openWeb, spanishGeo, rss] = await Promise.all([
       part==="all"?feedMarketsPanel(env):null,
       get('https://query1.finance.yahoo.com/v1/finance/search?q=global%20markets%20oil%20gold%20currencies&newsCount=25&quotesCount=0', { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
-      search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 5, 18),
+      search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 2, 18),
 
       search('latest war ceasefire attacks oil gas shipping stock markets political announcements sanctions tariffs',env.TAVILY_KEY,true,[...NEWS_DOMAINS,'bbc.com','theguardian.com','aljazeera.com','euronews.com'],1,20),
       massiveNews(env.MASSIVE_API_KEY),
-      search('markets economy geopolitics oil interest rates latest news',env.TAVILY_KEY,true,['apnews.com','bbc.com','cnbc.com','theguardian.com','aljazeera.com','euronews.com'],2,20),
+      search('markets economy geopolitics oil interest rates latest news',env.TAVILY_KEY,true,PRIMARY_NEWS_DOMAINS,2,20),
+      search('última hora guerra Ucrania Irán Oriente Medio China aranceles declaraciones políticas petróleo mercados',env.TAVILY_KEY,true,SPANISH_NEWS_DOMAINS,2,14),
+      cached('publisher-rss-v2',300000,publisherNews),
     ]);
     const headlines: Article[] = [];
-    for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', publishedAt:typeof row.providerPublishTime==='number'?new Date(row.providerPublishTime*1000).toISOString():undefined, excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.[0]?.url) });
+    for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', publishedAt:typeof row.providerPublishTime==='number'?new Date(row.providerPublishTime*1000).toISOString():undefined, excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.filter((r:Row)=>r.width>=400&&r.height>=220&&r.width/r.height>=1.25&&r.width/r.height<=2.6).sort((a:Row,b:Row)=>b.width-a.width)[0]?.url) });
     for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', publishedAt:typeof row.datetime==='number'?new Date(row.datetime*1000).toISOString():undefined, excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
     for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', publishedAt:typeof row.publishedDate==='string'&&Number.isFinite(Date.parse(row.publishedDate))?new Date(row.publishedDate).toISOString():undefined, excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
-    headlines.push(...web,...massive,...openWeb);
-    const geopolitics=curateFeed(geopoliticalNews([...geopolitical,...headlines]),6).sort((a,b)=>Date.parse(b.publishedAt??b.date)-Date.parse(a.publishedAt??a.date));
-    const selected=curateFeed(headlines.filter(a=>!geopolitics.some(g=>g.url===a.url)));
+    headlines.push(...web,...massive,...openWeb,...rss);
+    const geopolitics=curateFeed(geopoliticalNews([...geopolitical,...spanishGeo,...headlines]),8).sort(newsOrder);
+    // Partition BEFORE either limit. Political stories beyond the eight selected
+    // must not spill into the main feed, including tracking URL variants.
+    const selected=curateFeed(headlines.filter(a=>!isGeopolitical(a)));
     const enrich=async (article:Article):Promise<Article>=>({...article,image:validFeedImage(article.image)??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
     const [covers,geoCovers]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich))]);
     return { fetchedAt: new Date().toISOString(), groups:market?.groups??[], headlines:covers, geopolitics:geoCovers, treasury:market?.treasury??[], earnings:market?.earnings??[] };
@@ -297,7 +294,7 @@ export function extractChannels(documents: Article[]): Channel[] {
   });
 }
 export async function businessPanel(ticker: string, env: Env, deps: Dependencies): Promise<BusinessPanel> {
-  return cached(`business:${ticker}`, 24 * HOUR, async () => {
+  return cached(`business:v3:${ticker}`, 24 * HOUR, async () => {
     const [summary, annualProducts, quarterlyProducts, annualGeography, quarterlyGeography, profileRaw] = await Promise.all([
       deps.summary(ticker, 'assetProfile,quoteType'),
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-product-segmentation?symbol=${encodeURIComponent(ticker)}&period=annual&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
@@ -327,8 +324,8 @@ export async function businessPanel(ticker: string, env: Env, deps: Dependencies
     const geography = structuredGeography.length ? structuredGeography : research.geography;
     return {
       fetchedAt: new Date().toISOString(), description: research.context || description, products, geography,
-      productDisclosure: products.length ? '' : 'No se ha publicado un cuadro comparable de ingresos por producto o unidad de negocio para el último período. El modelo de negocio resume el detalle operativo disponible.',
-      geographyDisclosure: geography.length ? '' : 'No se ha publicado un cuadro comparable de ingresos por geografía para el último período. El modelo de negocio resume el detalle operativo disponible.',
+      productDisclosure: products.length ? '' : 'No se ha podido verificar un desglose completo de ingresos por producto o negocio para el último período.',
+      geographyDisclosure: geography.length ? '' : 'No se ha podido verificar un desglose completo de ingresos por región para el último período.',
       channels: [], documents, source: '', summary: editorial.summary, partnerships: editorial.partnerships
     };
   });

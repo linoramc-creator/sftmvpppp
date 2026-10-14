@@ -45,6 +45,11 @@ test('news limit is a maximum, never padded with irrelevant articles', () => {
   assert.ok(curateNews(rows, 'Apple', Date.parse('2026-09-15')).length <= 5);
   assert.deepEqual(curateNews(rows, 'Treasury', Date.parse('2026-09-15')), []);
 });
+test('ETF sponsorships, investment listicles and promotional wires do not become fund news',()=>{
+ const base={date:'2026-09-14',source:'test',url:'https://example.com/news'};
+ const rows=[{...base,title:'Wine festival presented by Invesco QQQ expands partnership'},{...base,title:'A monthly investment in QQQ could grow over 20 years'},{...base,title:'QQQ earnings rise',source:'The Motley Fool'},{...base,title:'Semiconductor revenue questions',url:'https://www.prnewswire.com/news/a'}];
+ assert.deepEqual(curateNews(rows,'QQQ semiconductor',Date.parse('2026-09-15'),6,true),[]);
+});
 test('news excludes passing mentions and repeated coverage of the same product launch', () => {
   const rows = [
     { title: 'Oracle revenue rises', excerpt: 'Apple also reported results.', url: 'https://example.com/1', source: 'test', date: '2026-09-14' },

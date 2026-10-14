@@ -1,3 +1,4 @@
+import {feedSymbols} from './feed-quotes.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -44,6 +45,7 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.subject!==undefined&&!['bonds','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction) return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   if(body.panel){
+    if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
     if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','extendedHours','assetContext','comparison','correlation'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
     if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>12||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 12 ETF válidos.');
     if(body.panel==='assetContext'&&body.benchmark!==undefined&&!['','XLC','XLY','XLP','XLE','XLF','XLV','XLI','XLK','XLB','XLRE','XLU'].includes(body.benchmark))throw new BetaError(400,'Referencia inválida.');
@@ -124,12 +126,12 @@ async function account(body: Body,user: User): Promise<Response> {
     default:throw new BetaError(400,'Operación inválida.');
   }
 }
-const cacheKey=(kind:string,subject:string)=>`${kind}:${subject.trim().toUpperCase()}`;
+const cacheKey=(kind:string,subject:string)=>`v4:${kind}:${subject.trim().toUpperCase()}`;
 export async function readSharedReport(kind:string,subject:string):Promise<any|null>{
   try{const rows=await service(`beta_analysis_cache?cache_key=eq.${encodeURIComponent(cacheKey(kind,subject))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=payload&limit=1`);return rows[0]?.payload??null;}catch{return null;}
 }
 export async function writeSharedReport(kind:string,subject:string,payload:any):Promise<void>{
-  try{await service('beta_analysis_cache?on_conflict=cache_key',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({cache_key:cacheKey(kind,subject),kind,subject:subject.trim().slice(0,80),payload,expires_at:new Date(Date.now()+2*60*60*1000).toISOString()})});await service(`beta_analysis_cache?expires_at=lt.${encodeURIComponent(new Date().toISOString())}`,{method:'DELETE'});}catch{console.error('Could not persist shared report cache');}
+  try{await service('beta_analysis_cache?on_conflict=cache_key',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({cache_key:cacheKey(kind,subject),kind,subject:subject.trim().slice(0,80),payload,expires_at:new Date(Date.now()+45*60*1000).toISOString()})});await service(`beta_analysis_cache?expires_at=lt.${encodeURIComponent(new Date().toISOString())}`,{method:'DELETE'});}catch{console.error('Could not persist shared report cache');}
 }
 async function finish(id: string,status: string){try{await service(`beta_usage?id=eq.${id}&status=eq.started`,{method:'PATCH',body:JSON.stringify({status,finished_at:new Date().toISOString()})});}catch{console.error('Could not finalize usage record');}}
 function tracked(response: Response,id: string): Response {

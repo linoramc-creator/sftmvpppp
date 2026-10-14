@@ -2,7 +2,7 @@ import {usePanelActive} from './KeepPanel';
 import { WatchlistCard } from "./WatchlistCard";
 import type { MarketData } from "@/lib/analyze";
 import { safeNewsHref } from "@/lib/navigation";
-import {NewsCards,TreasuryCard,EarningsList} from './FeedCards';
+import {NewsCards,TreasuryCard,EarningsList,FeedQuoteStamp} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
 import { cleanHeadline, cleanNewsExcerpt } from "@/lib/editorial";
 import { useEffect, useState, useRef, type ReactNode } from 'react';
@@ -18,7 +18,7 @@ function request<T>(panel: string, subject: string, sector: boolean, ttl: number
   if (pending.has(key)) return pending.get(key) as Promise<T>;
   const promise = authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', },
-    body: JSON.stringify({ panel, subject, sector }), signal: AbortSignal.timeout(panel === 'business' ? 110000 : 75000),
+    body: JSON.stringify({ panel, subject, sector }), signal: AbortSignal.timeout(panel === 'business' ? 145000 : 75000),
   }).then(async response => {
     if (!response.ok) throw new Error('No se ha podido consultar este apartado.');
     const data = await response.json();
@@ -42,7 +42,7 @@ function usePanel<T>(panel: string, subject = '', sector = false) {
     const key=`${panel}:${subject}:${sector}`;
     if(previous&&Date.now()-previous.at<86400000)setData(previous.data as T);else if(previousKey.current!==key)setData(null);
     previousKey.current=key;setError('');
-    const ttl = panel.startsWith('feed') ? 300000 : ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
+    const ttl = panel==='feedMarkets'?60000:panel.startsWith('feed') ? 300000 : panel==='news'?600000: ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
     const load = () => request<T>(panel, subject, sector, ttl)
       .then(value => { if (!cancelled) { setData(value); setError(''); } })
       .catch(() => { if (!cancelled) setError('No se ha podido actualizar. Inténtalo de nuevo.'); });
@@ -85,12 +85,12 @@ function feedPrice(price: number | null, currency: string) {
   return `${fmt(price, digits)} ${currency}`;
 }
 export function FeedView({stocks,data:quotes,onChange,onSelect}:{stocks:string[];data:MarketData|null;onChange:(stocks:string[])=>void;onSelect:(symbol:string)=>void}) {
-  const market=usePanel<MarketFeed>('feedMarkets');
+  const market=usePanel<MarketFeed>('feedMarkets',stocks.join(','));
   const state = usePanel<MarketFeed>('feedNews');
   const data = market.data ?? {groups:[],treasury:[],earnings:[],fetchedAt:''};
   return <div className="space-y-6">
     {(!market.data||market.error) && <Status {...market} />}
-    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div><p className="text-sm">{item.label}</p><p className="text-[10px] text-muted-foreground">{item.date ?? 'Fecha no disponible'}</p></div><div className="text-right"><p className="text-sm tabular-nums">{feedPrice(item.price, item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} onChange={onChange} onSelect={onSelect}/></Box></div>
+    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div><p className="text-sm">{item.label}</p><FeedQuoteStamp quote={item}/></div><div className="text-right"><p className="text-sm tabular-nums">{feedPrice(item.price, item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
       <div className="space-y-4"><Box title="PORTADAS DEL DÍA">{state.data&&<div className="mb-3"><Stamp at={state.data.fetchedAt}/></div>}{state.data?<NewsCards articles={state.data.headlines}/>:<Status {...state}/>}</Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS">{state.data?<NewsCards articles={state.data.geopolitics??[]} geo/>:<Status {...state}/>}</Box></div>
       <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]}/></Box>

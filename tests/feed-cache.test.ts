@@ -14,5 +14,8 @@ test('shared cache freshness, stale refresh and hard age limit',async()=>{
   await sharedFeed('fresh',create);assert.equal(calls,0);
   expires=Date.now()-1000;await sharedFeed('stale',create);assert.ok(background);await background;assert.equal(calls,1);
   at=Date.now()-16*60000;await sharedFeed('expired',create);assert.equal(calls,2);
+  at=Date.now()-60000;expires=Date.now()+300000;background=undefined;
+  await sharedFeed('minute-quotes',create,{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false});
+  assert.equal(calls,3);assert.equal(background,undefined);
  }finally{globalThis.fetch=original;if(oldDeno===undefined)delete runtime.Deno;else runtime.Deno=oldDeno;if(oldEdge===undefined)delete runtime.EdgeRuntime;else runtime.EdgeRuntime=oldEdge;}
 });

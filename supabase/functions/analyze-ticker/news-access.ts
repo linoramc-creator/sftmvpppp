@@ -6,7 +6,7 @@ export function newsAccess(value:string):NewsAccess{
   try{const u=new URL(value);const host=u.hostname;
     const matches=(domains:string[])=>domains.some(d=>host===d||host.endsWith('.'+d));
     if(matches(['wsj.com','ft.com','bloomberg.com','barrons.com','reuters.com','marketwatch.com'])||/\/pro\/|\/investingclub\/|\/premium\//i.test(u.pathname))return 'subscription';
-    if(matches(['apnews.com','bbc.com','bbc.co.uk','npr.org','cnbc.com','theguardian.com','aljazeera.com','finance.yahoo.com','euronews.com','pbs.org','federalreserve.gov','ecb.europa.eu']))return 'likely-open';
+    if(matches(['apnews.com','bbc.com','bbc.co.uk','npr.org','cnbc.com','theguardian.com','aljazeera.com','finance.yahoo.com','euronews.com','pbs.org','federalreserve.gov','ecb.europa.eu','rtve.es','efe.com','dw.com','france24.com']))return 'likely-open';
   }catch{/* unknown links are not counted as free */}
   return 'unknown';
 }

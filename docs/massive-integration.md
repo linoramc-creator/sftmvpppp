@@ -96,3 +96,40 @@ El postmarket se compara con el cierre regular de esa misma fecha; el premarket
 no incluye un porcentaje si no se dispone de su referencia. Si falta una sesión
 del día, puede mostrarse la última sesión disponible con su fecha explícita.
 Timeout, caché de dos minutos y ausencia de datos conservada como ausencia.
+
+## Feed e informes (14-10-2026)
+
+El snapshot de Massive para SPY sigue devolviendo 403 con el plan actual. El
+feed incorpora velas de un minuto de Yahoo con `includePrePost=true` para los
+ETF y activos de la watchlist, consulta cada 60 segundos y conserva la hora ET
+del dato. Se selecciona una vela completa cuyo cierre tenga al menos 60 segundos
+de antigüedad. El retraso efectivo puede ser mayor por el proveedor, caché o falta
+de operaciones; nunca se garantiza tiempo real ni un retraso exacto de un minuto.
+Premarket se compara con el último cierre regular; postmarket con el cierre de
+la misma sesión. Una cotización regular antigua mantiene su etiqueta de cierre.
+
+Los informes de ticker, ETF y sector usan Gemini 3.1 Pro preview, con fallback
+explícito ante indisponibilidad a Gemini 3 Flash preview y Gemini 2.5 Pro. El
+modelo efectivo se registra como metadato del stream y de la caché. Se conserva
+la memoria compartida, con vigencia de 45 minutos para estos informes.
+
+CNBC RSS oficial complementa Yahoo, CNBC por búsqueda, Massive y los demás
+proveedores. Se amplía la cobertura a elEconomista y otros medios contrastados.
+Las noticias geopolíticas se clasifican antes de limitar las portadas, con fecha
+verificada y ventana de 48 horas. Las fotos siguen pasando los filtros de portadas.
+El objetivo de 75 % de enlaces abiertos es heurístico; no garantiza el acceso.
+
+El desglose de ingresos usa documentos oficiales, extracción Pro y una búsqueda
+específica con reparación Flash si falta alguna tabla. Cada fila conserva evidencia
+literal, periodo, moneda y escala; sus importes deben cuadrar con el total. Un
+segmento único solo se acepta con una declaración explícita. Se informa de una
+tabla no verificada en vez de inventar importes o afirmar que no se ha publicado.
+
+Comprobación real: los tres tipos de informe han respondido con Gemini 3.1 Pro.
+MU recupera tablas verificadas de negocio y geografía del 10-K. El recorte conserva
+las notas financieras y elimina contextos XBRL ocultos para reducir tokens.
+Tavily devuelve HTTP 432 (límite del plan alcanzado). Un circuito suspende nuevos
+intentos durante 30 minutos por instancia; los RSS oficiales de CNBC, elEconomista
+y BBC permanecen disponibles. Para noticias de informes hay un respaldo acotado
+con Google Search de Gemini Flash: se aceptan únicamente enlaces a los medios
+permitidos y fechas de publicación verificadas en metadatos del artículo.

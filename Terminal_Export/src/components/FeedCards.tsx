@@ -4,8 +4,14 @@ import {useState} from 'react';
 import {ResponsiveContainer,LineChart,Line,XAxis,YAxis,Tooltip} from 'recharts';
 import {safeNewsHref} from '@/lib/navigation';
 import {cleanHeadline,cleanNewsExcerpt} from '@/lib/editorial';
-import type {Article,MarketFeed} from '../../../supabase/functions/analyze-ticker/panels';
+import type {Article,MarketFeed,FeedQuote} from '../../../supabase/functions/analyze-ticker/panels';
 const number=(v:number|null,digits=2)=>v===null?'—':v.toLocaleString('es-ES',{maximumFractionDigits:digits});
+export function FeedQuoteStamp({quote}:{quote:FeedQuote}){
+ const labels={pre:'PREMARKET',regular:'MARKET',post:'POSTMARKET',closed:'CIERRE'},time=quote.at?Date.parse(quote.at):NaN,age=Number.isFinite(time)?Math.max(0,Math.floor((Date.now()-time)/1000)):null;
+ const clock=Number.isFinite(time)?new Date(time).toLocaleString('es-ES',{timeZone:'America/New_York',...(quote.session==='closed'?{day:'2-digit',month:'2-digit'}:{}),hour:'2-digit',minute:'2-digit'})+' ET':quote.date??'Sin hora disponible';
+ const reference=quote.reference==='regular-close'?'Variación respecto al cierre regular de esa sesión.':'Variación respecto al cierre regular anterior cuando está disponible.';
+ return <span className="block text-[10px] text-muted-foreground" title={`Actualización cada 60 segundos. ${age===null?'No hay una hora verificada.':`Último dato hace ${Math.floor(age/60)} min.`} ${reference}`}>{quote.price===null?'Sin cotización':`${labels[quote.session]??''}${quote.session?' · ':''}${clock}${quote.session!=='closed'&&age!==null&&age>180?` · hace ${Math.floor(age/60)} min`:''}`}</span>;
+}
 export function NewsCover({article,geo=false}:{article:Article;geo?:boolean}){
   const [failed,setFailed]=useState(false);
   const usable=photoUrl(article.image)&&!failed;
