@@ -24,3 +24,15 @@ test('feed does not relabel stale regular prices as extended trading or fabricat
  assert.deepEqual(feedSymbols('spy,QQQ,SPY'),['SPY','QQQ']);
  for(const bad of ['AAPL,MSFT,NVDA,MU,SPY,QQQ,TLT','https://private','AAPL,',{}])assert.equal(feedSymbols(bad),null);
 });
+test('Asian index returns use the exchange date rather than New York midnight',()=>{
+ const data=raw('2026-10-14T05:00Z',110,['2026-10-13T00:00Z','2026-10-14T00:00Z'],[100,110]);
+ data.chart.result[0].meta.exchangeTimezoneName='Asia/Seoul';data.chart.result[0].meta.currentTradingPeriod={regular:{start:seconds('2026-10-14T00:00Z'),end:seconds('2026-10-14T06:00Z')}};
+ const r=normalizeFeedQuote('^KS11','KOSPI',data,null,Date.parse('2026-10-14T06:15Z'));
+ assert.equal(r.date,'2026-10-14');assert.equal(r.timezone,'Asia/Seoul');assert.equal(r.session,'regular');assert.ok(Math.abs(r.change!-10)<1e-8);
+});
+test('overnight futures exclude their unfinished daily candle from the prior-close reference',()=>{
+ const data=raw('2026-10-14T05:00Z',102,['2026-10-12T22:00Z','2026-10-13T22:00Z'],[100,102]);
+ data.chart.result[0].meta.currentTradingPeriod={regular:{start:seconds('2026-10-13T22:00Z'),end:seconds('2026-10-14T21:00Z')}};
+ const r=normalizeFeedQuote('NQ=F','Nasdaq future',data,null,Date.parse('2026-10-14T05:01Z'));
+ assert.ok(Math.abs(r.change!-2)<1e-8);assert.equal(r.reference,'previous-close');
+});

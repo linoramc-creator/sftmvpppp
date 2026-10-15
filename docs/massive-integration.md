@@ -133,3 +133,29 @@ intentos durante 30 minutos por instancia; los RSS oficiales de CNBC, elEconomis
 y BBC permanecen disponibles. Para noticias de informes hay un respaldo acotado
 con Google Search de Gemini Flash: se aceptan únicamente enlaces a los medios
 permitidos y fechas de publicación verificadas en metadatos del artículo.
+
+## Índices asiáticos y futuros del Nasdaq (15-10-2026)
+
+El feed añade KOSPI (`^KS11`), Nikkei 225 (`^N225`) y el futuro continuo Nasdaq 100
+(`NQ=F`), con fecha y hora de la plaza correspondiente. Los índices y el futuro
+se expresan en puntos. VEA, VWO, TLT y GLD completan los ocho ETF del recuadro.
+Se han verificado sus cotizaciones y nombres mediante el proveedor conectado.
+Massive MCP permite consultar contratos NQ vigentes, pero su snapshot de futuros
+devuelve 403 con este plan. El precio mostrado procede de Yahoo y puede llegar
+con retraso; no se presenta como un precio de Massive ni como tiempo real.
+
+Cada nueva edición del brief abre con Nikkei, KOSPI, Hang Seng y Shanghai Composite.
+Se distinguen sesiones en curso, pausas, cierres confirmados y sesiones anteriores.
+Los datos no pueden superar el corte de la edición: si la cotización actual es
+posterior, se toma una observación de cinco minutos ya completada. Se verifica
+también la fecha local de la referencia para evitar que una vela asiática en curso
+se convierta erróneamente en el cierre anterior al cruzar medianoche en Nueva York.
+La misma apertura entra en el contexto de la única generación de IA del brief;
+no requiere otra llamada. Se reutilizan las consultas diarias de cada activo.
+
+Horarios de sesión usados como apoyo, siempre con observaciones fechadas y sin
+deducir festivos únicamente por el día de la semana:
+[JPX](https://www.jpx.co.jp/english/systems/equities-trading/),
+[KRX](https://global.krx.co.kr/contents/GLB/06/0602/0602020204/GLB0602020204T1.jsp),
+[HKEX](https://www.hkex.com.hk/Services/Trading-hours-and-Severe-Weather-Arrangements/Trading-Hours/Securities-Market?sc_lang=en),
+[SSE](https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml).

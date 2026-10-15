@@ -161,10 +161,10 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
   });
 }
 const FEED_MARKETS: { label: string; items: [string, string][] }[] = [
-  { label: 'ÍNDICES', items: [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq Composite'], ['^DJI', 'Dow Jones'], ['^VIX', 'Volatilidad']] },
+  { label: 'ÍNDICES', items: [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq Composite'], ['NQ=F', 'Nasdaq 100 · Futuro'], ['^DJI', 'Dow Jones'], ['^KS11', 'KOSPI · Corea del Sur'], ['^N225', 'Nikkei 225 · Japón'], ['^VIX', 'Volatilidad']] },
   { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural']] },
   { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['BTC-USD', 'Bitcoin']] },
-  { label: 'ETF PRINCIPALES', items: [['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM']] },
+  { label: 'ETF PRINCIPALES', items: [['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM'],['VEA','Desarrollados fuera de EE. UU. · VEA'],['VWO','Emergentes · VWO'],['TLT','Tesoro a largo plazo · TLT'],['GLD','Oro · GLD']] },
 ];
 const validFeedImage = photoUrl;
 export function curateFeed(articles: Article[], limit=9): Article[] {
@@ -187,10 +187,10 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
   }).sort(newsOrder).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) })),limit);
 }
 export async function feedMarketsPanel(env:Env,symbols:string[]=[]):Promise<MarketFeed>{
-  const quote=(symbol:string,label:string,extended:boolean)=>cached(`feed-price-v3:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
-  return cached('feed-markets-v3:'+symbols.join(','),45000,async()=>{
+  const quote=(symbol:string,label:string,extended:boolean)=>cached(`feed-price-v4:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
+  return cached('feed-markets-v4:'+symbols.join(','),45000,async()=>{
     const [groups,bonds,events,watchlist]=await Promise.all([
-      Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>quote(symbol,label,group.label==='ETF PRINCIPALES')))}))),
+      Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>quote(symbol,label,group.label==='ETF PRINCIPALES'||symbol==='NQ=F')))}))),
       cached('feedTreasury-v1',600000,()=>treasury(env.FRED_KEY)),cached('feedEarnings-v1',3600000,()=>earnings(env.FMP_KEY,env.FINNHUB_KEY)),
       Promise.all(symbols.map(symbol=>quote(symbol,symbol,!symbol.startsWith('^')&&!symbol.includes('=')&&!symbol.endsWith('-USD'))))
     ]);

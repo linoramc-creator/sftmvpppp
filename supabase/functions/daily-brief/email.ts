@@ -22,7 +22,7 @@ export async function prepareBriefMail(data:BriefData){
  const charts:ChartSpec[]=[],html=renderBrief(data,chart=>{charts.push(chart);return `<img src="cid:${chart.id}@terminal" alt="${chart.title.replace(/[&<>"']/g,'')}" width="760" style="display:block;width:100%;height:auto"/>`;});
  const attachments=await Promise.all(charts.map(async chart=>({filename:chart.id+'.png',content:await rasterChart(chart),contentType:'image/png',cid:chart.id+'@terminal'})));
  const subject=`${data.preview?'Prueba · ':''}Terminal · Mercados · ${data.date}`;
- const text=`Brief de mercados · ${data.date}\n\n${data.lead}\n\n${data.takeaways.map(t=>t.title+'\n'+t.text).join('\n\n')}\n\n${data.watchlist.map(a=>a.symbol+'\n'+a.note).join('\n\n')}\n\nEntorno geopolítico internacional\n${(data.geopoliticalSummary??geopoliticalFallback(data)).paragraphs.join('\n\n')}\n\nAbre la terminal para ver los gráficos y el informe completo: https://sftmvpppp.vercel.app/`;
+ const text=`Brief de mercados · ${data.date}\n\n${data.asia?'Sesión asiática\n'+data.asia.summary+'\n\n':''}${data.lead}\n\n${data.takeaways.map(t=>t.title+'\n'+t.text).join('\n\n')}\n\n${data.watchlist.map(a=>a.symbol+'\n'+a.note).join('\n\n')}\n\nEntorno geopolítico internacional\n${(data.geopoliticalSummary??geopoliticalFallback(data)).paragraphs.join('\n\n')}\n\nAbre la terminal para ver los gráficos y el informe completo: https://sftmvpppp.vercel.app/`;
  return {subject,html,text,attachments};
 }
 export async function sendBrief(to:string,id:string,data:BriefData):Promise<string>{
