@@ -1,3 +1,5 @@
+import { cleanReportText } from './editorial';
+
 function formatInlineHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -60,7 +62,10 @@ function markdownToHtml(md: string): string {
       continue;
     }
 
-    if (line.startsWith("### ")) {
+    if (line.startsWith("#### ")) {
+      closeUl();
+      html.push(`<h4>${formatInlineHtml(line.slice(5))}</h4>`);
+    } else if (line.startsWith("### ")) {
       closeUl();
       html.push(`<h3>${formatInlineHtml(line.slice(4))}</h3>`);
     } else if (line.startsWith("## ")) {
@@ -97,7 +102,7 @@ function markdownToHtml(md: string): string {
 }
 
 export function downloadAnalysisPdf(markdown: string, ticker: string, targetWindow?: Window) {
-  const bodyHtml = markdownToHtml(markdown);
+  const bodyHtml = markdownToHtml(cleanReportText(markdown));
   const safeTicker = ticker.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]!);
   const dateStr = new Date().toLocaleDateString("es-ES", {
     year: "numeric",
@@ -155,6 +160,13 @@ h3 {
   font-weight: 700;
   margin: 12pt 0 4pt;
   color: #333;
+}
+h4 {
+  font-size: 9.5pt;
+  font-weight: 600;
+  margin: 10pt 0 4pt;
+  color: #234d70;
+  break-after: avoid;
 }
 p { margin: 3pt 0 5pt; }
 ul {

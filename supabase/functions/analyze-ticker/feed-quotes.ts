@@ -1,5 +1,6 @@
 export type FeedSession='pre'|'regular'|'post'|'closed';
-export type SessionQuote={symbol:string;label:string;price:number|null;change:number|null;date:string|null;currency:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close';reference:'previous-close'|'regular-close'|null;timezone?:string};
+export type SessionQuote={symbol:string;label:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close';reference:'previous-close'|'regular-close'|null;timezone?:string};
+const commodityUnits:Record<string,string>={'GC=F':'USD/oz t','SI=F':'USD/oz t','CL=F':'USD/barril','BZ=F':'USD/barril','HG=F':'USD/libra','NG=F':'USD/MMBtu','ZW=F':'¢/bushel','ZC=F':'¢/bushel'};
 const positive=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>0;
 const localDate=(ms:number,timezone:string)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(ms);
 export function feedSymbols(value:unknown):string[]|null{if(value===undefined||value==='')return [];if(typeof value!=='string'||value.length>100)return null;const items=value.split(',').map(s=>s.trim().toUpperCase());return items.length<=6&&items.every(s=>/^[A-Z0-9^][A-Z0-9.^=-]{0,14}$/.test(s))?[...new Set(items)]:null;}
@@ -13,7 +14,12 @@ export function normalizeFeedQuote(symbol:string,label:string,raw:any,intraday:a
  const date=regularAt===null?null:dateAt(regularAt),period=meta.currentTradingPeriod?.regular;
  const sameSession=regularAt!==null&&positive(period?.start)&&positive(period?.end)&&regularAt>=period.start*1000&&regularAt<=period.end*1000+60000;
  const prior=times.flatMap((t:number,i:number)=>positive(t)&&positive(closes[i])?[{time:t*1000,date:dateAt(t*1000),value:closes[i]}]:[]).filter((p:any)=>sameSession?p.time<period.start*1000:p.date<(date??'')).at(-1)?.value??null;
- const result:SessionQuote={symbol,label,price:regularPrice,change:regularPrice!==null&&prior?(regularPrice/prior-1)*100:null,date,currency:typeof meta.currency==='string'?meta.currency:'',session:regularAt!==null&&phase(meta,now,symbol)==='regular'&&dateAt(regularAt)===dateAt(now)?'regular':'closed',at:regularAt===null?null:new Date(regularAt).toISOString(),delaySeconds:regularAt===null?null:Math.max(0,Math.floor((now-regularAt)/1000)),priceKind:'quote',reference:prior?'previous-close':null,timezone};
+ const currency=typeof meta.currency==='string'?meta.currency:'';
+ // Agricultural futures arrive in US cents; keep their raw magnitude and
+ // display the contract unit instead of incorrectly labelling the price USD.
+ const expectedCurrency=symbol==='ZW=F'||symbol==='ZC=F'?'USX':'USD';
+ const unit=commodityUnits[symbol]&&currency===expectedCurrency?commodityUnits[symbol]:undefined;
+ const result:SessionQuote={symbol,label,price:regularPrice,change:regularPrice!==null&&prior?(regularPrice/prior-1)*100:null,date,currency,...(unit?{unit}:{}),session:regularAt!==null&&phase(meta,now,symbol)==='regular'&&dateAt(regularAt)===dateAt(now)?'regular':'closed',at:regularAt===null?null:new Date(regularAt).toISOString(),delaySeconds:regularAt===null?null:Math.max(0,Math.floor((now-regularAt)/1000)),priceKind:'quote',reference:prior?'previous-close':null,timezone};
  const chart=intraday?.chart?.result?.[0],m=chart?.meta??{},active=phase(m,now),quote=chart?.indicators?.quote?.[0];
  if(m.dataGranularity!=='1m'||active==='closed'||!quote)return result;
  // Yahoo timestamps identify the START of a minute, including a partial last

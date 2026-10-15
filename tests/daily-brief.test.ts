@@ -25,6 +25,15 @@ test('general markets occupy two separate compact sheets, preserving every asset
  const html=renderBrief(data);assert.ok(html.includes('width="146" height="98"'));assert.ok(!html.includes('width="700"'));assert.ok(html.indexOf('id="entorno"')>html.indexOf('id="politica"'));assert.ok(html.includes('@page{size:A4'));
 });
 
+test('brief news has nonclickable key points, while contents and terminal navigation remain usable',()=>{
+ const data=edition();data.politics[0]={...data.politics[0],title:'Oil supply and ceasefire talks – Reuters',keyPoints:['Se mantienen las conversaciones sobre suministro.','No se ha confirmado un acuerdo definitivo.']};
+ const html=renderBrief(data),article=html.match(/<article class="news-item">([\s\S]*?)<\/article>/)?.[1]??'';
+ assert.ok(article.includes('class="news-points"'));assert.ok(article.includes('No se ha confirmado un acuerdo definitivo.'));assert.ok(article.includes('class="news-cover"'));
+ assert.ok(!/<a\b|href=|– Reuters/.test(article));assert.ok(!html.includes('href="https://www.reuters.com/world/story"'));
+ assert.ok(html.includes('href="#politica"'));assert.ok(html.includes('href="https://sftmvpppp.vercel.app/"'));
+ assert.equal(data.politics[0].url,'https://www.reuters.com/world/story');
+});
+
 test('AI input deduplicates articles and excludes chart and image payloads; geopolitical text requires supplied evidence',()=>{
  const data=edition(),article=data.politics[0];data.news=[article];
  const input=briefAiInput(data);assert.equal(input.articles.length,1);assert.deepEqual(input.politics,[article.url]);assert.ok(!JSON.stringify(input).includes('photos/story.jpg'));assert.ok(!JSON.stringify(input).includes('points'));

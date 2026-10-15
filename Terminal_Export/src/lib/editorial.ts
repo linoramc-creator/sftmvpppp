@@ -11,18 +11,23 @@ export function cleanReportText(text: string): string {
     return !omittedLevel && !sourceHeading;
   })
     .map(line => line
+      .replace(/^\s*\[[^\]]+\]:\s*https?:\/\/\S+.*$/gi, '')
       .replace(/\[(?:fuente[^\]]*|\d+)\]\([^)]*\)/gi, '')
       .replace(/\[([^\]]+)\]\(https?:\/\/[^)]*\)/g, '$1')
+      .replace(/<a\b[^>]*>(.*?)<\/a>/gi, '$1')
+      .replace(/<?https?:\/\/[^\s<>]+>?/gi, '')
       .replace(/\([^)]*(?:Yahoo|FMP|Finnhub|Tavily|Twelve Data|Gemini|fuente:)[^)]*\)/gi, '')
+      .replace(/\(\s*(?:Reuters|AP News|Associated Press|CNBC|Bloomberg(?:\.com)?|BBC(?: News)?|elEconomista(?:\.es)?)\s*\)/gi, '')
       .replace(/\b(?:seg[uú]n|v[ií]a|datos de|obtenid[oa]s? de|publicad[oa]s? por)\s+(?:Yahoo(?: Finance)?|FMP|Finnhub|Tavily|Twelve Data|Gemini)\s*[,;:]?/gi, '')
       .replace(providers, '')
       .replace(/\s*\[(?:fuente|URL)[^\]]*\]/gi, '')
+      .replace(/\(\s*\)/g, '')
       .replace(/\s+([.,;:])/g, '$1').replace(/ {2,}/g, ' ').trimEnd())
     .filter(line => !/c[aá]lculo determinista|no generad[oa] por IA|consultamos|hemos consultado|hemos (?:utilizado|analizado).*fuentes|b[uú]squeda (?:web|Tavily)|datos del backend|fallback|redeploy/i.test(line))
     .join('\n');
 }
 export function cleanHeadline(text: string): string {
-  return text.replace(/(?:\s*[-–|]\s*(?:Reuters|Yahoo Finance|finance\.yahoo\.com|CNBC|Bloomberg|MarketWatch(?:\.com)?|Barron.s|Financial Times))+\s*$/i, '').replace(/^EXCLUSIVE:\s*/i, '');
+  return text.replace(/(?:\s*[-–|]\s*(?:Reuters|AP News|Associated Press|Yahoo Finance|finance\.yahoo\.com|CNBC|Bloomberg(?:\.com)?|MarketWatch(?:\.com)?|Barron.s|Financial Times|BBC(?: News)?|elEconomista(?:\.es)?))+\s*$/i, '').replace(/^EXCLUSIVE:\s*/i, '');
 }
 export function cleanNewsExcerpt(text: string): string {
   return cleanReportText(text).replace(/^.{0,70}\((?:Reuters|AP|Bloomberg)\)\s*[-—–]\s*/i, '').replace(/,?\s*opens new tab/gi, '').trim();

@@ -1599,8 +1599,8 @@ Añade un párrafo analítico de 4-5 líneas sobre los fundamentales más releva
 - ### Posicionamiento Competitivo: 3-4 líneas sobre cuota de mercado y ventajas diferenciales.
 
 ## Noticias
-- ### Noticias Corporativas Recientes: hasta 6 noticias relevantes, publicadas en los últimos 14 días, sin duplicados ni recomendaciones genéricas de compra. Cada noticia debe tener fecha y URL verificables del contexto; si no hay, indícalo sin inventar. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL proporcionada en los datos de contexto ([URL: ...]) para enlazar directamente la fuente en formato markdown [texto](url). Si no hay URL disponible para una noticia, usa "(Fuente)" sin enlace.
-- ### Noticias del Sector: hasta 6 noticias adicionales directamente relevantes del sector, sin repetir las corporativas. Mismo formato con enlace si URL disponible.
+- ### Noticias Corporativas Recientes: hasta 6 noticias relevantes, publicadas en los últimos 14 días, sin duplicados ni recomendaciones genéricas de compra. Comprueba internamente la fecha y URL del contexto; si faltan noticias verificables, indícalo sin inventar. Cada noticia se presenta como "#### Titular · fecha" y debajo 1-3 viñetas breves con sus hechos clave. Explica la implicación para el negocio solo cuando esté respaldada por el contexto, sin inventar causalidad. No muestres URLs, enlaces, nombres de medios ni etiquetas de fuente.
+- ### Noticias del Sector: hasta 6 noticias adicionales directamente relevantes del sector, sin repetir las corporativas. Mismo formato de titular, fecha y puntos clave sin enlaces ni nombres de medios.
 - ### Contexto Macro Relevante: 4-5 líneas sobre entorno macro/geopolítico con impacto directo. Integra indicadores FRED (tipos, inflación, yield 10Y).
 
 ## Señales Técnicas
@@ -1757,7 +1757,7 @@ Genera un informe sectorial completo y detallado sobre el sector "${sector}". Us
 - Para cada ETF, 1-2 líneas sobre ventajas, liquidez, para qué tipo de inversor.
 
 ## Noticias y Tendencias
-- ### Noticias Recientes: hasta 6 noticias materiales con fecha y URL del contexto (últimos 14 días); excluye duplicados, publicidad y listas de inversión. Formato: "- **Titular:** impacto 2-3 líneas."
+- ### Noticias Recientes: hasta 6 noticias materiales con fecha y URL verificables internamente en el contexto (últimos 14 días); excluye duplicados, publicidad y listas de inversión. Cada noticia se presenta como "#### Titular · fecha" y debajo 1-3 viñetas breves con sus hechos clave y, solo si está respaldada, su implicación sectorial. No muestres URLs, enlaces, nombres de medios ni etiquetas de fuente; no inventes noticias ni causalidad.
 - ### Tendencias Estructurales: 5-7 viñetas sobre megatendencias que definen el sector a largo plazo.
 - ### Disruptores e Innovaciones: 3-4 viñetas sobre tecnologías o modelos que están transformando el sector.
 
@@ -1832,7 +1832,7 @@ PROHIBIDO en esta sección: red flags automáticos, actividad insider, tenencias
 - ### Catalizadores (4-6 viñetas): divide en **Corto plazo (0-3m)**, **Medio plazo (3-12m)**, **Largo plazo (+12m)**.
 
 ## Noticias
-- ### Noticias del Fondo y su Temática: hasta 6 noticias materiales con fecha y URL del contexto (últimos 14 días); sin publicidad ni duplicados. Formato: "- **Titular:** impacto 2-3 líneas. ([Fuente](URL))" — usa la URL del contexto si está disponible; si no, "(Fuente)" sin enlace.
+- ### Noticias del Fondo y su Temática: hasta 6 noticias materiales con fecha y URL verificables internamente en el contexto (últimos 14 días); sin publicidad ni duplicados. Cada noticia se presenta como "#### Titular · fecha" y debajo 1-3 viñetas breves con sus hechos clave y, solo si está respaldada, su implicación para el fondo o su exposición. No muestres URLs, enlaces, nombres de medios ni etiquetas de fuente; no inventes noticias ni causalidad.
 - ### Contexto Macro Relevante: 4-5 líneas integrando indicadores FRED (tipos, inflación, yield 10Y).
 
 ## Señales Técnicas
@@ -3951,9 +3951,9 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
-      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v4:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
-      if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v5",()=>marketFeedPanel(env,"news")));
-      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v6",()=>marketFeedPanel(env)));
+      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v5:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
+      if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v6",()=>marketFeedPanel(env,"news")));
+      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v7",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       if (body.panel === "comparison") return panelJson(await comparison(body.symbols.map((s:string)=>s.trim().toUpperCase()),env.FMP_KEY));
       if (body.panel === "correlation") return panelJson(await correlations(body.symbols.map((s:string)=>s.trim().toUpperCase()),typeof body.range==="string"?body.range:"3m"));

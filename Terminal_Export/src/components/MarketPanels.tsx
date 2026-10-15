@@ -1,10 +1,8 @@
 import {usePanelActive} from './KeepPanel';
 import { WatchlistCard } from "./WatchlistCard";
 import type { MarketData } from "@/lib/analyze";
-import { safeNewsHref } from "@/lib/navigation";
 import {NewsCards,TreasuryCard,EarningsList,FeedQuoteStamp} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
-import { cleanHeadline, cleanNewsExcerpt } from "@/lib/editorial";
 import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
 import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, MarketFeed, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
@@ -66,11 +64,7 @@ function Stamp({ at }: { at: string }) {
   return <p className="text-xs text-muted-foreground">Actualizado: {new Date(at).toLocaleString('es-ES')}</p>;
 }
 function Documents({ articles }: { articles: Article[] }) {
-  return <div className="space-y-4">{articles.map(a => <article key={a.url} className="border-b border-border pb-3 last:border-0">
-    <a className="text-sm text-primary hover:underline" href={safeNewsHref(a.url)} target="_blank" rel="noopener noreferrer">{cleanHeadline(a.title)}</a>
-    <p className="text-xs text-muted-foreground mt-1">{a.date || 'Fecha no disponible'}</p>
-    {a.excerpt && <p className="text-sm text-foreground/80 leading-relaxed mt-2">{cleanNewsExcerpt(a.excerpt)}</p>}
-  </article>)}</div>;
+  return <NewsCards articles={articles} compact />;
 }
 export function NewsView({ subject, sector = false }: { subject: string; sector?: boolean }) {
   const state = usePanel<NewsPanel>('news', subject, sector);
@@ -90,10 +84,10 @@ export function FeedView({stocks,data:quotes,onChange,onSelect}:{stocks:string[]
   const data = market.data ?? {groups:[],treasury:[],earnings:[],fetchedAt:''};
   return <div className="space-y-6">
     {(!market.data||market.error) && <Status {...market} />}
-    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div><p className="text-sm">{item.label}</p><FeedQuoteStamp quote={item}/></div><div className="text-right"><p className="text-sm tabular-nums">{feedPrice(item.price, item.symbol.startsWith('^')||item.symbol==='NQ=F'?'pts':item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
+    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div className="min-w-0"><p className="text-sm">{item.label}</p><FeedQuoteStamp quote={item}/></div><div className="text-right shrink-0"><p className="text-xs sm:text-sm tabular-nums whitespace-nowrap">{feedPrice(item.price, item.symbol.startsWith('^')||item.symbol==='NQ=F'?'pts':item.unit??item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
       <div className="space-y-4"><Box title="PORTADAS DEL DÍA">{state.data&&<div className="mb-3"><Stamp at={state.data.fetchedAt}/></div>}{state.data?<NewsCards articles={state.data.headlines}/>:<Status {...state}/>}</Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS">{state.data?<NewsCards articles={state.data.geopolitics??[]} geo/>:<Status {...state}/>}</Box></div>
-      <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]}/></Box>
+      <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]} onSelect={onSelect}/></Box>
     </div>
     {state.error&&state.data&&<Status {...state}/>}
     {data.fetchedAt&&<Stamp at={data.fetchedAt} />}

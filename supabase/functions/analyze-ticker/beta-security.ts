@@ -126,7 +126,7 @@ async function account(body: Body,user: User): Promise<Response> {
     default:throw new BetaError(400,'Operación inválida.');
   }
 }
-const cacheKey=(kind:string,subject:string)=>`v4:${kind}:${subject.trim().toUpperCase()}`;
+const cacheKey=(kind:string,subject:string)=>`v5:${kind}:${subject.trim().toUpperCase()}`;
 export async function readSharedReport(kind:string,subject:string):Promise<any|null>{
   try{const rows=await service(`beta_analysis_cache?cache_key=eq.${encodeURIComponent(cacheKey(kind,subject))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=payload&limit=1`);return rows[0]?.payload??null;}catch{return null;}
 }

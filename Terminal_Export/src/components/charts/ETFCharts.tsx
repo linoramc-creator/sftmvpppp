@@ -1,4 +1,4 @@
-import { safeNewsHref } from "@/lib/navigation";
+import { NewsCards } from "../FeedCards";
 import { useMemo } from "react";
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
@@ -315,20 +315,7 @@ function GeoRiskChart({ risks }: { risks: EtfGeoRisk[] }) {
 // ── News feed ──────────────────────────────────────────────────────────
 
 function NewsList({ items }: { items: EtfNewsItem[] }) {
-  return (
-    <div className="border border-border bg-card divide-y divide-border/30">
-      {items.map((n) => (
-        <a
-          key={n.url}
-          href={safeNewsHref(n.url)} target="_blank" rel="noopener noreferrer"
-          className="block px-3 py-2 hover:bg-primary/3 transition-colors"
-        >
-          <div className="text-[12px] text-foreground/85 leading-snug" style={{ fontFamily: "var(--font-sans)" }}>{n.title}</div>
-          <div className="text-[9px] text-muted-foreground/40 mt-0.5 font-mono">{n.datetime}</div>
-        </a>
-      ))}
-    </div>
-  );
+  return <NewsCards articles={items.map(n=>({...n,date:n.datetime}))} compact />;
 }
 
 function EtfNews({ data }: { data: EtfResponse }) {

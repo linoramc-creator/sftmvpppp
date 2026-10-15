@@ -37,3 +37,12 @@ test('presentation removes providers and citations but retains facts and uncerta
   assert.equal(cleanHeadline('Apple raises guidance - Reuters'), 'Apple raises guidance');
   assert.equal(cleanReportText('## Fuentes\n- Reuters\n- https://example.com\n## Negocio\nGemini es un producto de Google.'), '## Negocio\nGemini es un producto de Google.');
 });
+
+test('legacy article references remain plain text without leaking external destinations', () => {
+  const text='## Noticias\n#### Acuerdo energético · 2026-10-15\n- La inversión anunciada es de 120 millones. ([Fuente](https://www.reuters.com/markets/story))\n- [Demanda de centros de datos][nota]\n[nota]: https://www.cnbc.com/article\n- La previsión sigue sujeta a aprobación (Reuters).\n- Más información: <https://publisher.example/article>\n- <a href="https://publisher.example/other">El volumen creció 8%.</a>\nThomson Reuters mantiene su negocio de información.';
+  const cleaned=cleanReportText(text);
+  assert.ok(!/https?:|href=|\[nota\]:|\(\s*\)/.test(cleaned));
+  assert.ok(cleaned.includes('120 millones'));assert.ok(cleaned.includes('sujeta a aprobación'));assert.ok(cleaned.includes('volumen creció 8%'));
+  assert.ok(cleaned.includes('Thomson Reuters mantiene su negocio'));
+  assert.equal(cleanHeadline('Revisión de previsiones – AP News'),'Revisión de previsiones');
+});

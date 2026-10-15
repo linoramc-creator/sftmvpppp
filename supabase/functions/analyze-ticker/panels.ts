@@ -9,11 +9,12 @@ import { researchBusiness } from './business-research.ts';
 import { tavilyJson,tavilyLimited } from './tavily-client.ts';
 import { groundedNews } from './grounded-news.ts';
 import { treasury, earnings, type TreasuryPoint, type EarningsEvent } from './feed-extras.ts';
+import { summarizeNews } from './news-summary-ai.ts';
 export type { OpinionsPanel } from "./editorial.ts";
 // On-demand panels with bounded per-isolate cache and request coalescing.
 type Row = Record<string, any>;
 export type Point = { date: string; value: number };
-export type Article = { title: string; url: string; source: string; date: string; excerpt?: string; image?: string; publishedAt?: string; access?: NewsAccess };
+export type Article = { title: string; url: string; source: string; date: string; excerpt?: string; image?: string; publishedAt?: string; access?: NewsAccess; keyPoints?: string[] };
 export type Series = { id: string; label: string; unit: string; source: string; points: Point[] };
 export type BondFund = { symbol: string; label: string; price: number | null; change: number | null; date: string | null; currency: string; points: Point[]; distributionYield: number | null; expenseRatio: number | null; assets: number | null };
 export type BondsPanel = { fetchedAt: string; series: Series[]; etfs: BondFund[] };
@@ -95,7 +96,7 @@ export function curateNews(articles: Article[], subject: string, now = Date.now(
   }).slice(0, limit).map(a => ({ ...a, excerpt: (a.excerpt ?? '').replace(/[#*_]/g, '').split(/(?<=[.!?])\s+/).filter(sentence => {
     const words = new Set(sentence.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
     return tokens.some(t => words.has(t)) && sentence.length > 40 && !noise.test(sentence);
-  }).slice(0, 1).join('').slice(0, 360) }));
+  }).slice(0, 2).join(' ').slice(0, 650) || (a.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 650) }));
 }
 async function search(query: string, key: string, news = false, domains: string[] = [], days = 14, maxResults = news ? 5 : 3): Promise<Article[]> {
   if (!key) return [];
@@ -106,7 +107,7 @@ async function search(query: string, key: string, news = false, domains: string[
   });
 }
 export async function newsPanel(subject: string, sector: boolean, env: Env, deps?: Dependencies): Promise<NewsPanel> {
-  return cached(`news:v3:${sector}:${subject}`, 600000, async () => {
+  return cached(`news:v4:${sector}:${subject}`, 600000, async () => {
     const aliases: Record<string, string> = { semiconductores: 'semiconductors semiconductor chips Nvidia Micron AMD Broadcom Intel TSMC ASML memory DRAM NAND', 'inteligencia artificial': 'artificial intelligence AI', 'energía': 'energy oil gas', salud: 'healthcare pharmaceutical biotech', defensa: 'defense aerospace', consumo: 'consumer retail', 'tecnología': 'technology software', bancos: 'banks banking', 'inmobiliario': 'real estate REIT' };
     const topic = sector ? `${subject} ${aliases[subject.toLowerCase()] ?? ''}` : subject;
     const [raw, profile, finnhubNews, fmpNews, massive, rss] = await Promise.all([
@@ -157,13 +158,14 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
       selection(fundTopic, rows, thematic, nasdaqFund?'Nasdaq 100 technology stocks earnings markets':broadUsMarket ? `${subject} S&P 500 ETF` : company, thematic&&!sector?fundRequired:!thematic&&company!==subject?companyRequired:undefined),
       !sector && sectorName ? selection(`${sectorContexts[sectorName] ?? sectorName} ${profile?.assetProfile?.industry ?? ''}`, [], true, broadUsMarket ? 'US stock market' : `${profile?.assetProfile?.industry || sectorName} industry`) : Promise.resolve([]),
     ]);
-    return { fetchedAt: new Date().toISOString(), articles, sectorArticles, sectorName };
+    const summaries = await summarizeNews([...articles, ...sectorArticles], env.GEMINI_API_KEY);
+    return { fetchedAt: new Date().toISOString(), articles: summaries.slice(0, articles.length), sectorArticles: summaries.slice(articles.length), sectorName };
   });
 }
 const FEED_MARKETS: { label: string; items: [string, string][] }[] = [
   { label: 'ÍNDICES', items: [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq Composite'], ['NQ=F', 'Nasdaq 100 · Futuro'], ['^DJI', 'Dow Jones'], ['^KS11', 'KOSPI · Corea del Sur'], ['^N225', 'Nikkei 225 · Japón'], ['^VIX', 'Volatilidad']] },
-  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural']] },
-  { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['BTC-USD', 'Bitcoin']] },
+  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['SI=F', 'Plata'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural'], ['ZW=F', 'Trigo'], ['ZC=F', 'Maíz']] },
+  { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['CHF=X', 'USD/CHF'], ['CAD=X', 'USD/CAD'], ['AUDUSD=X', 'AUD/USD'], ['CNY=X', 'USD/CNY'], ['BTC-USD', 'Bitcoin']] },
   { label: 'ETF PRINCIPALES', items: [['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM'],['VEA','Desarrollados fuera de EE. UU. · VEA'],['VWO','Emergentes · VWO'],['TLT','Tesoro a largo plazo · TLT'],['GLD','Oro · GLD']] },
 ];
 const validFeedImage = photoUrl;
@@ -184,11 +186,11 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
     });
     if (duplicate) return false;
     words.push(current); return true;
-  }).sort(newsOrder).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 280) })),limit);
+  }).sort(newsOrder).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 650) })),limit);
 }
 export async function feedMarketsPanel(env:Env,symbols:string[]=[]):Promise<MarketFeed>{
   const quote=(symbol:string,label:string,extended:boolean)=>cached(`feed-price-v4:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
-  return cached('feed-markets-v4:'+symbols.join(','),45000,async()=>{
+  return cached('feed-markets-v5:'+symbols.join(','),45000,async()=>{
     const [groups,bonds,events,watchlist]=await Promise.all([
       Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>quote(symbol,label,group.label==='ETF PRINCIPALES'||symbol==='NQ=F')))}))),
       cached('feedTreasury-v1',600000,()=>treasury(env.FRED_KEY)),cached('feedEarnings-v1',3600000,()=>earnings(env.FMP_KEY,env.FINNHUB_KEY)),
@@ -223,7 +225,9 @@ export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Pro
     // must not spill into the main feed, including tracking URL variants.
     const selected=curateFeed(headlines.filter(a=>!isGeopolitical(a)));
     const enrich=async (article:Article):Promise<Article>=>({...article,image:validFeedImage(article.image)??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
-    const [covers,geoCovers]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich))]);
+    const [covers,geoCovers,summaries]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich)),summarizeNews([...selected,...geopolitics],env.GEMINI_API_KEY)]);
+    covers.forEach((article,index)=>article.keyPoints=summaries[index].keyPoints);
+    geoCovers.forEach((article,index)=>article.keyPoints=summaries[selected.length+index].keyPoints);
     return { fetchedAt: new Date().toISOString(), groups:market?.groups??[], headlines:covers, geopolitics:geoCovers, treasury:market?.treasury??[], earnings:market?.earnings??[] };
   });
 }

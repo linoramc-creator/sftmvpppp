@@ -3,6 +3,7 @@ import {cached,curateNews,type Article} from './panels.ts';
 import {massiveNews} from './massive-news.ts';
 import {photoUrl} from './news-covers.ts';
 import {newsAccess} from './news-access.ts';
+import {summarizeNews} from './news-summary-ai.ts';
 export type Candle={time:number;open:number;high:number;low:number;close:number;volume:number|null;partial?:boolean};
 export type CandleInterval='1h'|'4h'|'1d'|'1w';
 export type CandleSeries={candles:Candle[];timezone:string;session:string};
@@ -58,7 +59,7 @@ async function brief(symbol:string,description:string,key?:string){
   });
 }
 export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string,modules:string)=>Promise<any>):Promise<AssetSnapshot>{
-  return cached('asset-snapshot-v2:'+symbol,120000,async()=>{
+  return cached('asset-snapshot-v3:'+symbol,120000,async()=>{
     const end=new Date().toISOString().slice(0,10),start=new Date(Date.now()-35*86400000).toISOString().slice(0,10),since=new Date(Date.now()-86400000).toISOString();
     const [chartRaw,profile,marketBars,massive,finnhub,search,company,dailyRaw,weeklyRaw]=await Promise.all([
       get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=60m&includePrePost=false`,{'User-Agent':'Mozilla/5.0'}),
@@ -88,8 +89,8 @@ export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string
     for(const r of search?.news??[])if(finite(r.providerPublishTime)&&r.link)rows.push({title:r.title??'',url:r.link,source:r.publisher??'',date:new Date(r.providerPublishTime*1000).toISOString().slice(0,10),publishedAt:new Date(r.providerPublishTime*1000).toISOString(),image:photoUrl(r.thumbnail?.resolutions?.[0]?.url)});
     const marketDate=(t:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(t);
     const previous=finite(meta.regularMarketTime)?series['1d']?.candles.filter(c=>marketDate(c.time)<marketDate(meta.regularMarketTime*1000)).at(-1):undefined;
-    const [hours,description]=await Promise.all([extendedHours(symbol,env.MASSIVE_API_KEY,summary,meta.regularMarketTime,previous?marketDate(previous.time):undefined),brief(symbol,profile?.assetProfile?.longBusinessSummary??fmp?.description??'',env.GEMINI_API_KEY)]);
+    const [hours,description,news]=await Promise.all([extendedHours(symbol,env.MASSIVE_API_KEY,summary,meta.regularMarketTime,previous?marketDate(previous.time):undefined),brief(symbol,profile?.assetProfile?.longBusinessSummary??fmp?.description??'',env.GEMINI_API_KEY),summarizeNews(lastDayNews(rows,`${symbol} ${name}`),env.GEMINI_API_KEY)]);
     const price=finite(meta.regularMarketPrice)?meta.regularMarketPrice:null;
-    return {symbol,name,description,extendedHours:hours,currency:meta.currency??fmp?.currency??'',exchange:meta.exchangeName??fmp?.exchangeShortName??'',timezone:fromMassive.length?'America/New_York':meta.exchangeTimezoneName??'UTC',price,change:price!==null&&finite(meta.previousClose)&&meta.previousClose>0?(price/meta.previousClose-1)*100:null,series,quoteAt:finite(meta.regularMarketTime)?new Date(meta.regularMarketTime*1000).toISOString():null,candles,session:fromMassive.length?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial',news:lastDayNews(rows,`${symbol} ${name}`),newsSince:since,fetchedAt:new Date().toISOString()};
+    return {symbol,name,description,extendedHours:hours,currency:meta.currency??fmp?.currency??'',exchange:meta.exchangeName??fmp?.exchangeShortName??'',timezone:fromMassive.length?'America/New_York':meta.exchangeTimezoneName??'UTC',price,change:price!==null&&finite(meta.previousClose)&&meta.previousClose>0?(price/meta.previousClose-1)*100:null,series,quoteAt:finite(meta.regularMarketTime)?new Date(meta.regularMarketTime*1000).toISOString():null,candles,session:fromMassive.length?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial',news,newsSince:since,fetchedAt:new Date().toISOString()};
   });
 }

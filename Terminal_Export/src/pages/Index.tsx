@@ -1,7 +1,6 @@
 import ExtendedHours from '@/components/ExtendedHours';
 import KeepPanel from '@/components/KeepPanel';
 import { ReportLoading } from "@/components/ReportLoading";
-import { safeNewsHref } from "@/lib/navigation";
 import { accountApi } from "@/lib/beta-api";
 import { useProfile } from "@/components/AuthGate";
 import { cleanReportText } from "@/lib/editorial";
@@ -1939,14 +1938,7 @@ function renderInline(text: string): React.ReactNode {
   const withLinks = text.split(/(\[[^\]]+\]\([^)]+\))/g);
   return withLinks.map((seg, si) => {
     const linkMatch = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (linkMatch) {
-      return (
-        <a key={si} href={safeNewsHref(linkMatch[2])} target="_blank" rel="noopener noreferrer"
-           className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors">
-          {linkMatch[1]}
-        </a>
-      );
-    }
+    if (linkMatch) seg = linkMatch[1];
     const parts = seg.split(/(\*\*[^*]+\*\*)/g);
     return parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {

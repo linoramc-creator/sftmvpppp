@@ -36,3 +36,13 @@ test('overnight futures exclude their unfinished daily candle from the prior-clo
  const r=normalizeFeedQuote('NQ=F','Nasdaq future',data,null,Date.parse('2026-10-14T05:01Z'));
  assert.ok(Math.abs(r.change!-2)<1e-8);assert.equal(r.reference,'previous-close');
 });
+test('commodity contract units preserve cents and never relabel an unexpected currency',()=>{
+ const data=raw('2026-10-14T16:00Z',678.5,['2026-10-13T13:30Z','2026-10-14T13:30Z'],[670,678.5]);
+ data.chart.result[0].meta.currency='USX';
+ const wheat=normalizeFeedQuote('ZW=F','Trigo',data,null,Date.parse('2026-10-14T17:00Z'));
+ assert.equal(wheat.price,678.5);assert.equal(wheat.currency,'USX');assert.equal(wheat.unit,'¢/bushel');
+ data.chart.result[0].meta.currency='USD';
+ assert.equal(normalizeFeedQuote('SI=F','Plata',data).unit,'USD/oz t');
+ data.chart.result[0].meta.currency='EUR';
+ assert.equal(normalizeFeedQuote('SI=F','Plata',data).unit,undefined);
+});
