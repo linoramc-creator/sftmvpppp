@@ -1,7 +1,7 @@
 import {extendedHours,type ExtendedHours} from './extended-hours.ts';
 import {cached,curateNews,type Article} from './panels.ts';
 import {massiveNews} from './massive-news.ts';
-import {photoUrl} from './news-covers.ts';
+import {photoUrl,articleCover} from './news-covers.ts';
 import {newsAccess} from './news-access.ts';
 import {summarizeNews} from './news-summary-ai.ts';
 export type Candle={time:number;open:number;high:number;low:number;close:number;volume:number|null;partial?:boolean};
@@ -51,6 +51,11 @@ export function lastDayNews(rows:Article[],subject:string,now=Date.now()):Articl
   const dated=rows.filter(a=>!promotional.test(a.title)&&a.publishedAt&&Number.isFinite(Date.parse(a.publishedAt))&&Date.parse(a.publishedAt)>=now-86400000&&Date.parse(a.publishedAt)<=now);
   return curateNews(dated,subject,now,8,false,2).map(a=>({...a,access:newsAccess(a.url)}));
 }
+export async function assetNewsCovers(rows:Article[],cover:(url:string)=>Promise<string|undefined>=url=>cached('cover:'+url,6*3600000,()=>articleCover(url))):Promise<Article[]>{
+  // The selected list is bounded to eight stories. Publisher previews run in
+  // parallel with the summary and retain the shared six-hour cover cache.
+  return await Promise.all(rows.map(async article=>({...article,image:photoUrl(article.image)??photoUrl(await cover(article.url))})));
+}
 async function brief(symbol:string,description:string,key?:string){
   const text=description.trim().slice(0,4500);if(!text)return '';
   return cached('asset-brief:'+symbol,86400000,async()=>{
@@ -89,7 +94,9 @@ export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string
     for(const r of search?.news??[])if(finite(r.providerPublishTime)&&r.link)rows.push({title:r.title??'',url:r.link,source:r.publisher??'',date:new Date(r.providerPublishTime*1000).toISOString().slice(0,10),publishedAt:new Date(r.providerPublishTime*1000).toISOString(),image:photoUrl(r.thumbnail?.resolutions?.[0]?.url)});
     const marketDate=(t:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(t);
     const previous=finite(meta.regularMarketTime)?series['1d']?.candles.filter(c=>marketDate(c.time)<marketDate(meta.regularMarketTime*1000)).at(-1):undefined;
-    const [hours,description,news]=await Promise.all([extendedHours(symbol,env.MASSIVE_API_KEY,summary,meta.regularMarketTime,previous?marketDate(previous.time):undefined),brief(symbol,profile?.assetProfile?.longBusinessSummary??fmp?.description??'',env.GEMINI_API_KEY),summarizeNews(lastDayNews(rows,`${symbol} ${name}`),env.GEMINI_API_KEY)]);
+    const selected=lastDayNews(rows,`${symbol} ${name}`);
+    const [hours,description,summaries,covers]=await Promise.all([extendedHours(symbol,env.MASSIVE_API_KEY,summary,meta.regularMarketTime,previous?marketDate(previous.time):undefined),brief(symbol,profile?.assetProfile?.longBusinessSummary??fmp?.description??'',env.GEMINI_API_KEY),summarizeNews(selected,env.GEMINI_API_KEY),assetNewsCovers(selected)]);
+    const news=summaries.map((article,index)=>({...article,image:covers[index].image}));
     const price=finite(meta.regularMarketPrice)?meta.regularMarketPrice:null;
     return {symbol,name,description,extendedHours:hours,currency:meta.currency??fmp?.currency??'',exchange:meta.exchangeName??fmp?.exchangeShortName??'',timezone:fromMassive.length?'America/New_York':meta.exchangeTimezoneName??'UTC',price,change:price!==null&&finite(meta.previousClose)&&meta.previousClose>0?(price/meta.previousClose-1)*100:null,series,quoteAt:finite(meta.regularMarketTime)?new Date(meta.regularMarketTime*1000).toISOString():null,candles,session:fromMassive.length?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial',news,newsSince:since,fetchedAt:new Date().toISOString()};
   });

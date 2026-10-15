@@ -16,7 +16,7 @@ export function FeedQuoteStamp({quote}:{quote:FeedQuote}){
 export function NewsCover({article,compact=false}:{article:Article;compact?:boolean}){
   const [failed,setFailed]=useState(false);
   const usable=photoUrl(article.image)&&!failed;
-  return usable?<img src={article.image} alt="" className={compact?'w-24 h-[4.5rem] sm:w-36 sm:h-24 shrink-0 rounded object-cover bg-muted':'aspect-[16/9] w-full object-cover bg-muted'} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<400||img.naturalHeight<220||img.naturalWidth/img.naturalHeight<1.25||img.naturalWidth/img.naturalHeight>2.6)setFailed(true);}}/>:null;
+  return usable?<img src={article.image} alt="" className={compact?'w-full h-24 mb-3 sm:w-36 sm:mb-0 shrink-0 rounded object-cover bg-muted':'aspect-[16/9] w-full object-cover bg-muted'} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<400||img.naturalHeight<220||img.naturalWidth/img.naturalHeight<1.25||img.naturalWidth/img.naturalHeight>2.6)setFailed(true);}}/>:null;
 }
 export function NewsCards({articles,geo=false,compact=false}:{articles:Article[];geo?:boolean;compact?:boolean}){
   return articles.length?<div className={compact?'grid xl:grid-cols-2 gap-3':'grid md:grid-cols-2 xl:grid-cols-3 gap-4'}>{articles.map(article=>{
@@ -24,7 +24,7 @@ export function NewsCards({articles,geo=false,compact=false}:{articles:Article[]
     const normalized=(text:string)=>text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
     const points=newsKeyPoints(article).map(cleanNewsExcerpt).filter(point=>point&&normalized(point)!==normalized(headline));
     const published=article.publishedAt&&Number.isFinite(Date.parse(article.publishedAt))?new Date(article.publishedAt).toLocaleString('es-ES'):article.date;
-    return <article key={article.url} className={`border border-border overflow-hidden rounded-md bg-background/30 ${compact?'flex items-start gap-3 sm:gap-4 p-3 sm:p-4':''}`}>
+    return <article key={article.url} className={`border border-border overflow-hidden rounded-md bg-background/30 ${compact?'sm:flex sm:items-start sm:gap-4 p-3 sm:p-4':''}`}>
       <NewsCover key={article.image??article.url} article={article} compact={compact}/>
       <div className={compact?'min-w-0 flex-1':'p-4'}>
         {published&&<p className="text-[10px] text-muted-foreground mb-2">{published}</p>}

@@ -19,3 +19,21 @@ test('shared cache freshness, stale refresh and hard age limit',async()=>{
   assert.equal(calls,3);assert.equal(background,undefined);
  }finally{globalThis.fetch=original;if(oldDeno===undefined)delete runtime.Deno;else runtime.Deno=oldDeno;if(oldEdge===undefined)delete runtime.EdgeRuntime;else runtime.EdgeRuntime=oldEdge;}
 });
+
+test('geopolitics-only selections are persisted but a complete news outage preserves the cache',async()=>{
+ const runtime=globalThis as any,original=globalThis.fetch,oldDeno=runtime.Deno;
+ const writes:any[]=[];
+ runtime.Deno={env:{get:(key:string)=>key==='SUPABASE_URL'?'https://test.supabase.co':'test-only'}};
+ globalThis.fetch=async(_input,init)=>{
+  if(init?.method==='POST'){writes.push(JSON.parse(String(init.body)));return new Response(null,{status:204});}
+  return Response.json([]);
+ };
+ const fetchedAt=new Date().toISOString();
+ try{
+  const politics={fetchedAt,headlines:[],geopolitics:[{title:'Confirmed ceasefire talks'}]};
+  assert.deepEqual(await sharedFeed('feed-news-v6',async()=>politics),politics);
+  assert.equal(writes.length,1);assert.equal(writes[0].cache_key,'feed-news-v6');assert.deepEqual(writes[0].payload,politics);
+  await sharedFeed('feed-news-v6',async()=>({fetchedAt,headlines:[],geopolitics:[]}));
+  assert.equal(writes.length,1);
+ }finally{globalThis.fetch=original;if(oldDeno===undefined)delete runtime.Deno;else runtime.Deno=oldDeno;}
+});

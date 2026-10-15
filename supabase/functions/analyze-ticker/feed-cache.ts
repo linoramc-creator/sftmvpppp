@@ -12,7 +12,7 @@ export async function sharedFeed<T extends {fetchedAt:string}>(key:string,create
     const task=create().then(async payload=>{
       // Do not replace useful cached data with a total provider outage.
       const p=payload as any;
-      const usable=key.includes('markets')?p.groups?.some((g:any)=>g.items?.some((q:any)=>q.price!==null)):p.headlines?.length>0;
+      const usable=key.includes('markets')?p.groups?.some((g:any)=>g.items?.some((q:any)=>q.price!==null)):p.headlines?.length>0||p.geopolitics?.length>0;
       if(usable)try{await fetch(endpoint+'?on_conflict=cache_key',{method:'POST',headers:{...headers,Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({cache_key:key,payload,expires_at:new Date(Date.parse(payload.fetchedAt)+ttl).toISOString()}),signal:AbortSignal.timeout(2500)});}catch{/* caching must not fail the feed */}
       return payload;
     }).finally(()=>active.delete(key));active.set(key,task);return task;

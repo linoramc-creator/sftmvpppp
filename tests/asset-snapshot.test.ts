@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {chartCandles,hourlyToFourHours,lastDayNews} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
+import {chartCandles,hourlyToFourHours,lastDayNews,assetNewsCovers} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
 import {balanceAccess,newsAccess} from '../supabase/functions/analyze-ticker/news-access.ts';
 import {photoUrl,extractCover} from '../supabase/functions/analyze-ticker/news-covers.ts';
 test('four-hour candles preserve OHLC and volume without crossing sessions',()=>{
@@ -19,8 +19,19 @@ test('open access target preserves top paid story without inventing access guara
 });
 test('wrapped logos and generic article thumbnails are rejected',()=>{
  for(const url of ['https://example.com/default53.jpg','https://example.com/images/logos/company.png','https://example.com/photo?url=https%3A%2F%2Fcdn.test%2Fcompany-logo.jpg','https://example.com/avatar123.jpg'])assert.equal(photoUrl(url),undefined);
+ const yahooBrand='https://s.yimg.com/rz/stage/p/yahoo_finance_en-US_h_p_finance_2.png';
+ for(const url of [yahooBrand,'https://cdn.example.com/yahoo_finance_en-US_h_p_finance_2.png','https://s.yimg.com/resize?url='+encodeURIComponent(yahooBrand),'https://cdn.example.com/preview?image='+encodeURIComponent(encodeURIComponent(yahooBrand))])assert.equal(photoUrl(url),undefined);
+ assert.ok(photoUrl('https://s.yimg.com/ny/api/res/1.2/photo-quality/finance-photo.jpg'));
+ assert.ok(photoUrl('https://media.zenfs.com/en/yahoo_finance/markets-2026-photo.jpg'));
  assert.ok(photoUrl('https://www.reuters.com/resizer/markets-photo.jpg'));
  assert.equal(extractCover('<meta property="og:image:alt" content="Company logo"><meta property="og:image" content="https://example.com/photo.jpg">','https://example.com'),undefined);
+});
+
+test('asset stories replace branding with an actual article cover and leave unavailable photos absent',async()=>{
+ const base={title:'Company reports earnings',source:'test',date:'2026-10-15'},urls:string[]=[];
+ const rows=[{...base,url:'https://finance.yahoo.com/news/story',image:'https://s.yimg.com/rz/stage/p/yahoo_finance_en-US_h_p_finance_2.png'},{...base,url:'https://www.reuters.com/story',image:'https://www.reuters.com/photos/article-photo.jpg'},{...base,url:'https://www.cnbc.com/blocked'}];
+ const result=await assetNewsCovers(rows,async url=>{urls.push(url);return url.includes('yahoo.com')?'https://media.zenfs.com/en/markets/article-photo.jpg':undefined;});
+ assert.equal(result[0].image,'https://media.zenfs.com/en/markets/article-photo.jpg');assert.equal(result[1].image,rows[1].image);assert.equal(result[2].image,undefined);assert.deepEqual(urls,[rows[0].url,rows[2].url]);
 });
 
 test('native hourly, daily and weekly candles preserve OHLC without inventing missing bars',()=>{

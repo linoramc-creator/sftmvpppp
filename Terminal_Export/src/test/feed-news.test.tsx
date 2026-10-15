@@ -34,6 +34,15 @@ it('hides a failed cover while retaining the factual summary',()=>{
  expect(screen.getByText('La inversión asciende a 100 millones.')).toBeVisible();
 });
 
+it('gives compact news full-width text on a narrow screen and a side thumbnail from sm',()=>{
+ const {container}=render(<NewsCards articles={[story]} compact/>);
+ const card=container.querySelector('article')!,cover=card.querySelector('img')!;
+ expect(card).not.toHaveClass('flex');
+ expect(card).toHaveClass('sm:flex');
+ expect(cover).toHaveClass('w-full','h-24','sm:w-36');
+ expect(screen.getByRole('list',{name:'Puntos clave'})).toBeVisible();
+});
+
 it('opens an earnings asset through the same selection handler as the watchlist',async()=>{
  api.mockImplementation(async(_url:string,init:RequestInit)=>{
   const panel=JSON.parse(init.body as string).panel;

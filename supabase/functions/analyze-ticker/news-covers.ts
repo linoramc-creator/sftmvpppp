@@ -9,6 +9,9 @@ export function photoUrl(value:unknown):string|undefined {
     // Providers often wrap the original image inside an encoded query string.
     let decoded=u.href;for(let i=0;i<3;i++){try{const next=decodeURIComponent(decoded);if(next===decoded)break;decoded=next;}catch{break;}}
     if(/logo|favicon|placeholder|default[_\/-]?(?:article|image|\d)|brand[_\/-]|apple-touch-icon|sprite|avatar|masthead|cnbc[^/]*share|social[_-](?:share|card)|profile[_\/-]?image|\/icons?\/|\.svg(?:[?#]|$)/i.test(decoded))return;
+    // Yahoo's fallback wordmarks do not contain "logo" and can arrive inside
+    // resized/encoded image URLs. Match the branding path/name, not all YF/CDNs.
+    if(/\/rz\/stage\/p\/yahoo[^/?#]*|yahoo[_-]finance[_-][^/?#]*[_-][hv][_-]p[_-]finance/i.test(decoded))return;
     return u.href;
   }catch{return;}
 }
