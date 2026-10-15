@@ -3951,9 +3951,9 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
-      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v5:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
+      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v6:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
       if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v6",()=>marketFeedPanel(env,"news")));
-      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v7",()=>marketFeedPanel(env)));
+      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v8",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       if (body.panel === "comparison") return panelJson(await comparison(body.symbols.map((s:string)=>s.trim().toUpperCase()),env.FMP_KEY));
       if (body.panel === "correlation") return panelJson(await correlations(body.symbols.map((s:string)=>s.trim().toUpperCase()),typeof body.range==="string"?body.range:"3m"));

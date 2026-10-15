@@ -10,6 +10,20 @@ export type CandleSeries={candles:Candle[];timezone:string;session:string};
 export type AssetSnapshot={symbol:string;name:string;description:string;currency:string;exchange:string;timezone:string;price:number|null;change:number|null;quoteAt:string|null;extendedHours?:ExtendedHours;candles:Candle[];series?:Partial<Record<CandleInterval,CandleSeries>>;session:string;news:Article[];newsSince:string;fetchedAt:string};
 type Env={MASSIVE_API_KEY?:string;FINNHUB_KEY:string;FMP_KEY:string;GEMINI_API_KEY?:string};
 const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
+export function previousSessionCandle(candles:Candle[],quoteAt:number,timezone='America/New_York'):Candle|undefined{
+  if(!finite(quoteAt)||quoteAt<=0)return;
+  try{
+    const sessionDate=(time:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(time);
+    const date=sessionDate(quoteAt);
+    return candles.filter(c=>finite(c.time)&&c.time<quoteAt&&finite(c.close)&&c.close>0&&sessionDate(c.time)<date).sort((a,b)=>a.time-b.time).at(-1);
+  }catch{return;}
+}
+export function selectFourHourCandles(extended:Candle[],regular:Candle[]):{candles:Candle[];extended:boolean}{
+  // Use a complete provider series, never splice different session anchors.
+  // Some plans stop at yesterday; a newer regular-session series takes priority.
+  const useExtended=extended.length>0&&(!regular.length||extended.at(-1)!.time>=regular.at(-1)!.time);
+  return {candles:useExtended?extended:regular,extended:useExtended};
+}
 async function get(url:string,headers:Record<string,string>={}){try{const r=await fetch(url,{headers,redirect:'error',signal:AbortSignal.timeout(8000)});return r.ok?await r.json():null;}catch{return null;}}
 export function validCandle(c:Candle){return [c.time,c.open,c.high,c.low,c.close].every(finite)&&c.time>0&&c.time<=Date.now()+60000&&c.low>0&&c.high>=Math.max(c.open,c.close)&&c.low<=Math.min(c.open,c.close)&&c.high>=c.low;}
 export function chartCandles(chart:any,duration:number):Candle[]{
@@ -64,7 +78,7 @@ async function brief(symbol:string,description:string,key?:string){
   });
 }
 export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string,modules:string)=>Promise<any>):Promise<AssetSnapshot>{
-  return cached('asset-snapshot-v3:'+symbol,120000,async()=>{
+  return cached('asset-snapshot-v4:'+symbol,120000,async()=>{
     const end=new Date().toISOString().slice(0,10),start=new Date(Date.now()-35*86400000).toISOString().slice(0,10),since=new Date(Date.now()-86400000).toISOString();
     const [chartRaw,profile,marketBars,massive,finnhub,search,company,dailyRaw,weeklyRaw]=await Promise.all([
       get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=60m&includePrePost=false`,{'User-Agent':'Mozilla/5.0'}),
@@ -80,24 +94,26 @@ export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string
     const chart=chartRaw?.chart?.result?.[0],meta=chart?.meta??{},fmp=Array.isArray(company)?company[0]:null;
     const name=profile?.quoteType?.longName??meta.longName??meta.shortName??fmp?.companyName??search?.quotes?.[0]?.longname??symbol;
     const fromMassive:Candle[]=(marketBars?.results??[]).map((r:any)=>({time:r.t,open:r.o,high:r.h,low:r.l,close:r.c,volume:finite(r.v)?r.v:null,partial:r.t+14400000>Date.now()})).filter((c:Candle)=>validCandle(c)&&c.time>=Date.parse(start));
-    const candles=fromMassive.length?fromMassive:hourlyToFourHours(chart);
+    const chosen=selectFourHourCandles(fromMassive,hourlyToFourHours(chart));
+    const candles=chosen.candles;
     const regular='Sesión regular · cotizaciones ajustadas por desdoblamientos';
     const toSeries=(raw:any,duration:number):CandleSeries=>{const c=raw?.chart?.result?.[0];return {candles:chartCandles(c,duration),timezone:c?.meta?.exchangeTimezoneName??'UTC',session:regular};};
     const series:AssetSnapshot['series']={
       '1h':toSeries(chartRaw,3600000),
-      '4h':{candles,timezone:fromMassive.length?'America/New_York':meta.exchangeTimezoneName??'UTC',session:fromMassive.length?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial'},
+      '4h':{candles,timezone:chosen.extended?'America/New_York':meta.exchangeTimezoneName??'UTC',session:chosen.extended?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial'},
       '1d':toSeries(dailyRaw,86400000),
       '1w':toSeries(weeklyRaw,7*86400000),
     };
     const rows:Article[]=[...massive];
     for(const r of Array.isArray(finnhub)?finnhub:[])if(finite(r.datetime)&&r.url)rows.push({title:r.headline??'',url:r.url,source:r.source??'',date:new Date(r.datetime*1000).toISOString().slice(0,10),publishedAt:new Date(r.datetime*1000).toISOString(),excerpt:r.summary??'',image:photoUrl(r.image)});
     for(const r of search?.news??[])if(finite(r.providerPublishTime)&&r.link)rows.push({title:r.title??'',url:r.link,source:r.publisher??'',date:new Date(r.providerPublishTime*1000).toISOString().slice(0,10),publishedAt:new Date(r.providerPublishTime*1000).toISOString(),image:photoUrl(r.thumbnail?.resolutions?.[0]?.url)});
-    const marketDate=(t:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(t);
-    const previous=finite(meta.regularMarketTime)?series['1d']?.candles.filter(c=>marketDate(c.time)<marketDate(meta.regularMarketTime*1000)).at(-1):undefined;
+    const marketZone=meta.exchangeTimezoneName??'America/New_York';
+    const marketDate=(t:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:marketZone,year:'numeric',month:'2-digit',day:'2-digit'}).format(t);
+    const previous=finite(meta.regularMarketTime)?previousSessionCandle(series['1d']?.candles??[],meta.regularMarketTime*1000,marketZone):undefined;
     const selected=lastDayNews(rows,`${symbol} ${name}`);
     const [hours,description,summaries,covers]=await Promise.all([extendedHours(symbol,env.MASSIVE_API_KEY,summary,meta.regularMarketTime,previous?marketDate(previous.time):undefined),brief(symbol,profile?.assetProfile?.longBusinessSummary??fmp?.description??'',env.GEMINI_API_KEY),summarizeNews(selected,env.GEMINI_API_KEY),assetNewsCovers(selected)]);
     const news=summaries.map((article,index)=>({...article,image:covers[index].image}));
     const price=finite(meta.regularMarketPrice)?meta.regularMarketPrice:null;
-    return {symbol,name,description,extendedHours:hours,currency:meta.currency??fmp?.currency??'',exchange:meta.exchangeName??fmp?.exchangeShortName??'',timezone:fromMassive.length?'America/New_York':meta.exchangeTimezoneName??'UTC',price,change:price!==null&&finite(meta.previousClose)&&meta.previousClose>0?(price/meta.previousClose-1)*100:null,series,quoteAt:finite(meta.regularMarketTime)?new Date(meta.regularMarketTime*1000).toISOString():null,candles,session:fromMassive.length?'Incluye negociación fuera de la sesión regular':'Sesión regular · última vela de cada sesión puede ser parcial',news,newsSince:since,fetchedAt:new Date().toISOString()};
+    return {symbol,name,description,extendedHours:hours,currency:meta.currency??fmp?.currency??'',exchange:meta.exchangeName??fmp?.exchangeShortName??'',timezone:meta.exchangeTimezoneName??'UTC',price,change:price!==null&&previous?(price/previous.close-1)*100:null,series,quoteAt:finite(meta.regularMarketTime)?new Date(meta.regularMarketTime*1000).toISOString():null,candles,session:series['4h']!.session,news,newsSince:since,fetchedAt:new Date().toISOString()};
   });
 }

@@ -1,51 +1,47 @@
-import {ExtendedHoursCards} from './ExtendedHours';
 import AssetContext from './AssetContext';
-import {useEffect,useMemo,useState} from 'react';
-import {ArrowLeft,ArrowUpRight,RefreshCw,Activity,Maximize2,Minimize2,Plus,Minus} from 'lucide-react';
+import AssetCandles from './AssetCandles';
+import AssetOverview from './AssetOverview';
+import {useEffect,useRef,useState} from 'react';
+import {ArrowLeft,RefreshCw} from 'lucide-react';
 import {authenticatedFetch} from '@/lib/beta-api';
 import {NewsCards} from './FeedCards';
-import type {AssetSnapshot,CandleInterval} from '../../../supabase/functions/analyze-ticker/asset-snapshot';
+import type {AssetSnapshot} from '../../../supabase/functions/analyze-ticker/asset-snapshot';
+
 const memory=new Map<string,AssetSnapshot>();
-const number=(n:number|null|undefined,digits=2)=>n==null?'—':n.toLocaleString('es-ES',{maximumFractionDigits:digits});
-function Candles({data}:{data:AssetSnapshot}){
-  const [interval,setInterval]=useState<CandleInterval>('4h'),[window,setWindow]=useState(30),[active,setActive]=useState<number|null>(null),[expanded,setExpanded]=useState(false),[zoom,setZoom]=useState(1);
-  useEffect(()=>{if(!expanded)return;const previous=document.body.style.overflow;document.body.style.overflow='hidden';const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')setExpanded(false);};document.addEventListener('keydown',escape);return()=>{document.body.style.overflow=previous;document.removeEventListener('keydown',escape);};},[expanded]);
-  const series=data.series?.[interval]??{candles:interval==='4h'?data.candles:[],timezone:data.timezone,session:data.session};
-  const intervals:Record<CandleInterval,string>={'1h':'1H','4h':'4H','1d':'1 DÍA','1w':'1 SEMANA'};
-  const ranges=interval==='1w'?[365,730,1825]:interval==='1d'?[90,365,730]:[7,30];
-  const rangeLabel=(days:number)=>({7:'1 SEMANA',30:'1 MES',90:'3 MESES',365:'1 AÑO',730:'2 AÑOS',1825:'5 AÑOS'}[days]);
-  const rows=useMemo(()=>{const end=series.candles.at(-1)?.time??Date.now();const all=series.candles.filter(c=>c.time>=end-window*86400000);return all.slice(-Math.max(1,Math.ceil(all.length/zoom)));},[series.candles,window,zoom]);
-  const selected=rows.find(c=>c.time===active)??rows.at(-1);
-  const date=(time:number)=>new Date(time).toLocaleString('es-ES',{timeZone:series.timezone,month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-  const min=Math.min(...rows.map(c=>c.low)),max=Math.max(...rows.map(c=>c.high)),pad=Math.max((max-min)*.08,max*.002),low=min-pad,high=max+pad;
-  const y=(v:number)=>28+(high-v)/(high-low)*265;
-  const step=880/Math.max(rows.length,1),x=(i:number)=>24+step*(i+.5),width=Math.max(1,Math.min(16,step*.65));
-  const maxVolume=Math.max(1,...rows.map(c=>c.volume??0));
-  return <section aria-label="Gráfico del activo" className={`${expanded?'fixed inset-2 sm:inset-5 z-50 overflow-y-auto shadow-2xl':'relative'} rounded-lg border border-border bg-card p-4 sm:p-6`}><div className="flex flex-wrap justify-between gap-3 items-center"><div><h2 className="text-sm font-semibold">PRECIO · VELAS {intervals[interval]}</h2><p className="text-[11px] text-muted-foreground mt-1">{data.currency} · {series.timezone}</p></div><div className="flex flex-wrap gap-1 items-center">{(Object.keys(intervals) as CandleInterval[]).map(value=><button key={value} aria-label={`Velas ${intervals[value]}`} aria-pressed={interval===value} className={`text-xs rounded px-3 py-2 ${interval===value?'bg-primary/15 text-primary':'text-muted-foreground hover:bg-muted'}`} onClick={()=>{setInterval(value);setWindow(value==='1w'?1825:value==='1d'?365:30);setZoom(1);setActive(null);}}>{intervals[value]}</button>)}<button aria-label={expanded?'Reducir gráfico':'Ampliar gráfico'} aria-expanded={expanded} className="p-2 rounded border border-border ml-2" onClick={()=>setExpanded(v=>!v)}>{expanded?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button></div></div>
-    <div className="flex flex-wrap justify-between gap-3 mt-4"><div className="flex gap-1">{ranges.map(days=><button key={days} aria-pressed={window===days} className={`text-xs rounded px-3 py-2 ${window===days?'bg-muted text-foreground':'text-muted-foreground hover:bg-muted'}`} onClick={()=>{setWindow(days);setZoom(1);setActive(null);}}>{rangeLabel(days)}</button>)}</div><div className="flex gap-2 items-center text-xs"><button aria-label="Alejar velas" disabled={zoom<=1} className="p-2 border border-border rounded disabled:opacity-30" onClick={()=>setZoom(z=>Math.max(1,z/2))}><Minus size={14}/></button><span>{zoom}×</span><button aria-label="Acercar velas" disabled={zoom>=8||rows.length<8} className="p-2 border border-border rounded disabled:opacity-30" onClick={()=>setZoom(z=>Math.min(8,z*2))}><Plus size={14}/></button></div></div>
-    {selected&&<div className="flex flex-wrap gap-x-5 gap-y-1 mt-5 text-xs tabular-nums"><span className="text-muted-foreground">{date(selected.time)}{selected.partial?' · parcial':''}</span>{[['A',selected.open],['Máx',selected.high],['Mín',selected.low],['C',selected.close]].map(([label,v])=><span key={label}>{label} <b>{number(v as number)}</b></span>)}<span>Vol. {number(selected.volume,0)}</span></div>}
-    {rows.length?<div className="overflow-x-auto mt-3"><svg viewBox="0 0 1000 410" className={`w-full min-w-[600px] ${expanded?'min-h-[55vh]':''}`} aria-label={`Velas japonesas ${intervals[interval]} de ${data.symbol}. Usa Tab para consultar cada vela.`}>
-      {[0,.25,.5,.75,1].map(n=>{const value=low+(high-low)*n;return <g key={n}><line x1={24} x2={914} y1={y(value)} y2={y(value)} stroke="#22302c" strokeDasharray="3 5"/><text x={925} y={y(value)+4} fill="#8d9b96" fontSize={11}>{number(value)}</text></g>;})}
-      {rows.map((c,i)=>{const color=c.close>=c.open?'#21d899':'#f87171';return <g key={c.time} tabIndex={0} role="button" aria-label={`${date(c.time)}, apertura ${number(c.open)}, máximo ${number(c.high)}, mínimo ${number(c.low)}, cierre ${number(c.close)}`} onFocus={()=>setActive(c.time)} onMouseEnter={()=>setActive(c.time)} onClick={()=>setActive(c.time)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')setActive(c.time);}} className="outline-none">
-        <rect x={x(i)-step/2} y={20} width={step} height={340} fill={selected?.time===c.time?'#ffffff08':'transparent'}/><line x1={x(i)} x2={x(i)} y1={y(c.high)} y2={y(c.low)} stroke={color}/><rect x={x(i)-width/2} y={y(Math.max(c.open,c.close))} width={width} height={Math.max(1,Math.abs(y(c.open)-y(c.close)))} fill={color} opacity={c.partial ? .75 : 1}/><rect x={x(i)-width/2} y={365-(c.volume??0)/maxVolume*45} width={width} height={(c.volume??0)/maxVolume*45} fill={color} opacity={.4}/>
-        <title>{date(c.time)} · A {number(c.open)} · Máx {number(c.high)} · Mín {number(c.low)} · C {number(c.close)}</title>
-      </g>;})}
-      {rows.filter((_,i)=>i%Math.max(1,Math.floor(rows.length/5))===0).map(c=>{const i=rows.indexOf(c);return <text key={c.time} x={x(i)} y={391} textAnchor="middle" fill="#8d9b96" fontSize={10}>{new Date(c.time).toLocaleDateString('es-ES',{timeZone:series.timezone,month:'short',day:'2-digit',...(window>90?{year:'2-digit' as const}:{})})}</text>;})}
-      <text x={24} y={319} fill="#8d9b96" fontSize={9}>VOLUMEN</text>
-    </svg></div>:<p className="py-16 text-center text-muted-foreground text-sm">No hay velas disponibles para este intervalo en este momento.</p>}
-    <p className="text-[11px] text-muted-foreground mt-2">{series.session}. Cada vela representa {interval==='1h'?'una hora':interval==='4h'?'cuatro horas':interval==='1d'?'una sesión diaria':'una semana'}; no se dibujan períodos sin negociación. {rows.length>0&&`Última vela: ${date(rows.at(-1)!.time)}.`}</p>
-  </section>;
-}
 export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{symbol:string;stocks:string[];onSelect:(s:string)=>void;onBack:()=>void;onAnalyze:(s:string)=>void}){
-  const [data,setData]=useState<AssetSnapshot|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0);
-  useEffect(()=>{let active=true;const previous=memory.get(symbol);setData(previous??null);setError('');
-    if(previous&&Date.now()-Date.parse(previous.fetchedAt)<120000&&retry===0){setBusy(false);return;}
-    setBusy(true);authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({panel:'assetSnapshot',subject:symbol}),signal:AbortSignal.timeout(60000)}).then(async r=>{if(!r.ok)throw Error('No se ha podido actualizar la ficha.');return r.json();}).then(d=>{if(active){if(memory.size>=30)memory.delete(memory.keys().next().value!);memory.set(symbol,d);setData(d);}}).catch(()=>{if(active)setError('No se ha podido actualizar. Vuelve a intentarlo.');}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};
-  },[symbol,retry]);
-  return <main className="max-w-7xl mx-auto px-4 py-6 space-y-5"><div className="flex flex-wrap justify-between gap-4"><button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary" onClick={onBack}><ArrowLeft size={16}/>Volver al feed</button><div className="flex gap-2 items-center"><label className="sr-only" htmlFor="watch-asset">Activo de la watchlist</label><select id="watch-asset" value={symbol} onChange={e=>onSelect(e.target.value)} className="bg-card border border-border px-3 py-2 text-xs rounded">{[...new Set([symbol,...stocks])].map(s=><option key={s}>{s}</option>)}</select><button disabled={busy} aria-label="Actualizar ficha" className="p-2 border border-border rounded disabled:opacity-40" onClick={()=>setRetry(n=>n+1)}><RefreshCw size={16} className={busy?'motion-safe:animate-spin':''}/></button></div></div>
-    <section className="rounded-lg border border-primary/20 bg-gradient-to-br from-primary/5 to-card p-6"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs tracking-widest text-primary mb-2">SEGUIMIENTO · {symbol}</p><h1 className="text-2xl font-semibold">{data?.name??symbol}</h1><p className="text-xs text-muted-foreground mt-2">{data?.exchange}</p></div>{data?.price!=null&&<div className="text-right"><p className="text-3xl font-semibold tabular-nums">{number(data.price)} <span className="text-sm text-muted-foreground">{data.currency}</span></p>{data.change!==null&&<p className={data.change>=0?'text-emerald-400':'text-red-400'}>{data.change>=0?'+':''}{number(data.change)}%</p>}{data.quoteAt&&<p className="text-[10px] text-muted-foreground mt-2">Cotización: {new Date(data.quoteAt).toLocaleString('es-ES')}</p>}</div>}</div><ExtendedHoursCards data={data?.extendedHours}/>{data?.description&&<p className="text-sm leading-relaxed text-foreground/80 max-w-3xl mt-5">{data.description}</p>}<button className="mt-5 inline-flex gap-2 items-center text-xs text-primary hover:underline" onClick={()=>onAnalyze(symbol)}>Abrir análisis del activo<ArrowUpRight size={14}/></button></section>
-    {error&&<p role="alert" className="border border-destructive/30 p-4 text-sm text-destructive">{error}</p>}
-    {!data&&busy&&<div role="status" className="rounded-lg border border-border p-10 text-center"><Activity className="mx-auto text-primary motion-safe:animate-pulse mb-4"/><p className="text-sm text-muted-foreground">Cargando cotización, velas y noticias recientes…</p></div>}
-    {data&&<><Candles key={symbol} data={data}/><AssetContext key={symbol+'context'} symbol={symbol}/><section className="rounded-lg border border-border bg-card p-5"><div className="mb-5 flex flex-wrap justify-between gap-2"><h2 className="text-sm font-semibold tracking-wide">NOTICIAS IMPORTANTES · ÚLTIMAS 24 HORAS</h2><span className="text-xs text-muted-foreground">{data.news.length} artículos</span></div>{data.news.length?<NewsCards articles={data.news} compact/>:<p className="text-sm text-muted-foreground py-6">No hay noticias relevantes con hora de publicación verificable en las últimas 24 horas. No se incluyen noticias antiguas para rellenar esta sección.</p>}</section><p className="text-[10px] text-muted-foreground">Actualizado: {new Date(data.fetchedAt).toLocaleString('es-ES')} · Las cotizaciones pueden tener retraso.</p></>}
+  const [data,setData]=useState<AssetSnapshot|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[revision,setRevision]=useState(0);
+  const appliedRevision=useRef(0);
+  useEffect(()=>{
+    let active=true;
+    const previous=memory.get(symbol),force=revision!==appliedRevision.current;
+    appliedRevision.current=revision;
+    setData(previous??null);setError('');
+    if(previous&&Date.now()-Date.parse(previous.fetchedAt)<120000&&!force){setBusy(false);return;}
+    setBusy(true);
+    authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({panel:'assetSnapshot',subject:symbol}),signal:AbortSignal.timeout(60000),
+    }).then(async r=>{if(!r.ok)throw Error();return r.json();}).then(value=>{
+      if(!active)return;
+      if(memory.size>=30)memory.delete(memory.keys().next().value!);
+      memory.set(symbol,value);setData(value);
+    }).catch(()=>{if(active)setError('No se ha podido actualizar la ficha. Puedes volver a intentarlo.');}).finally(()=>{if(active)setBusy(false);});
+    return()=>{active=false;};
+  },[symbol,revision]);
+  return <main className="mx-auto max-w-7xl space-y-5 px-4 py-5 font-body text-slate-300 sm:py-6 [&_h1]:font-body [&_h2]:font-body [&_h3]:font-body">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <button type="button" className="inline-flex items-center gap-2 rounded-md py-2 text-xs text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" onClick={onBack}><ArrowLeft size={14}/>Volver al feed</button>
+      <div className="flex items-center gap-2">
+        <label className="sr-only" htmlFor="watch-asset">Activo en seguimiento</label>
+        <select id="watch-asset" value={symbol} onChange={e=>onSelect(e.target.value)} className="rounded-md border border-slate-700/60 bg-[#0b1017] px-3 py-2 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
+          {[...new Set([symbol,...stocks])].map(value=><option key={value}>{value}</option>)}
+        </select>
+        <button type="button" disabled={busy} aria-label="Actualizar ficha" className="rounded-md border border-slate-700/60 bg-[#0b1017] p-2 text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-40" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={15} className={busy?'motion-safe:animate-spin':''}/></button>
+      </div>
+    </div>
+    <AssetOverview symbol={symbol} data={data} busy={busy} onAnalyze={()=>onAnalyze(symbol)}/>
+    {error&&<div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/5 px-5 py-4 text-sm text-rose-300">{error}<button type="button" disabled={busy} className="text-xs font-medium underline underline-offset-4" onClick={()=>setRevision(n=>n+1)}>Reintentar</button></div>}
+    {data?<AssetCandles key={symbol} data={data}/>:busy&&<section aria-label="Cargando gráfico" role="status" className="rounded-xl border border-slate-700/40 bg-[#0b1017] px-5 py-6"><div className="flex justify-between gap-6"><div className="h-3 w-32 rounded bg-slate-700/40 motion-safe:animate-pulse"/><div className="h-6 w-48 rounded bg-slate-700/25 motion-safe:animate-pulse"/></div><div className="mt-6 h-64 rounded-lg border border-slate-800/60 bg-slate-900/25 motion-safe:animate-pulse"/><p className="mt-4 text-xs text-slate-400">Cargando cotización, velas y noticias recientes…</p></section>}
+    <AssetContext key={symbol+'context'} symbol={symbol}/>
+    {data&&<><section className="overflow-hidden rounded-xl border border-slate-700/40 bg-[#0b1017] p-4 sm:p-5"><div className="mb-4 flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-sm font-semibold text-slate-200">Noticias del activo <span className="ml-2 text-xs font-normal text-slate-500">Últimas 24 horas</span></h2><span className="text-[11px] text-slate-500">{data.news.length} {data.news.length===1?'artículo':'artículos'}</span></div>{data.news.length?<NewsCards articles={data.news} compact/>:<p className="py-6 text-sm leading-relaxed text-slate-400">No hay noticias relevantes con hora de publicación verificable en las últimas 24 horas.</p>}</section><p className="px-1 text-[10px] leading-relaxed text-slate-500">Actualizado: {new Date(data.fetchedAt).toLocaleString('es-ES')} · Las cotizaciones pueden tener retraso.</p></>}
   </main>;
 }

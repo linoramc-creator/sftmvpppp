@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {chartCandles,hourlyToFourHours,lastDayNews,assetNewsCovers} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
+import {chartCandles,hourlyToFourHours,lastDayNews,assetNewsCovers,previousSessionCandle,selectFourHourCandles} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
 import {balanceAccess,newsAccess} from '../supabase/functions/analyze-ticker/news-access.ts';
 import {photoUrl,extractCover} from '../supabase/functions/analyze-ticker/news-covers.ts';
 test('four-hour candles preserve OHLC and volume without crossing sessions',()=>{
@@ -8,6 +8,24 @@ test('four-hour candles preserve OHLC and volume without crossing sessions',()=>
  const chart={meta:{exchangeTimezoneName:'America/New_York',instrumentType:'EQUITY'},timestamp:times.map(t=>Date.parse(t)/1000),indicators:{quote:[{open:[10,11,12,13,14,15],high:[12,13,14,15,16,17],low:[9,10,11,12,13,14],close:[11,12,13,14,15,16],volume:[1,2,3,4,5,6]}]}};
  const rows=hourlyToFourHours(chart);assert.equal(rows.length,3);assert.deepEqual(rows[0],{time:Date.parse(times[0]),open:10,high:15,low:9,close:14,volume:10,partial:false});assert.equal(rows[1].partial,true);assert.equal(rows[2].open,15);
  chart.indicators.quote[0].close[2]=99;assert.equal(hourlyToFourHours(chart)[0].partial,true);
+});
+test('daily quote reference is the prior exchange session, never the monthly range start',()=>{
+ const row=(at:string,close:number)=>({time:Date.parse(at),open:close,high:close,low:close,close,volume:10});
+ const rows=[row('2026-09-15T13:30Z',130),row('2026-10-14T13:30Z',147),row('2026-10-15T13:30Z',152)];
+ const previous=previousSessionCandle(rows,Date.parse('2026-10-15T17:00Z'),'America/New_York');
+ assert.equal(previous?.close,147);assert.equal(previousSessionCandle([rows[2]],Date.parse('2026-10-15T17:00Z')),undefined);
+ const asia=[row('2026-10-14T00:00Z',100),row('2026-10-15T00:00Z',110)];
+ assert.equal(previousSessionCandle(asia,Date.parse('2026-10-15T05:00Z'),'Asia/Seoul')?.close,100);
+ assert.equal(previousSessionCandle(rows,NaN),undefined);
+ assert.equal(previousSessionCandle(rows,Date.parse('2026-10-15T17:00Z'),'Invalid/Zone'),undefined);
+});
+test('four-hour chart prefers newer available bars without merging incompatible session anchors',()=>{
+ const candle=(time:number,close:number)=>({time,open:close,high:close,low:close,close,volume:1});
+ const delayed=[candle(Date.parse('2026-10-14T20:00Z'),148)],current=[candle(Date.parse('2026-10-15T13:30Z'),152)];
+ assert.deepEqual(selectFourHourCandles(delayed,current),{candles:current,extended:false});
+ assert.deepEqual(selectFourHourCandles(current,delayed),{candles:current,extended:true});
+ assert.deepEqual(selectFourHourCandles(delayed,[]),{candles:delayed,extended:true});
+ assert.deepEqual(selectFourHourCandles([],[]),{candles:[],extended:false});
 });
 test('24-hour news uses timestamps and never pads with old or undated news',()=>{
  const now=Date.parse('2026-10-07T10:00Z');const article={title:'Apple revenue growth accelerates',url:'https://www.cnbc.com/a',date:'2026-10-06',source:'CNBC',publishedAt:'2026-10-06T11:00Z'};
