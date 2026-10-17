@@ -30,3 +30,23 @@ test('mixed operations cannot bypass expensive request budgets',()=>{
  for(const body of [{macroCalendar:true,etf:true,ticker:'SPY'},{panel:'business',subject:'AAPL',marketData:true},{accountAction:'profile',panel:'feed'},{fundamentals:true,optionsAction:'chain',ticker:'AAPL'},{panel:'correlation',symbols:['SPY','QQQ'],range:'max'}])assert.throws(()=>classify(body),BetaError);
  assert.equal(classify({panel:'institutional',subject:'AAPL'}).request_class,'expensive');
 });
+
+test('relative comparisons require exactly two distinct normalized valid assets',()=>{
+ assert.deepEqual(classify({panel:'relativeComparison',symbols:['AAPL','SPY']}),{request_class:'data'});
+ assert.deepEqual(classify({panel:'relativeComparison',symbols:[' ^GSPC ','qqq']}),{request_class:'data'});
+ for(const symbols of [undefined,null,'AAPL,SPY',[],['AAPL'],['AAPL','SPY','QQQ'],['AAPL','AAPL'],[' aapl ','AAPL'],['AAPL',''],['AAPL',12],['AAPL','../secret'],['AAPL','SPY?api_key=x'],['AAPL','<script>']]){
+  assert.throws(()=>classify({panel:'relativeComparison',symbols}),e=>e instanceof BetaError&&e.status===400);
+ }
+});
+
+test('optional relative interpretation is strictly boolean and charged as expensive work',()=>{
+ assert.deepEqual(classify({panel:'relativeComparison',symbols:['AAPL','SPY'],includeAi:false}),{request_class:'data'});
+ assert.deepEqual(classify({panel:'relativeComparison',symbols:['AAPL','SPY'],includeAi:true}),{request_class:'expensive'});
+ for(const includeAi of ['true','false',0,1,null,{},[]])assert.throws(()=>classify({panel:'relativeComparison',symbols:['AAPL','SPY'],includeAi}),e=>e instanceof BetaError&&e.status===400);
+});
+
+test('relative comparisons cannot mix account, data or provider operations to bypass budgets',()=>{
+ for(const extra of [{accountAction:'profile'},{marketData:true},{macroCalendar:true},{optionsAction:'chain',ticker:'AAPL'},{fundamentals:true,ticker:'AAPL'},{risk:true,ticker:'AAPL'},{etf:true,ticker:'AAPL'},{technicals:true,ticker:'AAPL'}]){
+  assert.throws(()=>classify({panel:'relativeComparison',symbols:['AAPL','SPY'],includeAi:true,...extra}),e=>e instanceof BetaError&&e.status===400);
+ }
+});

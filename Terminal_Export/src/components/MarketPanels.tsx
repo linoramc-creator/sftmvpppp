@@ -5,7 +5,7 @@ import {NewsCards,TreasuryCard,EarningsList,FeedQuoteStamp} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
 import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
-import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, MarketFeed, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
+import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, MarketFeed, FeedQuote, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
 
 const cache = new Map<string, { at: number; data: unknown }>();
 const pending = new Map<string, Promise<unknown>>();
@@ -78,13 +78,18 @@ function feedPrice(price: number | null, currency: string) {
   const digits = Math.abs(price) < 10 ? 4 : 2;
   return `${fmt(price, digits)} ${currency}`;
 }
+function FeedInstrument({item,onSelect}:{item:FeedQuote;onSelect?: (symbol:string)=>void}){
+  const content=<><div className="min-w-0"><p className="text-sm group-hover:text-sky-300 transition-colors">{item.label}</p><FeedQuoteStamp quote={item}/></div><div className="text-right shrink-0"><p className="text-xs sm:text-sm tabular-nums whitespace-nowrap">{feedPrice(item.price,item.symbol.startsWith('^')||item.symbol==='NQ=F'?'pts':item.unit??item.currency)}</p><p className={`text-xs tabular-nums ${item.change===null?'text-muted-foreground':item.change>=0?'text-emerald-400':'text-red-400'}`}>{item.change===null?'N/D':`${item.change>=0?'+':''}${fmt(item.change)}%`}</p></div></>;
+  const classes='flex w-full items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0';
+  return onSelect?<button type="button" aria-label={`Abrir ficha de ${item.label}`} onClick={()=>onSelect(item.symbol)} className={`${classes} group text-left rounded px-1 -mx-1 hover:bg-sky-400/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60`}>{content}</button>:<div className={classes}>{content}</div>;
+}
 export function FeedView({stocks,data:quotes,onChange,onSelect}:{stocks:string[];data:MarketData|null;onChange:(stocks:string[])=>void;onSelect:(symbol:string)=>void}) {
   const market=usePanel<MarketFeed>('feedMarkets',stocks.join(','));
   const state = usePanel<MarketFeed>('feedNews');
   const data = market.data ?? {groups:[],treasury:[],earnings:[],fetchedAt:''};
   return <div className="space-y-6">
     {(!market.data||market.error) && <Status {...market} />}
-    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item => <div key={item.symbol} className="flex items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0"><div className="min-w-0"><p className="text-sm">{item.label}</p><FeedQuoteStamp quote={item}/></div><div className="text-right shrink-0"><p className="text-xs sm:text-sm tabular-nums whitespace-nowrap">{feedPrice(item.price, item.symbol.startsWith('^')||item.symbol==='NQ=F'?'pts':item.unit??item.currency)}</p><p className={`text-xs tabular-nums ${item.change === null ? 'text-muted-foreground' : item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{item.change === null ? 'N/D' : `${item.change >= 0 ? '+' : ''}${fmt(item.change)}%`}</p></div></div>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
+    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item=><FeedInstrument key={item.symbol} item={item} onSelect={group.label==='ÍNDICES'||group.label==='ETF PRINCIPALES'?onSelect:undefined}/>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
       <div className="space-y-4"><Box title="PORTADAS DEL DÍA">{state.data&&<div className="mb-3"><Stamp at={state.data.fetchedAt}/></div>}{state.data?<NewsCards articles={state.data.headlines}/>:<Status {...state}/>}</Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS">{state.data?<NewsCards articles={state.data.geopolitics??[]} geo/>:<Status {...state}/>}</Box></div>
       <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]} onSelect={onSelect}/></Box>

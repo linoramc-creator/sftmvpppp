@@ -15,7 +15,7 @@ export function upcomingEvents(symbol:string,earnings:any[],dividends:any[],cale
  return [...out.values()].sort((a,b)=>a.date.localeCompare(b.date)).slice(0,12);
 }
 export async function assetContext(symbol:string,benchmark:string|undefined,env:{FMP_KEY:string;FINNHUB_KEY:string},summary:(s:string,m:string)=>Promise<any>):Promise<AssetContext>{
- return cached(`asset-context-risk:${symbol}:${benchmark??'auto'}`,300000,async()=>{
+ return cached(`asset-context-risk-v2:${symbol}:${benchmark??'auto'}`,300000,async()=>{
  const profile=await cached('asset-profile:'+symbol,86400000,()=>summary(symbol,'quoteType,assetProfile,fundProfile'));
  const sector=profile?.assetProfile?.sector??null,reference=benchmark===undefined?SECTORS[String(sector??'').toLowerCase()]??null:benchmark||null;
  const symbols=[...new Set([symbol,'SPY',...(reference?[reference]:[])])];const [data,risk]=await Promise.all([Promise.all(symbols.map(s=>prices(s,'1y'))),assetRisk(symbol)]);

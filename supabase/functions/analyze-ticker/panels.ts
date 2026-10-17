@@ -1,4 +1,5 @@
 import {feedSessionQuote,type SessionQuote} from './feed-quotes.ts';
+import {ironReferenceQuote} from './iron-reference.ts';
 import {geopoliticalNews,isGeopolitical} from './geopolitical-news.ts';
 import {NEWS_DOMAINS,PRIMARY_NEWS_DOMAINS,SPANISH_NEWS_DOMAINS,publisherNews,articleTime,newsKey,newsOrder,fundNewsPattern} from './news-sources.ts';
 import { balanceAccess, type NewsAccess } from './news-access.ts';
@@ -164,7 +165,7 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
 }
 const FEED_MARKETS: { label: string; items: [string, string][] }[] = [
   { label: 'ÍNDICES', items: [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq Composite'], ['NQ=F', 'Nasdaq 100 · Futuro'], ['^DJI', 'Dow Jones'], ['^KS11', 'KOSPI · Corea del Sur'], ['^N225', 'Nikkei 225 · Japón'], ['^VIX', 'Volatilidad']] },
-  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['SI=F', 'Plata'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural'], ['ZC=F', 'Maíz']] },
+  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['SI=F', 'Plata'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural'], ['SGX-IODEX', 'Hierro · IODEX']] },
   { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['CHF=X', 'USD/CHF'], ['CAD=X', 'USD/CAD'], ['CNY=X', 'USD/CNY'], ['BTC-USD', 'Bitcoin']] },
   { label: 'ETF PRINCIPALES', items: [['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM'],['VEA','Desarrollados fuera de EE. UU. · VEA'],['VWO','Emergentes · VWO'],['TLT','Tesoro a largo plazo · TLT'],['GLD','Oro · GLD']] },
 ];
@@ -189,8 +190,8 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
   }).sort(newsOrder).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 650) })),limit);
 }
 export async function feedMarketsPanel(env:Env,symbols:string[]=[]):Promise<MarketFeed>{
-  const quote=(symbol:string,label:string,extended:boolean)=>cached(`feed-price-v4:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
-  return cached('feed-markets-v6:'+symbols.join(','),45000,async()=>{
+  const quote=(symbol:string,label:string,extended:boolean)=>symbol==='SGX-IODEX'?cached('iron-iodex-v1',3600000,()=>ironReferenceQuote()):cached(`feed-price-v4:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
+  return cached('feed-markets-v7:'+symbols.join(','),45000,async()=>{
     const [groups,bonds,events,watchlist]=await Promise.all([
       Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>quote(symbol,label,group.label==='ETF PRINCIPALES'||symbol==='NQ=F')))}))),
       cached('feedTreasury-v1',600000,()=>treasury(env.FRED_KEY)),cached('feedEarnings-v1',3600000,()=>earnings(env.FMP_KEY,env.FINNHUB_KEY)),

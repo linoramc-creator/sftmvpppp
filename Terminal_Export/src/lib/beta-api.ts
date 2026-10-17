@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-export type Profile = { id: string; email: string; isAdmin: boolean; dailyReportLimit: number };
+export type Profile = { id: string; email: string; displayName?: string; isAdmin: boolean; dailyReportLimit: number };
 export async function sessionHeaders() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Inicia sesión para continuar.');

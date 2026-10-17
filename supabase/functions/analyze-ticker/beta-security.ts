@@ -1,6 +1,7 @@
 import {feedSymbols} from './feed-quotes.ts';
+import {profileDisplayName} from './profile-name.ts';
 type Body = Record<string, any>;
-type User = { id: string; email: string; email_confirmed_at?: string };
+type User = { id: string; email: string; email_confirmed_at?: string; user_metadata?: Record<string, unknown> };
 const SITE = 'https://sftmvpppp.vercel.app';
 const ORIGINS = new Set([SITE, 'http://127.0.0.1:4173', 'http://localhost:5173']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -46,7 +47,12 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.accountAction) return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
-    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','extendedHours','assetContext','comparison','correlation'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','extendedHours','assetContext','comparison','correlation','relativeComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='relativeComparison'){
+      if(!Array.isArray(body.symbols)||body.symbols.length!==2||body.symbols.some((s:unknown)=>!symbol(s))||new Set(body.symbols.map((s:string)=>s.trim().toUpperCase())).size!==2)throw new BetaError(400,'Elige dos activos distintos y válidos.');
+      if(body.includeAi!==undefined&&typeof body.includeAi!=='boolean')throw new BetaError(400,'Opción de interpretación inválida.');
+      return {request_class:body.includeAi===true?'expensive':'data'};
+    }
     if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>12||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 12 ETF válidos.');
     if(body.panel==='assetContext'&&body.benchmark!==undefined&&!['','XLC','XLY','XLP','XLE','XLF','XLV','XLI','XLK','XLB','XLRE','XLU'].includes(body.benchmark))throw new BetaError(400,'Referencia inválida.');
   if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
@@ -94,7 +100,7 @@ async function account(body: Body,user: User): Promise<Response> {
       if(body.targetId!==undefined&&body.targetId!==null&&!UUID.test(body.targetId))throw new BetaError(400,'Usuario inválido.');
       return json(await rpc('beta_access_overview',{admin_uid:user.id,page_number:Number.isInteger(body.page)?Math.max(0,Math.min(10000,body.page)):0,target_uid:body.targetId??null}));
     }
-    case 'profile':return json({id:user.id,email:user.email,isAdmin:await rpc('beta_is_admin',{uid:user.id}),dailyReportLimit:20});
+    case 'profile':return json({id:user.id,email:user.email,displayName:profileDisplayName(user.user_metadata,user.email),isAdmin:await rpc('beta_is_admin',{uid:user.id}),dailyReportLimit:20});
     case 'listReports':return json(await service(`beta_reports?user_id=eq.${user.id}&select=id,kind,subject,saved_at&order=saved_at.desc&limit=100`));
     case 'getReport':{if(!UUID.test(body.id??''))throw new BetaError(400,'Informe inválido.');const rows=await service(`beta_reports?id=eq.${body.id}&user_id=eq.${user.id}&select=*&limit=1`);if(!rows.length)throw new BetaError(404,'Informe no encontrado.');return json(rows[0]);}
     case 'saveReport':{

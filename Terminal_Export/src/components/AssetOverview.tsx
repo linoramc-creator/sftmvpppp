@@ -63,6 +63,8 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
 }) {
   const quotes = data?.extendedHours?.quotes.filter(quote => finite(quote.price)) ?? [];
   const time = assetQuoteTime(data?.quoteAt, data?.timezone);
+  const unit=data?.instrument?.priceUnit||data?.currency;
+  const kind=data?.instrument?.kind;
   return <section aria-label={`Resumen de ${symbol}`} aria-busy={busy}
     className="overflow-hidden rounded-xl border border-slate-700/50 bg-[#0b1017] font-body shadow-sm">
     <div className="flex flex-col justify-between gap-5 px-5 py-5 sm:flex-row sm:items-start sm:px-6">
@@ -70,21 +72,22 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
         <div className="mb-2 flex flex-wrap items-center gap-2.5 text-xs">
           <span className="rounded-md border border-slate-600/50 bg-slate-800/70 px-2 py-1 font-mono font-medium text-slate-200">{symbol}</span>
           {data?.exchange && <span className="text-slate-400">{data.exchange}</span>}
+          {kind&&kind!=='other'&&<span className="rounded px-1.5 py-0.5 text-[10px] text-slate-500">{({index:'Índice',etf:'ETF',future:'Futuro continuo',equity:'Acción'})[kind]}</span>}
           {busy && <span role="status" className="text-slate-500">Actualizando…</span>}
         </div>
         <h1 className="font-body text-[23px] font-semibold leading-tight tracking-tight text-slate-100 sm:text-[26px]">
           {data?.name || symbol}
         </h1>
-        <button onClick={onAnalyze}
-          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/50 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1017]">
+        {kind!=='index'&&kind!=='future'&&<button disabled={!data||busy} onClick={onAnalyze}
+          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/50 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1017] disabled:cursor-wait disabled:opacity-40">
           Analizar {symbol}<ArrowUpRight size={14} aria-hidden="true"/>
-        </button>
+        </button>}
       </div>
       <div className="min-w-0 sm:text-right">
-        <p className="mb-1 text-[11px] font-medium text-slate-400">Cotización · sesión regular</p>
+        <p className="mb-1 text-[11px] font-medium text-slate-400">{kind==='future'?'Cotización · última negociación':'Cotización · sesión regular'}</p>
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 sm:justify-end">
           <span className="text-[34px] font-semibold leading-tight tracking-tight text-slate-50 tabular-nums">{priceText(data?.price)}</span>
-          {data?.currency && <span className="text-xs font-medium text-slate-400">{data.currency}</span>}
+          {unit && <span className="text-xs font-medium text-slate-400">{unit}</span>}
           {finite(data?.change) && <span className={`rounded-md px-2 py-1 text-sm font-medium tabular-nums ${data.change >= 0 ? 'bg-emerald-400/10 text-emerald-400' : 'bg-rose-400/10 text-rose-400'}`}>
             {changeText(data.change)}
           </span>}
@@ -96,7 +99,7 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
     </div>
     {(data?.description || quotes.length > 0) && <div className={`grid items-start gap-5 border-t border-slate-700/40 px-5 py-4 sm:px-6 ${data?.description && quotes.length ? 'lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]' : ''}`}>
       {data?.description && <div className="min-w-0">
-        <h2 className="mb-2 font-body text-[11px] font-semibold tracking-wide text-slate-400">Actividad</h2>
+        <h2 className="mb-2 font-body text-[11px] font-semibold tracking-wide text-slate-400">{kind==='index'?'Exposición':kind==='future'?'Contrato de referencia':'Actividad'}</h2>
         <p className="max-w-[70ch] text-[13px] leading-[1.75] text-slate-300">{data.description}</p>
       </div>}
       {quotes.length > 0 && <div aria-label="Negociación fuera de horario" className={`grid gap-2.5 ${quotes.length > 1 ? 'sm:grid-cols-2' : ''}`}>

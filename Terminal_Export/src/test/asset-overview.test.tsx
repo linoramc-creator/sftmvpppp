@@ -38,6 +38,7 @@ it('supports a loading snapshot without a large placeholder body or fake quote',
   render(<AssetOverview symbol="VST" data={null} busy onAnalyze={vi.fn()}/>);
   expect(screen.getByRole('status')).toHaveTextContent('Actualizando…');
   expect(screen.getByLabelText('Resumen de VST')).toHaveAttribute('aria-busy', 'true');
+  expect(screen.getByRole('button',{name:'Analizar VST'})).toBeDisabled();
   expect(screen.queryByRole('heading', {name: 'Actividad'})).toBeNull();
   expect(screen.getByText('—')).toBeVisible();
 });

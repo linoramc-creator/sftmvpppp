@@ -1,14 +1,16 @@
 import AssetContext from './AssetContext';
 import AssetCandles from './AssetCandles';
 import AssetOverview from './AssetOverview';
+import AssetSession from './AssetSession';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,RefreshCw} from 'lucide-react';
 import {authenticatedFetch} from '@/lib/beta-api';
 import {NewsCards} from './FeedCards';
 import type {AssetSnapshot} from '../../../supabase/functions/analyze-ticker/asset-snapshot';
+import type {InstrumentKind} from '../../../supabase/functions/analyze-ticker/asset-instrument';
 
 const memory=new Map<string,AssetSnapshot>();
-export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{symbol:string;stocks:string[];onSelect:(s:string)=>void;onBack:()=>void;onAnalyze:(s:string)=>void}){
+export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{symbol:string;stocks:string[];onSelect:(s:string)=>void;onBack:()=>void;onAnalyze:(s:string,kind?:InstrumentKind)=>void}){
   const [data,setData]=useState<AssetSnapshot|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[revision,setRevision]=useState(0);
   const appliedRevision=useRef(0);
   useEffect(()=>{
@@ -38,7 +40,8 @@ export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{s
         <button type="button" disabled={busy} aria-label="Actualizar ficha" className="rounded-md border border-slate-700/60 bg-[#0b1017] p-2 text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-40" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={15} className={busy?'motion-safe:animate-spin':''}/></button>
       </div>
     </div>
-    <AssetOverview symbol={symbol} data={data} busy={busy} onAnalyze={()=>onAnalyze(symbol)}/>
+    <AssetOverview symbol={symbol} data={data} busy={busy} onAnalyze={()=>onAnalyze(symbol,data?.instrument?.kind)}/>
+    {data&&<AssetSession data={data}/>}
     {error&&<div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/5 px-5 py-4 text-sm text-rose-300">{error}<button type="button" disabled={busy} className="text-xs font-medium underline underline-offset-4" onClick={()=>setRevision(n=>n+1)}>Reintentar</button></div>}
     {data?<AssetCandles key={symbol} data={data}/>:busy&&<section aria-label="Cargando gráfico" role="status" className="rounded-xl border border-slate-700/40 bg-[#0b1017] px-5 py-6"><div className="flex justify-between gap-6"><div className="h-3 w-32 rounded bg-slate-700/40 motion-safe:animate-pulse"/><div className="h-6 w-48 rounded bg-slate-700/25 motion-safe:animate-pulse"/></div><div className="mt-6 h-64 rounded-lg border border-slate-800/60 bg-slate-900/25 motion-safe:animate-pulse"/><p className="mt-4 text-xs text-slate-400">Cargando cotización, velas y noticias recientes…</p></section>}
     <AssetContext key={symbol+'context'} symbol={symbol}/>

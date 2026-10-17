@@ -1,11 +1,12 @@
 import { cached } from './panels.ts';
+import {TREASURY_MATURITIES,type TreasuryPoint} from './treasury-curve.ts';
+export {type TreasuryPoint} from './treasury-curve.ts';
 type Row=Record<string,any>;
-export type TreasuryPoint={years:number;yield:number|null;date:string|null;changeBp:number|null};
 export type EarningsEvent={symbol:string;date:string;session:string;eps:number|null;revenue:number|null};
 async function get(url:string):Promise<any>{try{const r=await fetch(url,{signal:AbortSignal.timeout(10000)});return r.ok?await r.json():null;}catch{return null;}}
 const number=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)?v:null;
-export async function treasury(key:string):Promise<TreasuryPoint[]>{return cached('feed-treasury-v1',3600000,()=>Promise.all([2,5,10,20].map(async years=>{
-  const raw=key?await get(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS${years}&api_key=${encodeURIComponent(key)}&file_type=json&sort_order=desc&limit=12`):null;
+export async function treasury(key:string):Promise<TreasuryPoint[]>{return cached('feed-treasury-v2',3600000,()=>Promise.all(TREASURY_MATURITIES.map(async({years,series})=>{
+  const raw=key?await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${series}&api_key=${encodeURIComponent(key)}&file_type=json&sort_order=desc&limit=12`):null;
   const values=(raw?.observations??[]).filter((r:Row)=>r.value!=='.'&&r.value!==''&&Number.isFinite(Number(r.value)));
   return {years,yield:values.length?Number(values[0].value):null,date:values[0]?.date??null,changeBp:values.length>1?(Number(values[0].value)-Number(values[1].value))*100:null};
 })));}

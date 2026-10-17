@@ -18,5 +18,5 @@ test('news coalesces requests, keeps key out of URL and handles denied plans',as
 test('market cards do not wait for news or photo providers',async()=>{
  const original=globalThis.fetch;const hosts:string[]=[];
  globalThis.fetch=async input=>{hosts.push(new URL(String(input)).hostname);return Response.json({});};
- try{const result=await feedMarketsPanel({FMP_KEY:'',FRED_KEY:'',FINNHUB_KEY:'',TAVILY_KEY:'test',MASSIVE_API_KEY:'test'});assert.equal(result.groups.length,4);assert.ok(hosts.every(host=>host.includes('yahoo.com')));assert.deepEqual(result.headlines,[]);}finally{globalThis.fetch=original;}
+ try{const result=await feedMarketsPanel({FMP_KEY:'',FRED_KEY:'',FINNHUB_KEY:'',TAVILY_KEY:'test',MASSIVE_API_KEY:'test'});assert.equal(result.groups.length,4);assert.ok(hosts.every(host=>host==='query1.finance.yahoo.com'||host==='api2.sgx.com'));assert.deepEqual(result.headlines,[]);}finally{globalThis.fetch=original;}
 });

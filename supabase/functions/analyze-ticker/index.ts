@@ -6,6 +6,7 @@ import {extendedHours} from './extended-hours.ts';
 import {assetContext} from './asset-context.ts';
 import { assetSnapshot } from './asset-snapshot.ts';
 import { sharedFeed } from './feed-cache.ts';
+import {relativeComparison} from './relative-comparison.ts';
 import { massiveContext } from './massive-news.ts';
 import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
 import { researchPeers } from './business-research.ts';
@@ -3951,9 +3952,20 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
-      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v6:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
+      if (body.panel === "relativeComparison") return panelJson(await relativeComparison(body.symbols.map((s:string)=>s.trim().toUpperCase()) as [string,string],body.includeAi===true,env,{
+        summary:(symbol,modules)=>cached('relative-profile-v1:'+symbol,3600000,()=>eYahooQuoteSummary(symbol,modules)),
+        options:symbol=>cached('relative-options-v1:'+symbol,15*60000,async()=>{
+          if(symbol.startsWith('^')||symbol.includes('='))return null;
+          try{const meta=await oGetMeta(symbol),today=Date.now();
+            const expiries=meta.expirationDates.filter(e=>(e*1000-today)/86400000>=7&&(e*1000-today)/86400000<=45).sort((a,b)=>Math.abs(a*1000-today-30*86400000)-Math.abs(b*1000-today-30*86400000));
+            if(!expiries.length)return null;const raw=await oYahooOptions(symbol,expiries[0]);return {...raw,expiry:oIsoFromEpoch(expiries[0])};
+          }catch{return null;}
+        }),
+        news:async()=>{const feed=await sharedFeed('feed-news-v6',()=>marketFeedPanel(env,'news'));return [...feed.geopolitics,...feed.headlines];},
+      }));
+      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v7:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
       if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v6",()=>marketFeedPanel(env,"news")));
-      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v8",()=>marketFeedPanel(env)));
+      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v9",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       if (body.panel === "comparison") return panelJson(await comparison(body.symbols.map((s:string)=>s.trim().toUpperCase()),env.FMP_KEY));
       if (body.panel === "correlation") return panelJson(await correlations(body.symbols.map((s:string)=>s.trim().toUpperCase()),typeof body.range==="string"?body.range:"3m"));

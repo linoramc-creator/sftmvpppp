@@ -6,15 +6,21 @@ export function stdev(xs:number[]):number|null { if(xs.length<2)return null;cons
 export function pearson(x:number[],y:number[]):number|null {if(x.length<3||x.length!==y.length)return null;const a=mean(x),b=mean(y);const dx=x.reduce((s,v)=>s+(v-a)**2,0),dy=y.reduce((s,v)=>s+(v-b)**2,0);return dx>0&&dy>0?Math.max(-1,Math.min(1,x.reduce((s,v,i)=>s+(v-a)*(y[i]-b),0)/Math.sqrt(dx*dy))):null;}
 export function risk(prices:number[]) {const returns=prices.slice(1).map((v,i)=>v/prices[i]-1);let peak=prices[0],maxDrawdown=0;const drawdown=prices.map(v=>{peak=Math.max(peak,v);const dd=(v/peak-1)*100;maxDrawdown=Math.min(maxDrawdown,dd);return dd;});const sd=stdev(returns);return {returns,drawdown,maxDrawdown:prices.length>1?maxDrawdown:null,volatility:returns.length>=20&&sd!==null?sd*Math.sqrt(252)*100:null,totalReturn:prices.length>1?(prices.at(-1)!/prices[0]-1)*100:null};}
 async function get(url:string):Promise<any>{try{const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});return r.ok?await r.json():null;}catch{return null;}}
-export async function prices(symbol:string,range:string):Promise<PriceSeries|null>{return cached(`analytics-v2:${symbol}:${range}`,300000,async()=>{
+export async function prices(symbol:string,range:string):Promise<PriceSeries|null>{return cached(`analytics-v3:${symbol}:${range}`,300000,async()=>{
   const raw=await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d`);const chart=raw?.chart?.result?.[0];if(!chart)return null;
   const close=chart.indicators?.quote?.[0]?.close??[],adj=chart.indicators?.adjclose?.[0]?.adjclose;
   // Never forward-fill missing trading sessions or mix adjusted and raw prices.
-  if(!Array.isArray(adj))return null;
-  const rows=(chart.timestamp??[]).flatMap((t:number,i:number)=>Number.isFinite(adj[i])&&adj[i]>0&&Number.isFinite(close[i])?[{date:new Date(t*1000).toISOString().slice(0,10),price:adj[i],raw:close[i],volume:chart.indicators.quote[0].volume?.[i]??null}]:[]);
+  const index=['INDEX','INDICES'].includes(chart.meta?.instrumentType),priceOnly=index||chart.meta?.instrumentType==='FUTURE';
+  if(!Array.isArray(adj)&&!priceOnly)return null;
+  const values=Array.isArray(adj)?adj:close;
+  let timezone=chart.meta?.exchangeTimezoneName??'UTC';try{new Intl.DateTimeFormat('en-CA',{timeZone:timezone});}catch{timezone='UTC';}
+  const day=(t:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(t*1000);
+  const distinct=new Map<string,Row>();
+  for(let i=0;i<(chart.timestamp?.length??0);i++){if(!Number.isFinite(values[i])||values[i]<=0||!Number.isFinite(close[i])||close[i]<=0)continue;const date=day(chart.timestamp[i]);if(distinct.has(date))continue;distinct.set(date,{date,price:values[i],raw:close[i],volume:index?null:chart.indicators.quote[0].volume?.[i]??null});}
+  const rows=[...distinct.values()].sort((a,b)=>a.date.localeCompare(b.date));
   return rows.length>1?{symbol,currency:chart.meta?.currency??'',dates:rows.map((r:Row)=>r.date),closes:rows.map((r:Row)=>r.price),raw:rows.map((r:Row)=>r.raw),volumes:rows.map((r:Row)=>r.volume)}:null;
 });}
-async function institutions(symbol:string,key:string){if(!key)return [];return cached(`comparison-institutions:${symbol}`,86400000,async()=>{
+export async function institutions(symbol:string,key:string){if(!key)return [];return cached(`comparison-institutions:${symbol}`,86400000,async()=>{
   // Two completed quarters with at least 60 days for filing availability.
   const cutoff=new Date(Date.now()-60*86400000);const q=Math.floor(cutoff.getUTCMonth()/3);const base=cutoff.getUTCFullYear()*4+q-1;
   return (await Promise.all([base,base-1].map(async period=>{
