@@ -1,4 +1,34 @@
-# Análisis relativo
+# Comparación de activos
+
+La navegación presenta un único apartado **Comparar**. El panel
+`marketComparison` reúne comparación, correlación y análisis relativo para entre
+dos y cinco símbolos distintos. Acepta ventanas `1m`, `3m`, `6m` y `1y`;
+`includeAnalysis` es un booleano estricto. La carga inicial solo calcula datos;
+**Analizar métricas** añade conclusiones estructuradas y una interpretación
+acotada de las evidencias. El modelo no puede modificar los valores, la
+clasificación ni las fechas calculadas. Los comentarios tienen un máximo de
+treinta y cinco palabras y no pueden introducir cifras.
+
+Se conservan los precios por activo, las referencias SPY/URTH, matrices con el
+número de observaciones por pareja, correlaciones móviles, caídas, ratios por
+pareja, actividad mensual, opciones y declaraciones institucionales. Las
+correlaciones requieren al menos veinte retornos comunes y monedas iguales;
+la sensibilidad a factores utiliza hasta sesenta y tres retornos con un mínimo
+de cuarenta, independientemente del rango general. La bandera mensual
+`complete` indica cobertura de datos, nunca que el mes calendario haya cerrado.
+
+Las fichas de índices y ETF del feed usan `marketPulse`: lectura de sesión,
+intradía, gap, rango, tendencia y rotación mediante ETF sectoriales. Estos ETF
+son referencias de rotación, no amplitud real del índice ni flujos de dinero.
+Solo los ETF con datos suficientes incluyen volumen negociado y VWAP aproximado.
+Los accesos desde watchlist y resultados conservan la ficha individual.
+
+La bienvenida espera la watchlist sincronizada, cotizaciones, noticias y
+portadas del feed. Mantiene el contenido montado detrás del modal para permitir
+su carga. Los fallos o un plazo agotado requieren reintento o continuar
+explícitamente con lo disponible; no se finge una carga completa.
+
+## Compatibilidad del panel anterior
 
 El panel `relativeComparison` acepta exactamente dos símbolos distintos. Usa el
 mismo control de sesión, revocación y cuotas de la terminal. `includeAi` solo

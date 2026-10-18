@@ -3,6 +3,7 @@ import { WatchlistCard } from "./WatchlistCard";
 import type { MarketData } from "@/lib/analyze";
 import {NewsCards,TreasuryCard,EarningsList,FeedQuoteStamp} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
+import {useTerminalEntry,waitForVisibleFeedImages} from '@/lib/terminal-entry';
 import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
 import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, MarketFeed, FeedQuote, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
@@ -27,30 +28,32 @@ function request<T>(panel: string, subject: string, sector: boolean, ttl: number
   pending.set(key, promise);
   return promise;
 }
-function usePanel<T>(panel: string, subject = '', sector = false) {
+function usePanel<T>(panel: string, subject = '', sector = false, enabled = true) {
   const active=usePanelActive();
   const previousKey=useRef(`${panel}:${subject}:${sector}`);
   const [data, setData] = useState<T | null>(() => (cache.get(`${panel}:${subject}:${sector}`)?.data as T) ?? null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [loading,setLoading]=useState(active&&enabled);
+  const [loadedKey,setLoadedKey]=useState(cache.has(`${panel}:${subject}:${sector}`)?`${panel}:${subject}:${sector}`:'');
   useEffect(() => {
-    if(!active)return;
+    if(!active||!enabled)return;
     let cancelled = false;
     const previous=cache.get(`${panel}:${subject}:${sector}`);
     const key=`${panel}:${subject}:${sector}`;
     if(previous&&Date.now()-previous.at<86400000)setData(previous.data as T);else if(previousKey.current!==key)setData(null);
-    previousKey.current=key;setError('');
+    previousKey.current=key;setError('');setLoading(true);
     const ttl = panel==='feedMarkets'?60000:panel.startsWith('feed') ? 300000 : panel==='news'?600000: ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
     const load = () => request<T>(panel, subject, sector, ttl)
-      .then(value => { if (!cancelled) { setData(value); setError(''); } })
-      .catch(() => { if (!cancelled) setError('No se ha podido actualizar. Inténtalo de nuevo.'); });
+      .then(value => { if (!cancelled) { setData(value); setLoadedKey(key); setError(''); setLoading(false); } })
+      .catch(() => { if (!cancelled) {setError('No se ha podido actualizar. Inténtalo de nuevo.');setLoading(false);} });
     void load();
     const visible=()=>{if(document.visibilityState==='visible')void load();};
     const timer = window.setInterval(visible, ttl);
     document.addEventListener('visibilitychange',visible);
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange',visible); };
-  }, [panel, subject, sector, retry,active]);
-  return { data, error, retry: () => { cache.delete(`${panel}:${subject}:${sector}`); setRetry(n => n + 1); } };
+  }, [panel, subject, sector, retry,active,enabled]);
+  return { data, error, loading, loadedKey, retry: () => { cache.delete(`${panel}:${subject}:${sector}`); setRetry(n => n + 1); } };
 }
 const fmt = (n: number | null | undefined, digits = 2) => n == null ? 'N/D' : n.toLocaleString('es-ES', { maximumFractionDigits: digits });
 const compact = (n: number) => Intl.NumberFormat('es-ES', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
@@ -83,13 +86,31 @@ function FeedInstrument({item,onSelect}:{item:FeedQuote;onSelect?: (symbol:strin
   const classes='flex w-full items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0';
   return onSelect?<button type="button" aria-label={`Abrir ficha de ${item.label}`} onClick={()=>onSelect(item.symbol)} className={`${classes} group text-left rounded px-1 -mx-1 hover:bg-sky-400/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60`}>{content}</button>:<div className={classes}>{content}</div>;
 }
-export function FeedView({stocks,data:quotes,onChange,onSelect}:{stocks:string[];data:MarketData|null;onChange:(stocks:string[])=>void;onSelect:(symbol:string)=>void}) {
-  const market=usePanel<MarketFeed>('feedMarkets',stocks.join(','));
+export function FeedView({stocks,data:quotes,onChange,onSelect,onMarketSelect,watchlistReady=true,watchlistError='',onRetryWatchlist,tickerReady=true}:{stocks:string[];data:MarketData|null;onChange:(stocks:string[])=>void;onSelect:(symbol:string)=>void;onMarketSelect?:(symbol:string)=>void;watchlistReady?:boolean;watchlistError?:string;onRetryWatchlist?:()=>void;tickerReady?:boolean}) {
+  const market=usePanel<MarketFeed>('feedMarkets',stocks.join(','),false,watchlistReady);
   const state = usePanel<MarketFeed>('feedNews');
+  const entry=useTerminalEntry(),root=useRef<HTMLDivElement>(null),lastAttempt=useRef('');
+  useEffect(()=>{
+    if(!entry)return;
+    const key=`${entry.sessionId}:${entry.attempt}`;if(lastAttempt.current===key)return;lastAttempt.current=key;
+    if(entry.attempt<1)return;
+    if(watchlistError)onRetryWatchlist?.();
+    if(market.error||!market.data)market.retry();
+    if(state.error||!state.data)state.retry();
+  },[entry?.sessionId,entry?.attempt]);
+  useEffect(()=>{
+    if(!entry)return;
+    const report=(status:'loading'|'ready'|'error',detail:string)=>entry.report(entry.sessionId,entry.attempt,{status,detail});
+    if(watchlistError||market.error||state.error){report('error',watchlistError?'No se ha podido sincronizar tu lista de seguimiento.':state.error?'No se han podido cargar las noticias del feed.':'No se han podido cargar los datos de mercado.');return;}
+    if(!watchlistReady||!tickerReady||market.loading||state.loading||!market.data||!state.data||market.loadedKey!==`feedMarkets:${stocks.join(',')}:false`){report('loading',!watchlistReady?'Sincronizando tu lista de seguimiento…':!state.data||state.loading?'Preparando las noticias del día…':'Preparando los datos de mercado…');return;}
+    const controller=new AbortController();report('loading','Preparando las portadas…');
+    if(root.current)void waitForVisibleFeedImages(root.current,controller.signal).then(ready=>{if(!controller.signal.aborted)report(ready?'ready':'error',ready?'Tu feed está preparado.':'Algunas portadas están tardando demasiado en cargar.');});
+    return()=>controller.abort();
+  },[entry?.sessionId,entry?.attempt,watchlistReady,watchlistError,tickerReady,stocks.join(','),market.data,market.error,market.loading,market.loadedKey,state.data,state.error,state.loading]);
   const data = market.data ?? {groups:[],treasury:[],earnings:[],fetchedAt:''};
-  return <div className="space-y-6">
+  return <div ref={root} className="space-y-6">
     {(!market.data||market.error) && <Status {...market} />}
-    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item=><FeedInstrument key={item.symbol} item={item} onSelect={group.label==='ÍNDICES'||group.label==='ETF PRINCIPALES'?onSelect:undefined}/>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
+    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item=><FeedInstrument key={item.symbol} item={item} onSelect={group.label==='ÍNDICES'||group.label==='ETF PRINCIPALES'?onMarketSelect??onSelect:undefined}/>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
       <div className="space-y-4"><Box title="PORTADAS DEL DÍA">{state.data&&<div className="mb-3"><Stamp at={state.data.fetchedAt}/></div>}{state.data?<NewsCards articles={state.data.headlines}/>:<Status {...state}/>}</Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS">{state.data?<NewsCards articles={state.data.geopolitics??[]} geo/>:<Status {...state}/>}</Box></div>
       <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]} onSelect={onSelect}/></Box>

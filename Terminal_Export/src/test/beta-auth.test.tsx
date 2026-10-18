@@ -1,11 +1,61 @@
 import {render,screen,waitFor,fireEvent,act,cleanup} from '@testing-library/react';
-import {BrowserRouter} from 'react-router-dom';
+import {BrowserRouter,MemoryRouter} from 'react-router-dom';
+import {useEffect} from 'react';
+import {useTerminalEntry,type TerminalEntry} from '@/lib/terminal-entry';
 import AuthGate from '@/components/AuthGate';
 const fake=vi.hoisted(()=>({getSession:vi.fn(),signInWithPassword:vi.fn(),signUp:vi.fn(),updateUser:vi.fn(),onAuthStateChange:vi.fn()}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{auth:fake},isPasswordRecovery:false}));
 beforeEach(()=>{vi.clearAllMocks();fake.getSession.mockResolvedValue({data:{session:null}});fake.onAuthStateChange.mockReturnValue({data:{subscription:{unsubscribe:vi.fn()}}});fake.signInWithPassword.mockResolvedValue({data:{session:null},error:{status:400}});fake.signUp.mockResolvedValue({data:{session:null},error:{status:400}});});
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 async function open(){render(<BrowserRouter><AuthGate><p>Private terminal</p></AuthGate></BrowserRouter>);await screen.findByRole('button',{name:'Entrar a la terminal'});}
+function ReadyFeed(){const entry=useTerminalEntry();useEffect(()=>{if(entry)entry.report(entry.sessionId,entry.attempt,{status:'ready',detail:'Feed listo.'});},[entry?.sessionId,entry?.attempt]);return <button>Open market</button>;}
+function signedIn(){const session={access_token:'test-session',user:{id:'person-id',user_metadata:{display_name:'María'}}};fake.getSession.mockResolvedValue({data:{session}});vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'person@example.test',displayName:'María',isAdmin:false})}));return session;}
+it('waits for feed readiness and the minimum greeting, then never replays on profile or token refresh',async()=>{
+ const session=signedIn();vi.useFakeTimers();let channel:TerminalEntry|null=null;
+ function Feed(){channel=useTerminalEntry();return <button>Open market</button>;}
+ await act(async()=>{render(<MemoryRouter><AuthGate><Feed/></AuthGate></MemoryRouter>);});
+ expect(screen.getByRole('dialog')).toHaveTextContent('Bienvenido, María');
+ expect(screen.queryByRole('button',{name:'Open market'})).not.toBeInTheDocument();
+ expect(screen.getByText('Open market')).toBeInTheDocument();
+ await act(async()=>vi.advanceTimersByTime(5000));expect(screen.getByRole('dialog')).toBeInTheDocument();
+ await act(async()=>channel!.report(channel!.sessionId,channel!.attempt,{status:'ready',detail:'Feed listo.'}));
+ await act(async()=>vi.advanceTimersByTime(0));await act(async()=>vi.advanceTimersByTime(380));
+ expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Open market'})).toBeEnabled();
+ await act(async()=>window.dispatchEvent(new Event('beta-access-check')));
+ await act(async()=>fake.onAuthStateChange.mock.calls[0][0]('TOKEN_REFRESHED',{...session,access_token:'refreshed-session'}));
+ expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+it('keeps a failed feed covered until an explicit action and ignores readiness from an older retry',async()=>{
+ signedIn();vi.useFakeTimers();let channel:TerminalEntry|null=null;
+ function Feed(){channel=useTerminalEntry();return <p>Feed behind overlay</p>;}
+ await act(async()=>{render(<MemoryRouter><AuthGate><Feed/></AuthGate></MemoryRouter>);});
+ const old=channel!;
+ await act(async()=>old.report(old.sessionId,old.attempt,{status:'error',detail:'Las noticias no están disponibles.'}));
+ expect(screen.getByRole('dialog')).toHaveTextContent('Las noticias no están disponibles.');
+ await act(async()=>vi.advanceTimersByTime(10000));expect(screen.getByRole('dialog')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Reintentar'}));expect(channel!.attempt).toBe(1);
+ await act(async()=>old.report(old.sessionId,old.attempt,{status:'ready'}));
+ await act(async()=>vi.advanceTimersByTime(3000));expect(screen.getByRole('dialog')).toBeInTheDocument();
+ await act(async()=>channel!.report(channel!.sessionId,channel!.attempt,{status:'error',detail:'Fallo de red.'}));
+ fireEvent.click(screen.getByRole('button',{name:'Continuar con lo disponible'}));
+ await act(async()=>vi.advanceTimersByTime(380));expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+it('uses a bounded loading timeout with explicit recovery rather than opening a partial feed',async()=>{
+ signedIn();vi.useFakeTimers();await act(async()=>{render(<MemoryRouter><AuthGate><p>Pending feed</p></AuthGate></MemoryRouter>);});
+ await act(async()=>vi.advanceTimersByTime(90000));expect(screen.getByRole('dialog')).toHaveTextContent('La carga está tardando');expect(screen.getByRole('button',{name:'Reintentar'})).toBeEnabled();
+});
+it('respects reduced motion and sanitizes the greeting while keeping the two second minimum',async()=>{
+ const session=signedIn();session.user.user_metadata.display_name='<img src=x onerror=alert(1)>';
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'existing.person@example.test',displayName:'<script>danger</script>',isAdmin:false})}));
+ const media=vi.spyOn(window,'matchMedia').mockImplementation(query=>({matches:true,media:query,onchange:null,addListener:vi.fn(),removeListener:vi.fn(),addEventListener:vi.fn(),removeEventListener:vi.fn(),dispatchEvent:vi.fn()}));
+ try{vi.useFakeTimers();await act(async()=>{render(<MemoryRouter><AuthGate><ReadyFeed/></AuthGate></MemoryRouter>);});expect(screen.getByRole('dialog')).toHaveTextContent('Bienvenido, existing person');expect(document.querySelector('img')).toBeNull();
+ await act(async()=>vi.advanceTimersByTime(1999));expect(screen.getByRole('dialog')).toBeInTheDocument();
+ await act(async()=>vi.advanceTimersByTime(1));await act(async()=>vi.advanceTimersByTime(0));expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+ }finally{media.mockRestore();}
+});
+it('opens direct administration without waiting for a feed that is not mounted',async()=>{
+ signedIn();await act(async()=>{render(<MemoryRouter initialEntries={['/admin']}><AuthGate><p>Administration</p></AuthGate></MemoryRouter>);});expect(screen.getByText('Administration')).toBeVisible();expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
 it('keeps the terminal private and submits email/password login',async()=>{
  await open();expect(screen.queryByText('Private terminal')).not.toBeInTheDocument();
  fireEvent.change(screen.getByLabelText('E-mail'),{target:{value:'Person@example.com'}});
@@ -34,36 +84,6 @@ it('rejects unsafe registration names before sending signup metadata',async()=>{
  for(const label of ['Contraseña','Repetir contraseña'])fireEvent.change(screen.getByLabelText(label,{exact:true}),{target:{value:'long-password-123'}});
  fireEvent.click(screen.getByRole('button',{name:'Crear cuenta'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('Escribe tu nombre');expect(fake.signUp).not.toHaveBeenCalled();
-});
-it('greets by name once while keeping the terminal usable and does not replay after profile or token refresh',async()=>{
- const session={access_token:'test-session',user:{id:'person-id',user_metadata:{display_name:'María'}}};
- fake.getSession.mockResolvedValue({data:{session}});
- vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'person@example.test',displayName:'María',isAdmin:false})}));
- render(<BrowserRouter><AuthGate><button>Open market</button></AuthGate></BrowserRouter>);
- expect(await screen.findByText('Bienvenido, María')).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Open market'})).toBeEnabled();
- fireEvent.click(screen.getByRole('button',{name:'Omitir bienvenida'}));
- expect(screen.queryByLabelText('Bienvenida a la terminal')).not.toBeInTheDocument();
- await act(async()=>window.dispatchEvent(new Event('beta-access-check')));
- await act(async()=>fake.onAuthStateChange.mock.calls[0][0]('TOKEN_REFRESHED',{...session,access_token:'refreshed-session'}));
- expect(screen.queryByText('Bienvenido, María')).not.toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Open market'})).toBeEnabled();
-});
-it('dismisses the entry welcome without animation events under reduced motion and sanitizes old account names',async()=>{
- const session={access_token:'test-session',user:{id:'person-id',user_metadata:{display_name:'<img src=x onerror=alert(1)>'}}};
- fake.getSession.mockResolvedValue({data:{session}});
- vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'existing.person@example.test',displayName:'<script>danger</script>',isAdmin:false})}));
- const media=vi.spyOn(window,'matchMedia').mockImplementation(query=>({matches:true,media:query,onchange:null,addListener:vi.fn(),removeListener:vi.fn(),addEventListener:vi.fn(),removeEventListener:vi.fn(),dispatchEvent:vi.fn()}));
- try{
-  vi.useFakeTimers();
-  await act(async()=>{render(<BrowserRouter><AuthGate><button>Open market</button></AuthGate></BrowserRouter>);});
-  expect(screen.getByText('Bienvenido, existing person')).toBeInTheDocument();
-  expect(document.querySelector('img')).toBeNull();
-  expect(screen.getByRole('button',{name:'Open market'})).toBeEnabled();
-  await act(async()=>vi.advanceTimersByTime(1400));
-  expect(screen.queryByLabelText('Bienvenida a la terminal')).not.toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'Open market'})).toBeEnabled();
- }finally{media.mockRestore();}
 });
 it('recovers the submit button after a network failure',async()=>{
  fake.signInWithPassword.mockRejectedValue(new Error('network'));await open();

@@ -1,11 +1,12 @@
 import { Eye, EyeOff, ArrowRight, Loader2 } from 'lucide-react';
-import { createContext, useContext, useEffect, useState, useRef, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { supabase, isPasswordRecovery } from '@/integrations/supabase/client';
 import { accountApi,type Profile } from '@/lib/beta-api';
 import { normalizeProfileName, profileDisplayName } from '../../../supabase/functions/analyze-ticker/profile-name';
 import TerminalWelcome from './TerminalWelcome';
+import {TerminalEntryProvider,type FeedReadiness} from '@/lib/terminal-entry';
 import './auth-experience.css';
 const Context = createContext<Profile | null>(null);
 export const useProfile = () => useContext(Context)!;
@@ -15,10 +16,9 @@ export default function AuthGate({children}: {children:ReactNode}) {
   const [profile,setProfile]=useState<Profile|null>(null),[error,setError]=useState('');
   const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmation,setConfirmation]=useState('');
   const [name,setName]=useState('');
-  const [welcome,setWelcome]=useState<{id:string;name:string}|null>(null);
+  const location=useLocation();
+  const [welcome,setWelcome]=useState<{id:string;profileId:string;name:string;attempt:number;startedAt:number;phase:'loading'|'ready'|'error'|'leaving';detail:string}|null>(null);
   const welcomedUsers=useRef(new Set<string>());
-  const welcomeTimer=useRef<number>();
-  useEffect(()=>()=>window.clearTimeout(welcomeTimer.current),[]);
   const [register,setRegister]=useState(false),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0);
   const [settings,setSettings]=useState(isPasswordRecovery),[notice,setNotice]=useState('');
   const [recovery,setRecovery]=useState(isPasswordRecovery);
@@ -34,12 +34,33 @@ export default function AuthGate({children}: {children:ReactNode}) {
   const recordedAccess=useRef(new Map<string,string>());
   useEffect(()=>{if(!profile)return;let visit=recordedAccess.current.get(profile.id);if(visit)return;visit=crypto.randomUUID();recordedAccess.current.set(profile.id,visit);void accountApi('recordAccess',{visitId:visit}).catch(()=>{recordedAccess.current.delete(profile.id);});},[profile?.id]);
   useEffect(()=>{
-    if(!profile||error||recovery||welcomedUsers.current.has(profile.id))return;
-    welcomedUsers.current.add(profile.id);
-    setWelcome({id:profile.id,name:normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email)});
-    window.clearTimeout(welcomeTimer.current);
-    welcomeTimer.current=window.setTimeout(()=>setWelcome(null),1400);
-  },[profile?.id,error,recovery]);
+    if(location.pathname!=='/'||!profile||error||recovery){setWelcome(null);return;}
+    if(welcomedUsers.current.has(profile.id))return;
+    setWelcome(previous=>previous?.profileId===profile.id?previous:{id:crypto.randomUUID(),profileId:profile.id,name:normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email),attempt:0,startedAt:Date.now(),phase:'loading',detail:'Preparando tu espacio de mercado…'});
+  },[profile?.id,error,recovery,location.pathname]);
+  const reportReadiness=useCallback((id:string,attempt:number,state:FeedReadiness)=>{
+    setWelcome(previous=>!previous||previous.id!==id||previous.attempt!==attempt||previous.phase==='leaving'||previous.phase===state.status&&previous.detail===(state.detail??'')?previous:{...previous,phase:state.status,detail:state.detail??''});
+  },[]);
+  const entryContext=useMemo(()=>welcome?{sessionId:welcome.id,attempt:welcome.attempt,report:reportReadiness}:null,[welcome?.id,welcome?.attempt,reportReadiness]);
+  useEffect(()=>{
+    if(!welcome||welcome.phase==='leaving')return;
+    const id=welcome.id,attempt=welcome.attempt;
+    const timer=window.setTimeout(()=>setWelcome(previous=>previous?.id===id&&previous.attempt===attempt&&previous.phase==='loading'?{...previous,phase:'error',detail:'La carga está tardando más de lo esperado. Puedes reintentar o entrar con lo que ya está disponible.'}:previous),90000);
+    return()=>window.clearTimeout(timer);
+  },[welcome?.id,welcome?.attempt]);
+  useEffect(()=>{
+    if(welcome?.phase!=='ready')return;
+    const id=welcome.id,attempt=welcome.attempt;
+    const timer=window.setTimeout(()=>setWelcome(previous=>previous?.id===id&&previous.attempt===attempt&&previous.phase==='ready'?{...previous,phase:'leaving'}:previous),Math.max(0,2000-(Date.now()-welcome.startedAt)));
+    return()=>window.clearTimeout(timer);
+  },[welcome?.id,welcome?.attempt,welcome?.phase]);
+  useEffect(()=>{
+    if(welcome?.phase!=='leaving')return;
+    const id=welcome.id;
+    const timer=window.setTimeout(()=>setWelcome(previous=>{if(previous?.id!==id)return previous;welcomedUsers.current.add(previous.profileId);return null;}),window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:380);
+    return()=>window.clearTimeout(timer);
+  },[welcome?.id,welcome?.phase]);
+  const welcomeVisible=location.pathname==='/'&&!recovery&&!!profile&&!error&&(!welcomedUsers.current.has(profile.id)||welcome?.profileId===profile.id);
   const signOut=async()=>{await supabase.auth.signOut({scope:'local'});window.location.assign('/');};
   async function enter(event:FormEvent){event.preventDefault();if(busy)return;setBusy(true);setError('');
     try {
@@ -60,7 +81,7 @@ export default function AuthGate({children}: {children:ReactNode}) {
   const passwordFields=<><div className="flex justify-end"><button type="button" aria-label={showPassword?"Ocultar contraseña":"Mostrar contraseña"} aria-pressed={showPassword} className="text-xs text-slate-400 inline-flex gap-2 items-center hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 rounded" onClick={()=>setShowPassword(!showPassword)}>{showPassword?<EyeOff size={14}/>:<Eye size={14}/>} {showPassword?"Ocultar":"Mostrar"}</button></div><label className="block text-sm text-slate-300">Contraseña<input type={showPassword?"text":"password"} autoComplete={register||settings?'new-password':'current-password'} required minLength={register||settings?12:undefined} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)} className="auth-input"/></label>{(register||settings)&&<><p className="text-xs text-slate-400">Mínimo 12 caracteres. Utiliza una contraseña única.</p><label className="block text-sm text-slate-300">Repetir contraseña<input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirmation} onChange={e=>setConfirmation(e.target.value)} className="auth-input"/></label></>}</>;
   if(!ready)return <div role="status" className="auth-page min-h-screen flex items-center justify-center gap-3 text-sm text-slate-400"><Loader2 size={17} className="text-emerald-400 motion-safe:animate-spin"/>Comprobando sesión…</div>;
   if(session&&recovery)return <main className="min-h-screen flex items-center justify-center p-5"><section className="w-full max-w-md border border-border bg-card p-7 space-y-5"><h1 className="text-xl">Establecer nueva contraseña</h1><p className="text-sm text-slate-400">Tu cuenta y tus informes se conservarán.</p><form onSubmit={savePassword} className="space-y-4">{passwordFields}<button disabled={busy} className="w-full rounded-md bg-primary text-black font-semibold py-3 hover:brightness-110 transition disabled:opacity-50">{busy?'Guardando…':'Guardar contraseña'}</button></form>{notice&&<p role="status">{notice}</p>}</section></main>;
-  if(session&&profile&&!error)return <Context.Provider value={profile}><div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border-b border-border text-xs"><span className="truncate">{profile.email}</span><nav className="flex flex-wrap gap-4"><Link to="/">Terminal</Link>{profile.isAdmin&&<Link className="text-primary" to="/admin">Administración</Link>}<button onClick={()=>{setSettings(!settings);setPassword('');setConfirmation('');setNotice('');}}>Mi contraseña</button><button onClick={signOut}>Cerrar sesión</button></nav></div>{settings&&<section className="max-w-md mx-auto p-6 space-y-4 border border-border"><h2>Establecer o cambiar contraseña</h2><form onSubmit={savePassword} className="space-y-4">{passwordFields}<button disabled={busy} className="bg-primary text-black px-4 py-3 disabled:opacity-50">{busy?'Guardando…':'Guardar contraseña'}</button></form>{notice&&<p role="status" className="text-sm">{notice}</p>}</section>}<div key={profile.id} className="terminal-entry-content">{children}</div>{welcome?.id===profile.id&&<TerminalWelcome name={welcome.name} onDismiss={()=>setWelcome(null)}/>}</Context.Provider>;
+  if(session&&profile&&!error)return <Context.Provider value={profile}><TerminalEntryProvider value={entryContext}><div ref={node=>{if(node)node.inert=welcomeVisible;}} aria-hidden={welcomeVisible||undefined}><div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border-b border-border text-xs"><span className="truncate">{profile.email}</span><nav className="flex flex-wrap gap-4"><Link to="/">Terminal</Link>{profile.isAdmin&&<Link className="text-primary" to="/admin">Administración</Link>}<button onClick={()=>{setSettings(!settings);setPassword('');setConfirmation('');setNotice('');}}>Mi contraseña</button><button onClick={signOut}>Cerrar sesión</button></nav></div>{settings&&<section className="max-w-md mx-auto p-6 space-y-4 border border-border"><h2>Establecer o cambiar contraseña</h2><form onSubmit={savePassword} className="space-y-4">{passwordFields}<button disabled={busy} className="bg-primary text-black px-4 py-3 disabled:opacity-50">{busy?'Guardando…':'Guardar contraseña'}</button></form>{notice&&<p role="status" className="text-sm">{notice}</p>}</section>}<div key={profile.id}>{children}</div></div>{welcomeVisible&&<TerminalWelcome name={welcome?.name??(normalizeProfileName(profile.displayName)||profileDisplayName(session.user?.user_metadata,profile.email))} phase={welcome?.phase??'loading'} detail={welcome?.detail??'Preparando tu espacio de mercado…'} onRetry={()=>setWelcome(previous=>previous?{...previous,attempt:previous.attempt+1,startedAt:Date.now(),phase:'loading',detail:'Volviendo a preparar tu feed…'}:previous)} onContinue={()=>setWelcome(previous=>previous?{...previous,phase:'leaving'}:previous)} onSignOut={signOut}/>}</TerminalEntryProvider></Context.Provider>;
   return <main className="auth-page relative flex min-h-screen items-center justify-center overflow-hidden px-5 py-10 text-slate-200 sm:px-8">
     <div className="relative grid w-full max-w-[960px] items-center gap-9 lg:grid-cols-[1fr_1.05fr] lg:gap-20">
       <section className="auth-intro mx-auto w-full max-w-md lg:mx-0">

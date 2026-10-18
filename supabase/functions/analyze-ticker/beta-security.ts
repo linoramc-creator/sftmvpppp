@@ -47,16 +47,23 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.accountAction) return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
-    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','extendedHours','assetContext','comparison','correlation','relativeComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','extendedHours','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='marketComparison'){
+      if(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>5||body.symbols.some((s:unknown)=>!symbol(s))||new Set(body.symbols.map((s:string)=>s.trim().toUpperCase())).size!==body.symbols.length)throw new BetaError(400,'Elige entre dos y cinco activos distintos y válidos.');
+      if(body.range!==undefined&&!['1m','3m','6m','1y'].includes(body.range))throw new BetaError(400,'Ventana inválida.');
+      if(body.includeAnalysis!==undefined&&typeof body.includeAnalysis!=='boolean')throw new BetaError(400,'Opción de análisis inválida.');
+      if(body.includeAi!==undefined)throw new BetaError(400,'Opción de análisis inválida.');
+      return {request_class:body.includeAnalysis===true?'expensive':'data'};
+    }
     if(body.panel==='relativeComparison'){
       if(!Array.isArray(body.symbols)||body.symbols.length!==2||body.symbols.some((s:unknown)=>!symbol(s))||new Set(body.symbols.map((s:string)=>s.trim().toUpperCase())).size!==2)throw new BetaError(400,'Elige dos activos distintos y válidos.');
       if(body.includeAi!==undefined&&typeof body.includeAi!=='boolean')throw new BetaError(400,'Opción de interpretación inválida.');
       return {request_class:body.includeAi===true?'expensive':'data'};
     }
-    if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>12||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 12 ETF válidos.');
+    if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>5||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 5 activos válidos.');
     if(body.panel==='assetContext'&&body.benchmark!==undefined&&!['','XLC','XLY','XLP','XLE','XLF','XLV','XLI','XLK','XLB','XLRE','XLU'].includes(body.benchmark))throw new BetaError(400,'Referencia inválida.');
-  if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
-    if(['news','institutional','business','assetSnapshot','extendedHours','assetContext'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
+  if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>5||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 5 activos válidos.');
+    if(['news','institutional','business','assetSnapshot','extendedHours','assetContext','marketPulse'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
     return {request_class:['feed','feedNews','news','business','institutional','assetSnapshot'].includes(body.panel)?'expensive':'data'};
   }
   if(body.marketData===true){if(body.symbols!==undefined&&(!Array.isArray(body.symbols)||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Lista de activos inválida.');return {request_class:'data'};}

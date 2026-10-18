@@ -8,9 +8,10 @@ type Row=Record<string,any>;
 export type RelativeAsset={symbol:string;name:string;kind:'stock'|'etf'|'index'|'future'|'other';currency:string;asOf:string|null;price:number|null;return20:number|null;return63:number|null;volatility20:number|null;drawdown:number|null;avgTurnover20:number|null;relativeVolume:number|null;upVolumeShare20:number|null;aboveSma50:boolean|null;aboveSma200:boolean|null;valuation:{pe:number|null;pb:number|null};institutions:{status:'available'|'unavailable'|'not-applicable';period:string|null;previousPeriod:string|null;shares:number|null;sharesChangePct:number|null;investors:number|null;ownershipPct:number|null;reason:string};options:{status:'available'|'unavailable'|'not-applicable';expiry:string|null;asOf:string|null;contracts:number;callVolume:number|null;putVolume:number|null;putCallVolume:number|null;putCallOi:number|null;atmIv:number|null;volumeSample?:{callVolume:number|null;putVolume:number|null;callContracts:number;putContracts:number;totalCalls:number;totalPuts:number};reason:string};fundFlows:{status:'available'|'unavailable'|'not-applicable';value:number|null;period:string|null;reason:string}};
 export type RelativeChartRow={date:string;a:number;b:number;ratio:number|null;drawdownA:number;drawdownB:number};
 export type RelativeComparison={fetchedAt:string;symbols:[string,string];assets:RelativeAsset[];window:{start:string|null;end:string|null;observations:number;currencyAligned:boolean};chart:RelativeChartRow[];metrics:{correlation:number|null;betaAtoB:number|null;trackingError:number|null;relative20:number|null;relative63:number|null;spreadZ:number|null};findings:{id:string;kind:'advantage'|'vulnerability'|'context';symbol:string|null;title:string;text:string}[];factors:{symbol:string;label:string;asOf:string|null;correlationA:number|null;correlationB:number|null;change20:number|null}[];news:Article[];ai:{status:'not-requested'|'ready'|'unavailable';paragraphs:string[];model?:string;cached?:boolean}};
-type History=PriceSeries&{kind:RelativeAsset['kind']};
+export type History=PriceSeries&{kind:RelativeAsset['kind']};
 type OptionRaw={expiry:string;rawCalls:Row[];rawPuts:Row[];spot:number;asOf?:string|null};
-type Deps={summary:(symbol:string,modules:string)=>Promise<Row|null>;options:(symbol:string)=>Promise<OptionRaw|null>;news:()=>Promise<Article[]>};
+export type RelativeDependencies={summary:(symbol:string,modules:string)=>Promise<Row|null>;options:(symbol:string)=>Promise<OptionRaw|null>;news:()=>Promise<Article[]>};
+type Deps=RelativeDependencies;
 type Env={FMP_KEY:string;GEMINI_API_KEY:string};
 const num=(v:unknown):number|null=>typeof v==='number'&&Number.isFinite(v)?v:v&&typeof v==='object'&&'raw' in v?num((v as Row).raw):null;
 const avg=(rows:number[])=>rows.reduce((a,b)=>a+b,0)/rows.length;
@@ -40,6 +41,7 @@ export function normalizeRelativeHistory(symbol:string,raw:any,now=Date.now()):H
 async function history(symbol:string):Promise<History|null>{return cached('relative-history-v1:'+symbol,300000,async()=>{
  try{const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error',signal:AbortSignal.timeout(9000)});return r.ok?normalizeRelativeHistory(symbol,await r.json()):null;}catch{return null;}
 });}
+export {history as relativeHistory};
 const change=(p:number[],n:number)=>p.length>n?(p.at(-1)!/p[p.length-1-n]-1)*100:null;
 const returns=(p:number[])=>p.slice(1).map((value,i)=>value/p[i]-1);
 function drawdowns(prices:number[]){let peak=prices[0];return prices.map(v=>{peak=Math.max(peak,v);return(v/peak-1)*100;});}

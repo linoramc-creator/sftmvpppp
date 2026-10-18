@@ -32,40 +32,30 @@
 .terminal-welcome-wrap {
   position: fixed;
   z-index: 70;
-  top: 4.5rem;
-  left: 0;
-  right: 0;
-  padding: 0 1rem;
+  inset: 0;
+  min-height: 100dvh;
+  padding: 2rem 1.5rem;
   display: flex;
+  align-items: center;
   justify-content: center;
-  pointer-events: none;
+  background: #080e17;
+  transition: opacity 380ms ease, visibility 380ms;
   font-family: var(--font-sans);
 }
+.terminal-welcome-wrap[data-state="leaving"] { opacity: 0; pointer-events: none; }
+.terminal-welcome-grid { position: absolute; inset: 0; opacity: .45; background: radial-gradient(ellipse at 20% 20%, #1b385b80, transparent 65%), radial-gradient(ellipse at 85% 90%, #12382e40, transparent 60%); }
 .terminal-welcome-panel {
   position: relative;
-  display: flex;
-  justify-content: space-between;
-  overflow: hidden;
-  width: min(100%, 420px);
-  border: 1px solid #3e526b;
-  border-radius: .875rem;
-  background: linear-gradient(115deg, #132030f7, #0d1622fa);
-  box-shadow: 0 18px 65px #0008;
-  pointer-events: auto;
-  animation: terminal-welcome 1400ms cubic-bezier(.2,.7,.2,1) both;
+  width: min(100%, 640px);
+  padding: 2rem 0;
+  animation: auth-reveal 600ms cubic-bezier(.2,.7,.2,1) both;
 }
-.terminal-welcome-accent { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: linear-gradient(#60a5fa, #34d399); }
-.terminal-entry-content { animation: auth-reveal 420ms ease-out both; }
+.terminal-welcome-divider { height: 1px; width: 5rem; margin: 2rem 0; background: linear-gradient(90deg,#34d399,#60a5fa70,transparent); }
 @keyframes auth-reveal {
   from { opacity: .4; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
-@keyframes terminal-welcome {
-  0% { opacity: 0; transform: translateY(-8px); }
-  14%, 85% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-4px); }
-}
 @media (prefers-reduced-motion: reduce) {
-  .auth-intro, .auth-card, .terminal-welcome-panel, .terminal-entry-content { animation: none; }
-  .auth-input { transition: none; }
+  .auth-intro, .auth-card, .terminal-welcome-panel { animation: none; }
+  .auth-input, .terminal-welcome-wrap { transition: none; }
 }

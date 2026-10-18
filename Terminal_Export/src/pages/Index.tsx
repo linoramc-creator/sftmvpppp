@@ -22,8 +22,8 @@ import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
 
 const AssetDetail = lazy(() => import("@/components/AssetDetail"));
-const MarketTools = lazy(() => import("@/pages/MarketTools"));
-const RelativeAnalysis = lazy(() => import("@/pages/RelativeAnalysis"));
+const UnifiedComparison = lazy(() => import("@/pages/UnifiedComparison"));
+const MarketInstrumentDetail = lazy(() => import("@/components/MarketInstrumentDetail"));
 import type { EtfResponse } from "@/types/etf";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -282,15 +282,18 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"feed" | "brief" | "ticker" | "etf" | "sector" | "comparacion" | "relativo" | "seguimiento" | "bonos" | "guardados">("feed");
+  const [navTab, setNavTab] = useState<"feed" | "brief" | "ticker" | "etf" | "sector" | "comparacion" | "mercado" | "seguimiento" | "bonos" | "guardados">("feed");
 
 
 
   const [watchSymbol,setWatchSymbol]=useState("");
   const openWatchAsset=(symbol:string)=>{setWatchSymbol(symbol);setNavTab("seguimiento");};
+  const [marketSymbol,setMarketSymbol]=useState('');
+  const openMarketAsset=(symbol:string)=>{setMarketSymbol(symbol);setNavTab('mercado');};
 
   // Market ticker
   const [marketData,    setMarketData]    = useState<MarketData | null>(null);
+  const [marketDataKey,setMarketDataKey] = useState<string|null>(null);
   const [customStocks,  setCustomStocks]  = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(`terminal_stocks_v2:${profile.id}`) || '["AAPL","MSFT","NVDA"]'); }
     catch (_) { return ["AAPL", "MSFT", "NVDA"]; }
@@ -303,7 +306,22 @@ const Index = () => {
   const watchlistEdited=useRef(false);
   const watchlistQueue=useRef<Promise<unknown>>(Promise.resolve());
   const persistWatchlist=(symbols:string[])=>{const task=watchlistQueue.current.catch(()=>{}).then(()=>accountApi('saveWatchlist',{symbols}));watchlistQueue.current=task;return task;};
-  useEffect(()=>{let active=true;accountApi<{symbols:string[]|null}>('getWatchlist').then(({symbols})=>{if(!active||watchlistEdited.current)return;const localKey=`terminal_stocks_v2:${profile.id}`,syncKey=`terminal_stocks_synced_v1:${profile.id}`;let importLocal=false;try{importLocal=localStorage.getItem(localKey)!==null&&!localStorage.getItem(syncKey);}catch{}if(importLocal||symbols===null){void persistWatchlist(customStocks).then(()=>{try{localStorage.setItem(syncKey,'1');}catch{}}).catch(()=>{});}else{setCustomStocks(symbols);try{localStorage.setItem(localKey,JSON.stringify(symbols));localStorage.setItem(syncKey,'1');}catch{}}}).catch(()=>{});return()=>{active=false;};},[profile.id]);
+  const [watchlistReady,setWatchlistReady]=useState(false),[watchlistError,setWatchlistError]=useState(''),[watchlistRetry,setWatchlistRetry]=useState(0);
+  useEffect(()=>{
+    let active=true;setWatchlistReady(false);setWatchlistError('');
+    const synchronize=async()=>{
+      try{
+        const {symbols}=await accountApi<{symbols:string[]|null}>('getWatchlist');
+        if(!active)return;if(watchlistEdited.current){setWatchlistReady(true);return;}
+        const localKey=`terminal_stocks_v2:${profile.id}`,syncKey=`terminal_stocks_synced_v1:${profile.id}`;
+        let importLocal=false;try{importLocal=localStorage.getItem(localKey)!==null&&!localStorage.getItem(syncKey);}catch{}
+        if(importLocal||symbols===null){await persistWatchlist(customStocks);if(!active)return;try{localStorage.setItem(syncKey,'1');}catch{}}
+        else{setCustomStocks(symbols);try{localStorage.setItem(localKey,JSON.stringify(symbols));localStorage.setItem(syncKey,'1');}catch{}}
+        if(active)setWatchlistReady(true);
+      }catch{if(active)setWatchlistError('No se ha podido sincronizar tu lista de seguimiento.');}
+    };
+    void synchronize();return()=>{active=false;};
+  },[profile.id,watchlistRetry]);
 
   useEffect(() => {
     let active=true;
@@ -314,7 +332,7 @@ const Index = () => {
   // Fetch market data on mount + every 60s
   useEffect(() => {
     let active = true;
-    const load = () => fetchMarketData(customStocks).then(d => { if (active && d) setMarketData(d); });
+    const load = () => fetchMarketData(customStocks).then(d => { if (active && d) {setMarketData(d);setMarketDataKey(customStocks.join(','));} });
     load();
     const id = setInterval(() => { if(document.visibilityState==='visible')void load(); }, 60_000);
     return () => { active = false; clearInterval(id); };
@@ -574,8 +592,7 @@ const Index = () => {
                 { label: "TICKER",    key: "ticker"    },
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
-                { label: "COMPARAR Y CORRELACIÓN", key: "comparacion" },
-                { label: "ANÁLISIS RELATIVO", key: "relativo" },
+                { label: "COMPARAR", key: "comparacion" },
                 { label: "BONOS", key: "bonos" },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
@@ -621,11 +638,11 @@ const Index = () => {
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       <KeepPanel active={navTab === "bonos"}><main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main></KeepPanel>
-      <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} /></main></KeepPanel>
+      <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} onMarketSelect={openMarketAsset} watchlistReady={watchlistReady} watchlistError={watchlistError} onRetryWatchlist={()=>setWatchlistRetry(n=>n+1)} tickerReady={marketData!==null&&marketDataKey===customStocks.join(',')}/></main></KeepPanel>
       <KeepPanel active={navTab === "brief"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo brief…</p>}><DailyBrief watchlist={customStocks} syncWatchlist={()=>persistWatchlist(customStocks)}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol} symbol={watchSymbol} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
-      <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Cargando comparación…</p>}><MarketTools /></Suspense></KeepPanel>
-      <KeepPanel active={navTab === "relativo"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo análisis relativo…</p>}><RelativeAnalysis /></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "mercado"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo sesión de mercado…</p>}><MarketInstrumentDetail key={marketSymbol} symbol={marketSymbol} onBack={()=>setNavTab('feed')} onSelect={openMarketAsset}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo comparación…</p>}><UnifiedComparison /></Suspense></KeepPanel>
       <KeepPanel active={navTab === "ticker"}>
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">

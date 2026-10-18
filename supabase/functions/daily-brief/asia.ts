@@ -9,7 +9,7 @@ export const ASIA_MARKETS:AsiaMarket[]=[
  {symbol:'000001.SS',name:'Shanghai Composite',country:'China',timezone:'Asia/Shanghai',open:570,close:900,pause:[690,780]},
 ];
 export type AsiaSession={symbol:string;name:string;country:string;timezone:string;status:AsiaStatus;date:string|null;price:number|null;change:number|null;at:string|null;previousClose:number|null;previousDate:string|null};
-export type AsiaOpening={cutoff:string;summary:string;markets:AsiaSession[]};
+export type AsiaOpening={cutoff:string;summary:string;editorial?:string;markets:AsiaSession[]};
 const positive=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>0;
 function local(time:number,timezone:string){const p=new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(time),get=(key:string)=>p.find(v=>v.type===key)?.value??'';return {date:`${get('year')}-${get('month')}-${get('day')}`,minute:Number(get('hour'))*60+Number(get('minute'))};}
 export function normalizeAsiaSession(market:AsiaMarket,daily:any,intraday:any,cutoff:number):AsiaSession{

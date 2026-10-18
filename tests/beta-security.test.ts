@@ -50,3 +50,11 @@ test('relative comparisons cannot mix account, data or provider operations to by
   assert.throws(()=>classify({panel:'relativeComparison',symbols:['AAPL','SPY'],includeAi:true,...extra}),e=>e instanceof BetaError&&e.status===400);
  }
 });
+
+test('unified comparisons enforce a maximum of five and strict analysis billing before providers run',()=>{
+ assert.equal(classify({panel:'marketComparison',symbols:['AAPL','MSFT','SPY','QQQ','TLT'],range:'6m'}).request_class,'data');
+ assert.equal(classify({panel:'marketComparison',symbols:['AAPL','MSFT'],includeAnalysis:true}).request_class,'expensive');
+ for(const body of [{symbols:['AAPL']},{symbols:['AAPL',' AAPL ']},{symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD']},{symbols:['AAPL','../secrets']},{symbols:['AAPL','MSFT'],includeAnalysis:'true'},{symbols:['AAPL','MSFT'],includeAi:true},{symbols:['AAPL','MSFT'],range:'max'},{symbols:['AAPL','MSFT'],marketData:true}])assert.throws(()=>classify({panel:'marketComparison',...body}),BetaError);
+ for(const panel of ['comparison','correlation'])assert.throws(()=>classify({panel,symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD']}),BetaError);
+ assert.equal(classify({panel:'marketPulse',subject:'^GSPC'}).request_class,'data');assert.throws(()=>classify({panel:'marketPulse',subject:'https://evil.test/'}),BetaError);
+});
