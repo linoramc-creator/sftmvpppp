@@ -6,7 +6,7 @@ import { useProfile } from "@/components/AuthGate";
 import { cleanReportText } from "@/lib/editorial";
 import { RevenueGrowthSection } from "@/components/charts/RevenueGrowthChart";
 import { buildGrowthChartData } from "@/lib/revenue-growth";
-import { BondsView, BusinessView, FeedView, InstitutionalView, NewsView } from "@/components/MarketPanels";
+import { BusinessView, FeedView, InstitutionalView, NewsView } from "@/components/MarketPanels";
 import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
@@ -24,6 +24,8 @@ import { fetchEtfData } from "@/lib/etf-api";
 const AssetDetail = lazy(() => import("@/components/AssetDetail"));
 const UnifiedComparison = lazy(() => import("@/pages/UnifiedComparison"));
 const MarketInstrumentDetail = lazy(() => import("@/components/MarketInstrumentDetail"));
+const BondsCreditView = lazy(() => import("@/components/BondsCreditView"));
+const SectorActivity = lazy(() => import("@/components/SectorActivity"));
 import type { EtfResponse } from "@/types/etf";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -593,7 +595,7 @@ const Index = () => {
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
                 { label: "COMPARAR", key: "comparacion" },
-                { label: "BONOS", key: "bonos" },
+                { label: "BONOS Y CRÉDITOS", key: "bonos" },
                 { label: "GUARDADOS", key: "guardados" },
               ] as const).map(({ label, key }) => {
                 const active = navTab === key;
@@ -637,7 +639,7 @@ const Index = () => {
       />
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
-      <KeepPanel active={navTab === "bonos"}><main className="max-w-7xl mx-auto px-4 py-6"><BondsView /></main></KeepPanel>
+      <KeepPanel active={navTab === "bonos"}><Suspense fallback={<div role="status" className="mx-auto my-6 h-64 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse" aria-label="Cargando bonos y créditos"/>}><BondsCreditView /></Suspense></KeepPanel>
       <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} onMarketSelect={openMarketAsset} watchlistReady={watchlistReady} watchlistError={watchlistError} onRetryWatchlist={()=>setWatchlistRetry(n=>n+1)} tickerReady={marketData!==null&&marketDataKey===customStocks.join(',')}/></main></KeepPanel>
       <KeepPanel active={navTab === "brief"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo brief…</p>}><DailyBrief watchlist={customStocks} syncWatchlist={()=>persistWatchlist(customStocks)}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol} symbol={watchSymbol} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
@@ -725,16 +727,6 @@ const Index = () => {
           {/* Loading placeholder */}
           {isLoading && <ReportLoading subject={activeTicker} streaming={Boolean(activeAnalysis)} />}
 
-          {/* Empty state */}
-          {!activeAnalysis && !isLoading && !error && (
-            <div className="flex flex-col items-center justify-center py-28 opacity-20">
-              <div className="text-5xl font-bold tracking-[0.3em] text-primary mb-3">TERMINAL</div>
-              <p className="text-[10px] tracking-[0.4em] text-muted-foreground">
-                INTRODUCE UN TICKER PARA GENERAR UN INFORME
-              </p>
-            </div>
-          )}
-
           {/* Report */}
           {activeAnalysis && (viewingReport?.kind === 'etf' ? <EtfReportView content={activeAnalysis} ticker={activeTicker} etfDeep={viewingReport.etfDeep??null} isLoading={false} activeSection={activeSection} onSelectSection={setActiveSection} /> : viewingReport?.kind === 'sector' ? <SectorReportView content={activeAnalysis} sectorName={activeTicker} isLoading={false} expanded={sectorExpanded} onToggle={toggleSectorSection} /> :
             <ReportView
@@ -819,27 +811,6 @@ const Index = () => {
           {currentEtf&&<ExtendedHours symbol={currentEtf}/>}
           {isEtfLoading && <ReportLoading subject={etfInput} streaming={Boolean(etfAnalysis)} />}
 
-          {/* Empty state */}
-          {!etfAnalysis && !isEtfLoading && !etfError && !etfNotFund && (
-            <div className="flex flex-col items-center justify-center py-28 opacity-20">
-              <div className="text-5xl font-bold tracking-[0.3em] text-primary mb-3">ETF</div>
-              <p className="text-[10px] tracking-[0.4em] text-muted-foreground">
-                INTRODUCE UN ETF PARA GENERAR UN ANÁLISIS COMPLETO
-              </p>
-              <div className="mt-5 flex flex-wrap gap-2 justify-center">
-                {["SPY","QQQ","GLD","TAN","IWM","XLE","ARKK"].map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setEtfInput(s)}
-                    className="text-[9px] tracking-widest border border-border/50 px-2 py-1 hover:border-primary/40 hover:text-primary transition-colors"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* ETF report */}
           {etfAnalysis && !etfNotFund && (
             <EtfReportView
@@ -900,27 +871,6 @@ const Index = () => {
 
           {/* Loading */}
           {isSectorLoading && <ReportLoading subject={sectorInput} streaming={Boolean(sectorAnalysis)} />}
-
-          {/* Empty state */}
-          {!sectorAnalysis && !isSectorLoading && !sectorError && (
-            <div className="flex flex-col items-center justify-center py-28 opacity-20">
-              <div className="text-4xl font-bold tracking-[0.2em] text-primary mb-3">SECTOR</div>
-              <p className="text-[10px] tracking-[0.4em] text-muted-foreground">
-                INTRODUCE UN SECTOR PARA GENERAR UN ANÁLISIS COMPLETO
-              </p>
-              <div className="mt-5 flex flex-wrap gap-2 justify-center">
-                {["Semiconductores","Inteligencia Artificial","Energía","Salud","Fintech","Defensa","Consumo"].map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setSectorInput(s)}
-                    className="text-[9px] tracking-widest border border-border/50 px-2 py-1 hover:border-primary/40 hover:text-primary transition-colors"
-                  >
-                    {s.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {sectorAnalysis&&!isSectorLoading&&<button disabled={saving} onClick={()=>saveCurrent("sector")} className="mb-4 text-xs text-primary border border-primary/30 px-4 py-2">GUARDAR INFORME DEL SECTOR</button>}
           {/* Sector report */}
@@ -1391,6 +1341,7 @@ function SectorReportView({
                 {key === "Noticias y Tendencias" && <NewsView key={sectorName} subject={sectorName} sector />}
                 {key === "Noticias y Tendencias" && sectionNodes && renderElements(sectorTrends(sectionNodes))}
                 {sectionNodes && key !== "Noticias y Tendencias" && !isMacro && renderElements(sectionNodes)}
+                {key === "Empresas Líderes" && <Suspense fallback={<div role="status" className="mt-4 h-40 rounded-xl bg-secondary/30 motion-safe:animate-pulse" aria-label="Cargando actividad del sector"/>}><SectorActivity sector={sectorName} report={content} isLoading={isLoading}/></Suspense>}
                 {isLoading && isLast && (
                   <span className="terminal-cursor text-primary ml-1" />
                 )}

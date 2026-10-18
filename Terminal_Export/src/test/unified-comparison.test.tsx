@@ -12,10 +12,10 @@ beforeEach(()=>{request.mockReset();});
 function compare(container:HTMLElement){fireEvent.change(screen.getByLabelText('Activos para comparar'),{target:{value:'SPY, QQQ'}});fireEvent.submit(container.querySelector('form')!);}
 
 it('validates the full selection without silently truncating tickers or adding presets',()=>{
- expect(parseComparisonInput('BRK-B, ^GSPC').error).toBe('');expect(parseComparisonInput('SPY QQQ URTH IWM VEA VWO').symbols).toHaveLength(6);
- expect(parseComparisonInput('SPY QQQ URTH IWM VEA VWO').error).toContain('máximo de cinco');expect(parseComparisonInput('SPY,SPY').error).toContain('una sola vez');expect(parseComparisonInput('AAPL<script>, SPY').error).toContain('válido');
+ expect(parseComparisonInput('BRK-B, ^GSPC').error).toBe('');expect(parseComparisonInput('AAPL MSFT SPY QQQ TLT GLD').error).toBe('');expect(parseComparisonInput('SPY QQQ URTH IWM VEA VWO GLD').symbols).toHaveLength(7);
+ expect(parseComparisonInput('SPY QQQ URTH IWM VEA VWO GLD').error).toContain('máximo de seis');expect(parseComparisonInput('SPY,SPY').error).toContain('una sola vez');expect(parseComparisonInput('AAPL<script>, SPY').error).toContain('válido');
  const {container}=render(<UnifiedComparison/>);expect(container.querySelectorAll('form')).toHaveLength(1);expect(screen.getByLabelText('Activos para comparar')).toHaveValue('');
- fireEvent.change(screen.getByLabelText('Activos para comparar'),{target:{value:'SPY QQQ URTH IWM VEA VWO'}});expect(screen.getByText(/Retira los tickers sobrantes/)).toBeVisible();expect(screen.getByRole('button',{name:'Comparar activos'})).toBeDisabled();expect(request).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('Activos para comparar'),{target:{value:'SPY QQQ URTH IWM VEA VWO GLD'}});expect(screen.getByText(/Retira los tickers sobrantes/)).toBeVisible();expect(screen.getByRole('button',{name:'Comparar activos'})).toBeDisabled();expect(request).not.toHaveBeenCalled();
 });
 it('loads all comparison views with one form and analyzes the displayed pair and period after draft edits',async()=>{
  request.mockResolvedValueOnce(Response.json(data)).mockResolvedValueOnce(Response.json(withAnalysis));
@@ -40,4 +40,13 @@ it('rejects a response for another selection instead of overwriting the comparis
 it('aborts an outstanding request when the comparison unmounts',async()=>{
  let finish!:(value:Response)=>void;request.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));const {container,unmount}=render(<UnifiedComparison/>);compare(container);const signal=request.mock.calls[0][1].signal as AbortSignal;
  unmount();expect(signal.aborted).toBe(true);finish(Response.json(data));
+});
+it('accepts six selected assets and reports the complete count without adding a preset',()=>{
+ render(<UnifiedComparison/>);fireEvent.change(screen.getByLabelText('Activos para comparar'),{target:{value:'AAPL MSFT SPY QQQ TLT GLD'}});
+ expect(screen.getByRole('button',{name:'Comparar activos'})).toBeEnabled();expect(screen.getByText(/6\/6 activos/)).toBeVisible();expect(parseComparisonInput('AAPL MSFT SPY QQQ TLT GLD').symbols).toHaveLength(6);
+});
+it('groups missing complementary data and omits metrics and sections that have no verified observations',async()=>{
+ const incomplete={...data,assets:data.assets.map(a=>({...a,window:{...a.window,volatility:null},benchmark:{...a.benchmark,betaSP500:null,trackingErrorSP500:null}}))};
+ request.mockResolvedValueOnce(Response.json(incomplete));const {container}=render(<UnifiedComparison/>);compare(container);await screen.findByRole('heading',{name:'Riesgo y referencias de mercado'});
+ expect(screen.queryByRole('heading',{name:'Valoración de las empresas'})).toBeNull();expect(screen.queryByRole('heading',{name:'Histórico de posiciones declaradas'})).toBeNull();expect(screen.queryByText('Beta S&P 500')).toBeNull();expect(screen.queryByText('Tracking error S&P 500 · anualizado')).toBeNull();expect(screen.getByText('Disponibilidad de datos complementarios')).toBeVisible();expect(container.querySelector('details')).not.toHaveAttribute('open');
 });

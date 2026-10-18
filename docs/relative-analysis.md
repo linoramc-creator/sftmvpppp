@@ -2,12 +2,11 @@
 
 La navegación presenta un único apartado **Comparar**. El panel
 `marketComparison` reúne comparación, correlación y análisis relativo para entre
-dos y cinco símbolos distintos. Acepta ventanas `1m`, `3m`, `6m` y `1y`;
+dos y seis símbolos distintos. Acepta ventanas `1m`, `3m`, `6m` y `1y`;
 `includeAnalysis` es un booleano estricto. La carga inicial solo calcula datos;
 **Analizar métricas** añade conclusiones estructuradas y una interpretación
 acotada de las evidencias. El modelo no puede modificar los valores, la
-clasificación ni las fechas calculadas. Los comentarios tienen un máximo de
-treinta y cinco palabras y no pueden introducir cifras.
+clasificación ni las fechas calculadas. La lectura final añade una nota específica para cada activo con historial suficiente y comentarios sobre parejas y riesgos concretos. Cada texto debe referirse al activo y a evidencias exactas; las cifras solo se admiten si figuran en esas evidencias. Los valores calculados permanecen inmutables.
 
 Se conservan los precios por activo, las referencias SPY/URTH, matrices con el
 número de observaciones por pareja, correlaciones móviles, caídas, ratios por
@@ -86,3 +85,44 @@ comparte únicamente datos públicos de mercado, nunca perfiles o informes
 privados. La migración `202610170001_relative_market_cache.sql` conserva RLS y
 acceso exclusivo del rol de servicio. La prueba SQL de regresión revierte todas
 sus escrituras.
+
+
+## Seis activos y análisis específico (18 de octubre de 2026)
+
+La validación y el cálculo admiten de dos a seis activos distintos; un séptimo
+se rechaza sin recortar la selección. Hasta ocho series incluyen las referencias
+SPY y URTH, con colores diferenciados.
+
+La lectura final recibe por activo rentabilidad y riesgo del período, tendencia,
+valoración disponible, posiciones fechadas, cobertura de opciones y sensibilidades,
+además de noticias compartidas. No recibe históricos completos ni imágenes. Una
+única petición a Gemini Flash usa salida JSON con esquema, razonamiento mínimo,
+35 segundos de plazo y máximo de 4.200 tokens. Produce notas de entre treinta y
+setenta palabras por activo y comparaciones seleccionadas; no modifica las tablas,
+no genera órdenes de compra/venta y no presenta volumen como flujo de dinero.
+
+El validador exige identificadores y referencias de evidencia exactos,
+longitud acotada y cifras presentes en la evidencia asociada, admitiendo su
+redondeo exacto a cero, uno o dos decimales como en las tablas.
+El nombre verificado de una empresa o fondo puede aparecer en el texto sin
+repetir su ticker, que ya está en el encabezado de la tarjeta. La evidencia de
+cada activo conserva también su hallazgo ya formateado; no se sobrescribe al
+añadir los datos sin redondear. Conserva un diagnóstico
+sin respuestas crudas ni secretos: indisponibilidad, HTTP rechazado, JSON truncado,
+respuesta inválida o notas aceptadas/rechazadas. La versión anterior omitía estos
+motivos y descartaba incluso horizontes numéricos habituales; no es posible atribuir
+una respuesta histórica `enhanced:false` a una causa exacta sin sus registros.
+No se reintenta una generación fallida o ambigua. La huella de caché incluye activos,
+parejas, cobertura y factores; una interpretación válida dura 45 minutos. Guarda
+también las noticias utilizadas en esa edición y consulta la caché antes de
+refrescarlas: una actualización del feed no vuelve a facturar la misma selección.
+Las notas interpretativas evitan repetir cifras que ya aparecen en sus tarjetas.
+
+Las filas completamente vacías y los apartados no aplicables se omiten. Las
+carencias verificadas se agrupan en «Disponibilidad de datos complementarios»,
+sin convertirlas en ceros ni en cálculos estimados. La valoración de empresas se
+separa de fondos e índices. Los ratios de opciones con cobertura parcial siguen
+sin calcularse, aunque se muestran los contratos y volúmenes realmente observados.
+El acceso actual a ratios de Massive para AAPL volvió a devolver HTTP 403; no se
+han contratado planes ni se simula una fuente alternativa para datos institucionales
+que no estén autorizados.

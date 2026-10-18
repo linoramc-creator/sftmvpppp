@@ -51,10 +51,20 @@ test('relative comparisons cannot mix account, data or provider operations to by
  }
 });
 
-test('unified comparisons enforce a maximum of five and strict analysis billing before providers run',()=>{
- assert.equal(classify({panel:'marketComparison',symbols:['AAPL','MSFT','SPY','QQQ','TLT'],range:'6m'}).request_class,'data');
+test('unified comparisons enforce a maximum of six and strict analysis billing before providers run',()=>{
+ assert.equal(classify({panel:'marketComparison',symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD'],range:'6m'}).request_class,'data');
  assert.equal(classify({panel:'marketComparison',symbols:['AAPL','MSFT'],includeAnalysis:true}).request_class,'expensive');
- for(const body of [{symbols:['AAPL']},{symbols:['AAPL',' AAPL ']},{symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD']},{symbols:['AAPL','../secrets']},{symbols:['AAPL','MSFT'],includeAnalysis:'true'},{symbols:['AAPL','MSFT'],includeAi:true},{symbols:['AAPL','MSFT'],range:'max'},{symbols:['AAPL','MSFT'],marketData:true}])assert.throws(()=>classify({panel:'marketComparison',...body}),BetaError);
- for(const panel of ['comparison','correlation'])assert.throws(()=>classify({panel,symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD']}),BetaError);
+ for(const body of [{symbols:['AAPL']},{symbols:['AAPL',' AAPL ']},{symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD','IEF']},{symbols:['AAPL','../secrets']},{symbols:['AAPL','MSFT'],includeAnalysis:'true'},{symbols:['AAPL','MSFT'],includeAi:true},{symbols:['AAPL','MSFT'],range:'max'},{symbols:['AAPL','MSFT'],marketData:true}])assert.throws(()=>classify({panel:'marketComparison',...body}),BetaError);
+ for(const panel of ['comparison','correlation']){
+  assert.equal(classify({panel,symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD']}).request_class,'data');
+  assert.throws(()=>classify({panel,symbols:['AAPL','MSFT','SPY','QQQ','TLT','GLD','IEF']}),BetaError);
+ }
  assert.equal(classify({panel:'marketPulse',subject:'^GSPC'}).request_class,'data');assert.throws(()=>classify({panel:'marketPulse',subject:'https://evil.test/'}),BetaError);
+});
+
+test('credit and sector activity routes keep identity and payload limits before any data lookup',()=>{
+ assert.equal(classify({panel:'bondsCredit'}).request_class,'data');
+ const valid={panel:'sectorActivity',subject:'Semiconductores',peers:[{symbol:'NVDA',name:'NVIDIA Corporation'},{symbol:'ASML',name:'ASML Holding N.V.'}]};
+ assert.equal(classify(valid).request_class,'data');
+ for(const extra of [{subject:'<script>'},{subject:'a'.repeat(81)},{peers:[]},{peers:Array(11).fill({symbol:'NVDA',name:'NVIDIA'})},{peers:[{symbol:'NVDA',name:'NVIDIA'},{symbol:' nvda ',name:'NVIDIA'}]},{peers:[{symbol:'https://evil.test/',name:'NVIDIA'}]},{peers:[{symbol:'NVDA',name:''}]},{peers:[{symbol:'NVDA',name:'x'.repeat(121)}]},{peers:[null]},{marketData:true}])assert.throws(()=>classify({...valid,...extra}),BetaError);
 });

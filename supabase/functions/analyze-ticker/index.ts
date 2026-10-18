@@ -9,6 +9,8 @@ import { sharedFeed } from './feed-cache.ts';
 import {relativeComparison,type RelativeDependencies} from './relative-comparison.ts';
 import {marketComparison} from './market-comparison.ts';
 import {marketPulse} from './market-pulse.ts';
+import {bondsCreditPanel} from './bonds-credit.ts';
+import {sectorActivity} from './sector-activity.ts';
 import { massiveContext } from './massive-news.ts';
 import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
 import { researchPeers } from './business-research.ts';
@@ -3955,6 +3957,8 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
       if(body.panel==='marketPulse')return panelJson(await marketPulse(String(body.subject).trim().toUpperCase()));
+      if(body.panel==='bondsCredit')return panelJson(await bondsCreditPanel(env));
+      if(body.panel==='sectorActivity')return panelJson(await sectorActivity(body.subject.trim(),body.peers.map((p:{symbol:string;name:string})=>({symbol:p.symbol.trim().toUpperCase(),name:p.name.trim()})),deps));
       if (body.panel === "relativeComparison"||body.panel === "marketComparison") {
         const relativeDeps:RelativeDependencies={
         summary:(symbol,modules)=>cached('relative-profile-v1:'+symbol,3600000,()=>eYahooQuoteSummary(symbol,modules)),

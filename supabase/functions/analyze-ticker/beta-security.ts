@@ -43,13 +43,18 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel==='correlation'&&body.range!==undefined&&!['1m','3m','6m','1y'].includes(body.range))throw new BetaError(400,'Ventana inválida.');
   const symbol = (v: unknown) => typeof v==='string'&&SYMBOL.test(v.trim().toUpperCase());
   if(body.ticker!==undefined&&!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');
-  if(body.subject!==undefined&&!['bonds','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
+  if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction) return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
-    if(!['feed','feedMarkets','feedNews','bonds','news','institutional','business','assetSnapshot','extendedHours','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','sectorActivity','news','institutional','business','assetSnapshot','extendedHours','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='sectorActivity'){
+      if(typeof body.subject!=='string'||!/^[\p{L}\p{N} &.,()/-]{2,80}$/u.test(body.subject.trim()))throw new BetaError(400,'Sector inválido.');
+      if(!Array.isArray(body.peers)||body.peers.length<1||body.peers.length>10||body.peers.some((p:unknown)=>!p||typeof p!=='object'||Array.isArray(p)||!symbol((p as Body).symbol)||typeof (p as Body).name!=='string'||(p as Body).name.trim().length<1||(p as Body).name.length>120)||new Set(body.peers.map((p:Body)=>p.symbol.trim().toUpperCase())).size!==body.peers.length)throw new BetaError(400,'Empresas del sector inválidas.');
+      return {request_class:'data'};
+    }
     if(body.panel==='marketComparison'){
-      if(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>5||body.symbols.some((s:unknown)=>!symbol(s))||new Set(body.symbols.map((s:string)=>s.trim().toUpperCase())).size!==body.symbols.length)throw new BetaError(400,'Elige entre dos y cinco activos distintos y válidos.');
+      if(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))||new Set(body.symbols.map((s:string)=>s.trim().toUpperCase())).size!==body.symbols.length)throw new BetaError(400,'Elige entre dos y seis activos distintos y válidos.');
       if(body.range!==undefined&&!['1m','3m','6m','1y'].includes(body.range))throw new BetaError(400,'Ventana inválida.');
       if(body.includeAnalysis!==undefined&&typeof body.includeAnalysis!=='boolean')throw new BetaError(400,'Opción de análisis inválida.');
       if(body.includeAi!==undefined)throw new BetaError(400,'Opción de análisis inválida.');
@@ -60,9 +65,9 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
       if(body.includeAi!==undefined&&typeof body.includeAi!=='boolean')throw new BetaError(400,'Opción de interpretación inválida.');
       return {request_class:body.includeAi===true?'expensive':'data'};
     }
-    if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>5||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 5 activos válidos.');
+    if(body.panel==='comparison'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
     if(body.panel==='assetContext'&&body.benchmark!==undefined&&!['','XLC','XLY','XLP','XLE','XLF','XLV','XLI','XLK','XLB','XLRE','XLU'].includes(body.benchmark))throw new BetaError(400,'Referencia inválida.');
-  if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>5||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 5 activos válidos.');
+  if(body.panel==='correlation'&&(!Array.isArray(body.symbols)||body.symbols.length<2||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Elige entre 2 y 6 activos válidos.');
     if(['news','institutional','business','assetSnapshot','extendedHours','assetContext','marketPulse'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
     return {request_class:['feed','feedNews','news','business','institutional','assetSnapshot'].includes(body.panel)?'expensive':'data'};
   }
