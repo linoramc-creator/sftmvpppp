@@ -580,14 +580,12 @@ const Index = () => {
 
       {/* ── Header ─────────────────────────────────────────────────── */}
       <header className="border-b border-border bg-card">
-        <div className="flex items-center justify-between px-5 h-10">
-          {/* Left: logo + nav */}
-          <div className="flex items-center gap-2 sm:gap-6 min-w-0 flex-1">
-            <div className="hidden sm:flex items-center gap-2 shrink-0">
-              <span className="w-2 h-2 rounded-full bg-primary inline-block" />
-              <span className="text-primary font-bold text-xs tracking-[0.25em]">TERMINAL</span>
-            </div>
-            <nav className="flex min-w-0 overflow-x-auto" aria-label="Apartados principales">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-4 pt-3 sm:px-5 xl:h-14 xl:grid-cols-[180px_minmax(0,1fr)_180px] xl:py-0 2xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:gap-x-6">
+          <div className="col-start-1 row-start-1 justify-self-start whitespace-nowrap font-body text-[15px] font-semibold tracking-[-0.02em] text-white">
+            MensorTerminal
+          </div>
+          <nav className="col-span-2 row-start-2 mt-2 min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:col-span-1 xl:col-start-2 xl:row-start-1 xl:mt-0" aria-label="Apartados principales">
+            <div className="mx-auto flex w-max items-center gap-1 sm:gap-2 2xl:gap-3">
               {([
                 { label: "FEED",       key: "feed"      },
                 ...(profile.isAdmin?[{label:"BRIEF",key:"brief"} as const]:[]),
@@ -603,7 +601,7 @@ const Index = () => {
                   <button
                     key={key}
                     onClick={() => setNavTab(key)}
-                    className={`px-4 h-10 shrink-0 text-[11px] tracking-widest transition-colors ${
+                    className={`h-11 shrink-0 whitespace-nowrap px-3 text-[11px] tracking-[0.1em] transition-colors xl:h-14 2xl:px-4 ${
                       active
                         ? "text-primary border-b-2 border-primary"
                         : "text-muted-foreground hover:text-foreground"
@@ -618,14 +616,14 @@ const Index = () => {
                   </button>
                 );
               })}
-            </nav>
-          </div>
+            </div>
+          </nav>
           {/* Right: live indicator + clock */}
-          <div className="hidden xl:flex shrink-0 items-center gap-3 text-[10px] text-muted-foreground/50 tabular-nums">
-            <span className="text-primary/50 tracking-widest">MKT</span>
-            <span className="text-primary/70">·</span>
-            <span className="text-primary/70 tracking-widest">LIVE</span>
-            <span className="text-primary/70">·</span>
+          <div className="col-start-2 row-start-1 hidden items-center gap-3 justify-self-end whitespace-nowrap text-[10px] text-muted-foreground/50 tabular-nums sm:flex xl:col-start-3">
+            <span className="hidden text-primary/50 tracking-widest 2xl:inline">MKT</span>
+            <span className="hidden text-primary/70 2xl:inline">·</span>
+            <span className="hidden text-primary/70 tracking-widest 2xl:inline">LIVE</span>
+            <span className="hidden text-primary/70 2xl:inline">·</span>
             <span><TerminalClock /></span>
           </div>
         </div>
