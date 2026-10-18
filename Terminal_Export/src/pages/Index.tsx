@@ -603,13 +603,13 @@ const Index = () => {
                     onClick={() => setNavTab(key)}
                     className={`h-11 shrink-0 whitespace-nowrap px-3 text-[11px] tracking-[0.1em] transition-colors xl:h-14 2xl:px-4 ${
                       active
-                        ? "text-primary border-b-2 border-primary"
-                        : "text-muted-foreground hover:text-foreground"
+                        ? "text-white border-b-2 border-white"
+                        : "text-white/70 hover:text-white"
                     }`}
                   >
                     {label}
                     {label === "GUARDADOS" && savedReports.length > 0 && (
-                      <span className="ml-1.5 text-[9px] bg-primary/15 text-primary px-1.5 py-0.5">
+                      <span className="ml-1.5 text-[9px] bg-white/10 text-white px-1.5 py-0.5">
                         {savedReports.length}
                       </span>
                     )}
@@ -620,10 +620,10 @@ const Index = () => {
           </nav>
           {/* Right: live indicator + clock */}
           <div className="col-start-2 row-start-1 hidden items-center gap-3 justify-self-end whitespace-nowrap text-[10px] text-muted-foreground/50 tabular-nums sm:flex xl:col-start-3">
-            <span className="hidden text-primary/50 tracking-widest 2xl:inline">MKT</span>
-            <span className="hidden text-primary/70 2xl:inline">·</span>
-            <span className="hidden text-primary/70 tracking-widest 2xl:inline">LIVE</span>
-            <span className="hidden text-primary/70 2xl:inline">·</span>
+            <span className="hidden text-white/50 tracking-widest 2xl:inline">MKT</span>
+            <span className="hidden text-white/70 2xl:inline">·</span>
+            <span className="hidden text-white/70 tracking-widest 2xl:inline">LIVE</span>
+            <span className="hidden text-white/70 2xl:inline">·</span>
             <span><TerminalClock /></span>
           </div>
         </div>
@@ -1122,7 +1122,7 @@ function ReportView({
       {ticker && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
           <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
-          <span className="text-base font-bold text-primary tracking-[0.15em]">{ticker}</span>
+          <span className="text-base font-bold text-section-heading tracking-[0.15em]">{ticker}</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">INFORME DE ANÁLISIS FINANCIERO</span>
           {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 ml-auto" />}
         </div>
@@ -1219,7 +1219,7 @@ function EtfReportView({
       {ticker && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
           <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
-          <span className="text-base font-bold text-primary tracking-[0.15em]">{ticker}</span>
+          <span className="text-base font-bold text-section-heading tracking-[0.15em]">{ticker}</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">ANÁLISIS DE ETF</span>
           {etfDeep?.name && (
             <span className="text-[10px] text-muted-foreground/55 truncate hidden sm:block">{etfDeep.name}</span>
@@ -1297,7 +1297,7 @@ function SectorReportView({
       {sectorName && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
           <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
-          <span className="text-base font-bold text-primary tracking-[0.15em]">{sectorName.toUpperCase()}</span>
+          <span className="text-base font-bold text-section-heading tracking-[0.15em]">{sectorName.toUpperCase()}</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">ANÁLISIS SECTORIAL COMPLETO</span>
           {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 ml-auto" />}
         </div>

@@ -61,7 +61,7 @@ function Status({ error, retry }: { error: string; retry: () => void }) {
   return <div className="border border-border p-8 text-sm text-muted-foreground" role="status">{error || 'Cargando…'}{error && <button className="ml-4 text-primary underline" onClick={retry}>Reintentar</button>}</div>;
 }
 function Box({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="border border-border bg-card p-4 min-w-0"><h3 className="text-xs font-semibold tracking-wider text-primary mb-4">{title}</h3>{children}</section>;
+  return <section className="border border-border bg-card p-4 min-w-0"><h3 className="text-xs font-semibold tracking-wider text-section-heading mb-4">{title}</h3>{children}</section>;
 }
 function Stamp({ at }: { at: string }) {
   return <p className="text-xs text-muted-foreground">Actualizado: {new Date(at).toLocaleString('es-ES')}</p>;
@@ -141,7 +141,7 @@ export function BondsView() {
   const common = treasury.length ? treasury[0].points.map(p => p.date).sort().reverse().find(d => dateSets.every(dates => dates.has(d))) : null;
   const curve = treasury.map(s => ({ maturity: s.label, yield: common ? s.points.find(p => p.date === common)?.value ?? null : null }));
   const historyStart = new Date(Date.now() - years * 365.25 * 86400000).toISOString().slice(0,10);
-  return <div className="space-y-6"><div><h1 className="text-xl font-semibold tracking-wide text-primary">BONOS · EE. UU.</h1><p className="text-sm text-muted-foreground mt-2">Treasuries, tipos reales, inflación implícita, riesgo de crédito y ETF de renta fija. Datos actualizados con la última fecha disponible.</p></div>
+  return <div className="space-y-6"><div><h1 className="text-xl font-semibold tracking-wide text-section-heading">BONOS · EE. UU.</h1><p className="text-sm text-muted-foreground mt-2">Treasuries, tipos reales, inflación implícita, riesgo de crédito y ETF de renta fija. Datos actualizados con la última fecha disponible.</p></div>
     {state.error && <Status {...state} />}
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{choose('DGS2', 'DGS10', 'T10Y2Y', 'DFF').map(s => <Box key={s.id} title={s.label}><p className="text-2xl font-mono">{fmt(s.points.at(-1)?.value)} {s.unit}</p><p className="text-xs text-muted-foreground mt-2">{s.points.at(-1)?.date ?? 'Sin observaciones'}</p></Box>)}</div>
     <div className="grid lg:grid-cols-2 gap-4">
@@ -181,8 +181,8 @@ export function BusinessView({ ticker }: { ticker: string }) {
   if (!state.data) return <Status {...state} />;
   const data = state.data;
   return <div className="space-y-5 py-3">{state.error && <Status {...state} />}
-    <Box title="MODELO DE NEGOCIO">{data.summary ? <dl className="grid md:grid-cols-3 gap-5 text-sm">{[['Actividad', data.summary.activity], ['Clientes', data.summary.customers], ['Cómo genera ingresos', data.summary.revenueModel]].map(([label, value]) => <div key={label}><dt className="text-primary text-xs font-semibold mb-2">{label}</dt><dd className="leading-relaxed">{value}</dd></div>)}</dl> : <p className="text-sm leading-relaxed">{data.description || 'Resumen operativo no disponible.'}</p>}</Box>
+    <Box title="MODELO DE NEGOCIO">{data.summary ? <dl className="grid md:grid-cols-3 gap-5 text-sm">{[['Actividad', data.summary.activity], ['Clientes', data.summary.customers], ['Cómo genera ingresos', data.summary.revenueModel]].map(([label, value]) => <div key={label}><dt className="text-section-heading text-xs font-semibold mb-2">{label}</dt><dd className="leading-relaxed">{value}</dd></div>)}</dl> : <p className="text-sm leading-relaxed">{data.description || 'Resumen operativo no disponible.'}</p>}</Box>
     <div className="grid xl:grid-cols-2 gap-4"><Segments title="INGRESOS POR PRODUCTO O NEGOCIO" periods={data.products} disclosure={data.productDisclosure} /><Segments title="INGRESOS POR REGIÓN" periods={data.geography} disclosure={data.geographyDisclosure} /></div>
     <p className="text-xs text-muted-foreground">Productos y regiones son vistas distintas de los mismos ingresos; no se suman entre sí.</p>
-    <Box title="SOCIOS Y COLABORACIONES · ÚLTIMOS 12 MESES">{data.partnerships?.length ? <div className="grid md:grid-cols-2 gap-4">{data.partnerships.map(p => <article key={p.partner + p.date} className="border border-border p-4"><h4 className="text-sm text-primary font-semibold">{p.partner}</h4><p className="text-xs text-muted-foreground mt-1">{p.date}</p><p className="text-sm leading-relaxed mt-3">{p.summary}</p></article>)}</div> : <p className="text-sm">No hay acuerdos anunciados disponibles para los últimos 12 meses.</p>}</Box><Stamp at={data.fetchedAt} /></div>;
+    <Box title="SOCIOS Y COLABORACIONES · ÚLTIMOS 12 MESES">{data.partnerships?.length ? <div className="grid md:grid-cols-2 gap-4">{data.partnerships.map(p => <article key={p.partner + p.date} className="border border-border p-4"><h4 className="text-sm text-section-heading font-semibold">{p.partner}</h4><p className="text-xs text-muted-foreground mt-1">{p.date}</p><p className="text-sm leading-relaxed mt-3">{p.summary}</p></article>)}</div> : <p className="text-sm">No hay acuerdos anunciados disponibles para los últimos 12 meses.</p>}</Box><Stamp at={data.fetchedAt} /></div>;
 }

@@ -18,6 +18,8 @@
     --primary: 145 85% 42%;
     --primary-foreground: 0 0% 0%;
 
+    --section-heading: 213 94% 68%;
+
     --secondary: 0 0% 7%;
     --secondary-foreground: 210 6% 50%;
 
@@ -81,7 +83,7 @@
 .analysis-content h3 {
   @apply font-semibold mb-3 mt-5 pb-2 tracking-widest uppercase;
   font-size: 11px;
-  color: hsl(var(--primary));
+  color: hsl(var(--section-heading));
   border-bottom: 1px solid hsl(var(--border));
 }
 .analysis-content h4 {
