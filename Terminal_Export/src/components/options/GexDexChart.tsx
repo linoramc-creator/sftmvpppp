@@ -38,7 +38,7 @@ export function GexDexChart({ data }: { data: AggregationsResponse }) {
               onClick={() => setMetric(m)}
               className={`px-3 py-1 text-[10px] tracking-widest border transition-colors ${
                 metric === m
-                  ? "border-primary text-primary bg-primary/10"
+                  ? "border-section-heading text-section-heading bg-section-heading/10"
                   : "border-border text-muted-foreground hover:text-foreground"
               }`}
             >

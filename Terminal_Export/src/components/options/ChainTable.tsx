@@ -91,7 +91,7 @@ export function ChainTable({ data }: { data: ChainResponse }) {
               const callItm = k < data.spot;
               const putItm = k > data.spot;
               return (
-                <tr key={k} ref={isATM ? atmRowRef : undefined} className={isATM ? "bg-primary/10" : "hover:bg-primary/[0.03] transition-colors"}>
+                <tr key={k} ref={isATM ? atmRowRef : undefined} className={isATM ? "bg-section-heading/10" : "hover:bg-section-heading/[0.03] transition-colors"}>
                   {callCells(c).map((cell, j) => (
                     <td key={`c-${j}`} className={`px-2 py-1 text-right ${callItm ? "text-foreground/85" : "text-muted-foreground/55"}`}>{cell}</td>
                   ))}

@@ -26,7 +26,7 @@
     --muted: 0 0% 6%;
     --muted-foreground: 215 6% 32%;
 
-    --accent: 145 85% 42%;
+    --accent: 213 94% 68%;
     --accent-foreground: 0 0% 0%;
 
     --destructive: 0 72% 55%;
@@ -34,7 +34,7 @@
 
     --border: 220 5% 11%;
     --input: 220 5% 11%;
-    --ring: 145 85% 42%;
+    --ring: 213 94% 68%;
 
     --radius: 0rem;
 
@@ -43,12 +43,12 @@
 
     --sidebar-background: 0 0% 3%;
     --sidebar-foreground: 210 8% 72%;
-    --sidebar-primary: 145 85% 42%;
+    --sidebar-primary: 213 94% 68%;
     --sidebar-primary-foreground: 0 0% 0%;
     --sidebar-accent: 0 0% 6%;
     --sidebar-accent-foreground: 210 8% 72%;
     --sidebar-border: 220 5% 11%;
-    --sidebar-ring: 145 85% 42%;
+    --sidebar-ring: 213 94% 68%;
   }
 }
 
@@ -125,13 +125,13 @@
 }
 .analysis-content blockquote {
   @apply border-l-2 pl-4 my-3 text-xs italic;
-  border-color: hsl(var(--primary) / 0.4);
+  border-color: hsl(var(--section-heading) / 0.4);
   color: hsl(var(--muted-foreground));
 }
 .analysis-content code {
   @apply px-1.5 py-0.5 text-xs;
-  background: hsl(var(--primary) / 0.08);
-  color: hsl(var(--primary));
+  background: hsl(var(--section-heading) / 0.08);
+  color: hsl(var(--section-heading));
 }
 .analysis-content hr {
   @apply my-4;
@@ -149,7 +149,7 @@
 .terminal-cursor::after {
   content: '█';
   animation: terminal-blink 1s infinite;
-  color: hsl(var(--primary));
+  color: hsl(var(--section-heading));
 }
 
 @keyframes ticker-scroll-right {

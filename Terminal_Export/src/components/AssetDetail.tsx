@@ -31,13 +31,13 @@ export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{s
   },[symbol,revision]);
   return <main className="mx-auto max-w-7xl space-y-5 px-4 py-5 font-body text-slate-300 sm:py-6 [&_h1]:font-body [&_h2]:font-body [&_h3]:font-body">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <button type="button" className="inline-flex items-center gap-2 rounded-md py-2 text-xs text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" onClick={onBack}><ArrowLeft size={14}/>Volver al feed</button>
+      <button type="button" className="inline-flex items-center gap-2 rounded-md py-2 text-xs text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-section-heading" onClick={onBack}><ArrowLeft size={14}/>Volver al feed</button>
       <div className="flex items-center gap-2">
         <label className="sr-only" htmlFor="watch-asset">Activo en seguimiento</label>
-        <select id="watch-asset" value={symbol} onChange={e=>onSelect(e.target.value)} className="rounded-md border border-slate-700/60 bg-[#0b1017] px-3 py-2 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
+        <select id="watch-asset" value={symbol} onChange={e=>onSelect(e.target.value)} className="rounded-md border border-slate-700/60 bg-[#0b1017] px-3 py-2 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-section-heading">
           {[...new Set([symbol,...stocks])].map(value=><option key={value}>{value}</option>)}
         </select>
-        <button type="button" disabled={busy} aria-label="Actualizar ficha" className="rounded-md border border-slate-700/60 bg-[#0b1017] p-2 text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-40" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={15} className={busy?'motion-safe:animate-spin':''}/></button>
+        <button type="button" disabled={busy} aria-label="Actualizar ficha" className="rounded-md border border-slate-700/60 bg-[#0b1017] p-2 text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-section-heading disabled:opacity-40" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={15} className={busy?'motion-safe:animate-spin':''}/></button>
       </div>
     </div>
     <AssetOverview symbol={symbol} data={data} busy={busy} onAnalyze={()=>onAnalyze(symbol,data?.instrument?.kind)}/>

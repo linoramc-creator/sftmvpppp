@@ -102,7 +102,7 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
     <div className="mb-4 border border-border overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
         <div className="flex items-center gap-3">
-          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+          <span className="w-1.5 h-1.5 bg-section-heading shrink-0" />
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FUNDAMENTALES ETF</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">SNAPSHOT</span>
         </div>
@@ -115,14 +115,14 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
               <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium" style={{ minWidth: 200 }}>
                 MÉTRICA
               </th>
-              <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap" style={{ minWidth: 140 }}>
+              <th className="px-3 py-3 text-right text-[11px] tracking-widest text-section-heading font-semibold whitespace-nowrap" style={{ minWidth: 140 }}>
                 VALOR ACTUAL
               </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.label} className="border-b border-border/20 hover:bg-primary/3 transition-colors">
+              <tr key={r.label} className="border-b border-border/20 hover:bg-section-heading/[0.03] transition-colors">
                 <td className="px-4 py-3 text-[13px] text-foreground/90 font-medium whitespace-nowrap">
                   {r.label}
                 </td>
@@ -238,7 +238,7 @@ function HoldingsTable({ data }: { data: EtfResponse }) {
         </thead>
         <tbody className="divide-y divide-border/30">
           {holdings.map((h, i) => (
-            <tr key={`${h.symbol}-${i}`} className="hover:bg-primary/3 transition-colors">
+            <tr key={`${h.symbol}-${i}`} className="hover:bg-section-heading/[0.03] transition-colors">
               <td className="px-3 py-1.5 text-muted-foreground/40">{i + 1}</td>
               <td className="px-3 py-1.5 text-primary font-semibold">{h.symbol || "—"}</td>
               <td className="px-3 py-1.5 text-foreground/75" style={{ fontFamily: "var(--font-sans)" }}>{h.name || "—"}</td>
@@ -346,7 +346,7 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
       {tab.theme && (
         <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono">
           <span className="text-muted-foreground/50">TEMA DETECTADO</span>
-          <span className="text-primary/70 border border-primary/25 px-1.5 py-0.5">{tab.theme}</span>
+          <span className="text-section-heading/70 border border-section-heading/25 px-1.5 py-0.5">{tab.theme}</span>
         </div>
       )}
 
@@ -373,7 +373,7 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
               </thead>
               <tbody className="divide-y divide-border/30">
                 {peers.map((p) => (
-                  <tr key={p.symbol} className="hover:bg-primary/3 transition-colors">
+                  <tr key={p.symbol} className="hover:bg-section-heading/[0.03] transition-colors">
                     <td className="px-3 py-1.5 text-primary font-semibold">{p.symbol}</td>
                     <td className="px-3 py-1.5 text-foreground/75 max-w-[220px] truncate" style={{ fontFamily: "var(--font-sans)" }}>{p.name ?? "—"}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-foreground/80">{fmtUsd(p.price) ?? "—"}</td>
@@ -405,7 +405,7 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
             <div className="border border-border bg-card px-3 py-2 space-y-2">
               {benefits.map((b) => (
                 <div key={b} className="flex items-start gap-2.5">
-                  <span className="text-primary text-[11px] leading-none select-none shrink-0" style={{ marginTop: 3 }}>●</span>
+                  <span className="text-section-heading text-[11px] leading-none select-none shrink-0" style={{ marginTop: 3 }}>●</span>
                   <span className="text-[12px] text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>{b}</span>
                 </div>
               ))}
@@ -444,7 +444,7 @@ export function EtfSubSection({ data }: { data: EtfResponse }) {
         <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono">
           {data.name && <span className="text-foreground/85">{data.name}</span>}
           {data.family && <span className="text-muted-foreground/50">{data.family}</span>}
-          {data.category && <span className="text-primary/70 border border-primary/25 px-1.5 py-0.5">{data.category}</span>}
+          {data.category && <span className="text-section-heading/70 border border-section-heading/25 px-1.5 py-0.5">{data.category}</span>}
         </div>
       )}
 

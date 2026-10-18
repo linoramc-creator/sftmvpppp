@@ -1,4 +1,4 @@
-import ExtendedHours from '@/components/ExtendedHours';
+import ReportQuote from '@/components/ReportQuote';
 import KeepPanel from '@/components/KeepPanel';
 import { ReportLoading } from "@/components/ReportLoading";
 import { accountApi } from "@/lib/beta-api";
@@ -658,13 +658,13 @@ const Index = () => {
                 onKeyDown={handleKeyDown}
                 placeholder="TICKER — AAPL, MSFT, NVDA, ASML..."
                 maxLength={20}
-                className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-primary transition-colors font-mono"
+                className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-section-heading transition-colors font-mono"
               />
             </div>
             <button
               onClick={handleAnalyze}
               disabled={isLoading || !ticker.trim()}
-              className="h-8 px-5 bg-primary text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-opacity"
+              className="h-8 px-5 bg-section-heading text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-section-heading/90 transition-opacity"
             >
               {isLoading
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -674,7 +674,7 @@ const Index = () => {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="h-8 px-4 border border-primary/40 text-primary text-[11px] tracking-widest hover:bg-primary/8 transition-colors flex items-center gap-1.5"
+                className="h-8 px-4 border border-section-heading/40 text-section-heading text-[11px] tracking-widest hover:bg-section-heading/[0.08] transition-colors flex items-center gap-1.5"
               >
                 <Bookmark className="h-3 w-3" />
                 GUARDAR INFORME
@@ -691,15 +691,15 @@ const Index = () => {
           )}
 
           {/* Detected ETF → redirect to the dedicated apartado */}
-          {currentTicker&&<ExtendedHours symbol={currentTicker}/>}
+          {activeTicker && activeAnalysis && viewingReport?.kind !== 'sector' && !tickerIsEtf && <ReportQuote symbol={activeTicker}/>}
           {tickerIsEtf && (
-            <div className="mb-4 px-4 py-3 border border-primary/30 bg-primary/5 flex items-center justify-between gap-3 flex-wrap">
+            <div className="mb-4 px-4 py-3 border border-section-heading/30 bg-section-heading/5 flex items-center justify-between gap-3 flex-wrap">
               <span className="text-[11px] text-foreground/80 font-mono">
-                <span className="text-primary font-bold">{tickerIsEtf}</span> es un ETF — los fondos se analizan en su propio apartado.
+                <span className="text-section-heading font-bold">{tickerIsEtf}</span> es un ETF — los fondos se analizan en su propio apartado.
               </span>
               <button
                 onClick={() => analyzeAsEtf(tickerIsEtf)}
-                className="h-7 px-4 bg-primary text-black font-bold text-[10px] tracking-widest hover:bg-primary/90 transition-opacity"
+                className="h-7 px-4 bg-section-heading text-black font-bold text-[10px] tracking-widest hover:bg-section-heading/90 transition-opacity"
               >
                 ANALIZAR EN ETF
               </button>
@@ -708,11 +708,11 @@ const Index = () => {
 
           {/* Viewing saved banner */}
           {viewingReport && (
-            <div className="mb-4 px-4 py-2 border border-primary/25 bg-primary/4 flex items-center justify-between">
-              <span className="text-[10px] text-primary/70 tracking-widest">
+            <div className="mb-4 px-4 py-2 border border-section-heading/25 bg-section-heading/[0.04] flex items-center justify-between">
+              <span className="text-[10px] text-section-heading/70 tracking-widest">
                 INFORME GUARDADO · {viewingReport.ticker} · {viewingReport.savedAt}
               </span>
-              <button disabled={summaryBusy} onClick={()=>void handleSummaryPdf()} className="ml-auto mr-4 text-[10px] text-primary tracking-widest disabled:opacity-50">{summaryBusy?'RESUMIENDO…':'RESUMEN IA · PDF'}</button>
+              <button disabled={summaryBusy} onClick={()=>void handleSummaryPdf()} className="ml-auto mr-4 text-[10px] text-section-heading tracking-widest disabled:opacity-50">{summaryBusy?'RESUMIENDO…':'RESUMEN IA · PDF'}</button>
               <button
                 onClick={() => setViewingReport(null)}
                 className="text-[10px] text-muted-foreground/50 hover:text-foreground tracking-widest"
@@ -752,7 +752,7 @@ const Index = () => {
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
 
-          {etfAnalysis&&!isEtfLoading&&<button disabled={saving} onClick={()=>saveCurrent("etf")} className="mb-4 text-xs text-primary border border-primary/30 px-4 py-2">GUARDAR INFORME ETF</button>}
+          {etfAnalysis&&!isEtfLoading&&<button disabled={saving} onClick={()=>saveCurrent("etf")} className="mb-4 text-xs text-section-heading border border-section-heading/30 px-4 py-2">GUARDAR INFORME ETF</button>}
           {/* ETF search row */}
           <div className="flex gap-2 mb-5">
             <div className="relative flex-1">
@@ -764,13 +764,13 @@ const Index = () => {
                 onKeyDown={handleEtfKeyDown}
                 placeholder="ETF — SPY, QQQ, GLD, TAN, VWCE.DE..."
                 maxLength={20}
-                className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-primary transition-colors font-mono"
+                className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-section-heading transition-colors font-mono"
               />
             </div>
             <button
               onClick={() => handleEtfAnalyze()}
               disabled={isEtfLoading || !etfInput.trim()}
-              className="h-8 px-5 bg-primary text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-opacity whitespace-nowrap"
+              className="h-8 px-5 bg-section-heading text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-section-heading/90 transition-opacity whitespace-nowrap"
             >
               {isEtfLoading
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -788,9 +788,9 @@ const Index = () => {
 
           {/* Not a fund → point back to the ticker search */}
           {etfNotFund && (
-            <div className="mb-4 px-4 py-3 border border-primary/30 bg-primary/5 flex items-center justify-between gap-3 flex-wrap">
+            <div className="mb-4 px-4 py-3 border border-section-heading/30 bg-section-heading/5 flex items-center justify-between gap-3 flex-wrap">
               <span className="text-[11px] text-foreground/80 font-mono">
-                <span className="text-primary font-bold">{etfNotFund}</span> no es un ETF — las acciones se analizan en el apartado TICKER.
+                <span className="text-section-heading font-bold">{etfNotFund}</span> no es un ETF — las acciones se analizan en el apartado TICKER.
               </span>
               <button
                 onClick={() => {
@@ -798,7 +798,7 @@ const Index = () => {
                   setTicker(etfNotFund);
                   setEtfNotFund(null);
                 }}
-                className="h-7 px-4 bg-primary text-black font-bold text-[10px] tracking-widest hover:bg-primary/90 transition-opacity"
+                className="h-7 px-4 bg-section-heading text-black font-bold text-[10px] tracking-widest hover:bg-section-heading/90 transition-opacity"
               >
                 IR A TICKER
               </button>
@@ -806,7 +806,7 @@ const Index = () => {
           )}
 
           {/* Loading placeholder */}
-          {currentEtf&&<ExtendedHours symbol={currentEtf}/>}
+          {currentEtf && etfAnalysis && !etfNotFund && <ReportQuote symbol={currentEtf}/>}
           {isEtfLoading && <ReportLoading subject={etfInput} streaming={Boolean(etfAnalysis)} />}
 
           {/* ETF report */}
@@ -845,13 +845,13 @@ const Index = () => {
                 onKeyDown={handleSectorKeyDown}
                 placeholder="SECTOR — Semiconductores, Inteligencia Artificial, Energía, Salud..."
                 maxLength={80}
-                className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-primary transition-colors font-mono"
+                className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-section-heading transition-colors font-mono"
               />
             </div>
             <button
               onClick={handleSectorAnalyze}
               disabled={isSectorLoading || !sectorInput.trim()}
-              className="h-8 px-5 bg-primary text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-opacity whitespace-nowrap"
+              className="h-8 px-5 bg-section-heading text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-section-heading/90 transition-opacity whitespace-nowrap"
             >
               {isSectorLoading
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -870,7 +870,7 @@ const Index = () => {
           {/* Loading */}
           {isSectorLoading && <ReportLoading subject={sectorInput} streaming={Boolean(sectorAnalysis)} />}
 
-          {sectorAnalysis&&!isSectorLoading&&<button disabled={saving} onClick={()=>saveCurrent("sector")} className="mb-4 text-xs text-primary border border-primary/30 px-4 py-2">GUARDAR INFORME DEL SECTOR</button>}
+          {sectorAnalysis&&!isSectorLoading&&<button disabled={saving} onClick={()=>saveCurrent("sector")} className="mb-4 text-xs text-section-heading border border-section-heading/30 px-4 py-2">GUARDAR INFORME DEL SECTOR</button>}
           {/* Sector report */}
           {sectorAnalysis && (
             <SectorReportView
@@ -894,13 +894,13 @@ const Index = () => {
       <KeepPanel active={navTab === "guardados"}>
         <div className="max-w-5xl mx-auto px-4 pt-5 pb-16">
           <div className="flex items-center gap-3 mb-4">
-            <span className="w-1.5 h-1.5 bg-primary inline-block" />
+            <span className="w-1.5 h-1.5 bg-section-heading inline-block" />
             <span className="text-[11px] tracking-widest text-foreground">INFORMES GUARDADOS</span>
             <span className="text-[10px] text-muted-foreground/40">{savedReports.length}</span>
           </div>
 
           {reportsError&&<p role="alert" className="text-destructive text-sm mb-4">{reportsError}</p>}
-          {profile.isAdmin&&<button disabled={saving} onClick={importLegacy} className="text-xs text-primary border border-border p-2 mb-4">Importar informes antiguos de este navegador</button>}
+          {profile.isAdmin&&<button disabled={saving} onClick={importLegacy} className="text-xs text-section-heading border border-border p-2 mb-4">Importar informes antiguos de este navegador</button>}
           {savedReports.length === 0 && !reportsError && (
             <div className="flex flex-col items-center justify-center py-20 opacity-25">
               <p className="text-[10px] tracking-widest text-muted-foreground">
@@ -1060,8 +1060,8 @@ function MarketTickerBar({
           </div>
         </div>
         <div className="flex shrink-0 gap-3 px-3 bg-card text-[9px]">
-          <button aria-label={paused?'Reanudar cotizaciones':'Pausar cotizaciones'} onClick={()=>setPaused(p=>!p)} className="text-muted-foreground hover:text-primary">{paused?'▶':'Ⅱ'}</button>
-          <button onClick={()=>{setDraft(customStocks.join(', '));setEditing(e=>!e);}} className="text-muted-foreground hover:text-primary">{editing?'CERRAR':'EDITAR'}</button>
+          <button aria-label={paused?'Reanudar cotizaciones':'Pausar cotizaciones'} onClick={()=>setPaused(p=>!p)} className="text-muted-foreground hover:text-section-heading">{paused?'▶':'Ⅱ'}</button>
+          <button onClick={()=>{setDraft(customStocks.join(', '));setEditing(e=>!e);}} className="text-muted-foreground hover:text-section-heading">{editing?'CERRAR':'EDITAR'}</button>
         </div>
       </div>
 
@@ -1074,9 +1074,9 @@ function MarketTickerBar({
             onChange={e => setDraft(e.target.value.toUpperCase())}
             onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
             placeholder="AAPL, TSLA, NVDA, AMZN..."
-            className="flex-1 h-6 px-2 bg-background border border-border text-[11px] text-foreground font-mono focus:outline-none focus:border-primary"
+            className="flex-1 h-6 px-2 bg-background border border-border text-[11px] text-foreground font-mono focus:outline-none focus:border-section-heading"
           />
-          <button onClick={saveEdit} className="text-[9px] tracking-widest text-primary hover:text-primary/80 px-2 py-1 border border-primary/30">GUARDAR</button>
+          <button onClick={saveEdit} className="text-[9px] tracking-widest text-section-heading hover:text-section-heading/80 px-2 py-1 border border-section-heading/30">GUARDAR</button>
         </div>
       )}
     </div>
@@ -1121,7 +1121,7 @@ function ReportView({
       {/* Ticker header strip */}
       {ticker && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
-          <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-section-heading shrink-0" />
           <span className="text-base font-bold text-section-heading tracking-[0.15em]">{ticker}</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">INFORME DE ANÁLISIS FINANCIERO</span>
           {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 ml-auto" />}
@@ -1142,7 +1142,7 @@ function ReportView({
                     onClick={() => onSelectSection(key)}
                     className={`px-4 py-2.5 text-[11px] tracking-widest whitespace-nowrap shrink-0 border-b-2 transition-colors font-semibold ${
                       isActive
-                        ? "text-primary border-primary bg-secondary/30"
+                        ? "text-section-heading border-section-heading bg-secondary/30"
                         : "text-muted-foreground/55 border-transparent hover:text-foreground"
                     }`}
                   >
@@ -1172,7 +1172,7 @@ function ReportView({
               {active === "Noticias" && <NewsView key={ticker} subject={ticker} />}
               {sections[active] && !["Desglose de ingresos", "Institucional", "Noticias", "Calendario Macro"].includes(active) && renderElements(sections[active])}
               {isLoading && (
-                <span className="terminal-cursor text-primary ml-1" />
+                <span className="terminal-cursor text-section-heading ml-1" />
               )}
             </div>
           )}
@@ -1218,7 +1218,7 @@ function EtfReportView({
       {/* ETF header strip */}
       {ticker && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
-          <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-section-heading shrink-0" />
           <span className="text-base font-bold text-section-heading tracking-[0.15em]">{ticker}</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">ANÁLISIS DE ETF</span>
           {etfDeep?.name && (
@@ -1242,7 +1242,7 @@ function EtfReportView({
                     onClick={() => onSelectSection(key)}
                     className={`px-4 py-2.5 text-[11px] tracking-widest whitespace-nowrap shrink-0 border-b-2 transition-colors font-semibold ${
                       isActive
-                        ? "text-primary border-primary bg-secondary/30"
+                        ? "text-section-heading border-section-heading bg-secondary/30"
                         : "text-muted-foreground/55 border-transparent hover:text-foreground"
                     }`}
                   >
@@ -1268,7 +1268,7 @@ function EtfReportView({
               {active === "Noticias" && <NewsView key={ticker} subject={ticker} />}
               {sections[active] && !["Noticias", "Institucional", "Calendario Macro"].includes(active) && renderElements(sections[active])}
               {isLoading && (
-                <span className="terminal-cursor text-primary ml-1" />
+                <span className="terminal-cursor text-section-heading ml-1" />
               )}
             </div>
           )}
@@ -1296,7 +1296,7 @@ function SectorReportView({
       {/* Sector header strip */}
       {sectorName && (
         <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
-          <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-section-heading shrink-0" />
           <span className="text-base font-bold text-section-heading tracking-[0.15em]">{sectorName.toUpperCase()}</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">ANÁLISIS SECTORIAL COMPLETO</span>
           {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 ml-auto" />}
@@ -1341,7 +1341,7 @@ function SectorReportView({
                 {sectionNodes && key !== "Noticias y Tendencias" && !isMacro && renderElements(sectionNodes)}
                 {key === "Empresas Líderes" && <Suspense fallback={<div role="status" className="mt-4 h-40 rounded-xl bg-secondary/30 motion-safe:animate-pulse" aria-label="Cargando actividad del sector"/>}><SectorActivity sector={sectorName} report={content} isLoading={isLoading}/></Suspense>}
                 {isLoading && isLast && (
-                  <span className="terminal-cursor text-primary ml-1" />
+                  <span className="terminal-cursor text-section-heading ml-1" />
                 )}
               </div>
             )}
@@ -1364,14 +1364,14 @@ function SavedReportCard({
   return (
     <div className="border border-border bg-card flex items-center justify-between px-4 py-3 hover:border-border/80 transition-colors">
       <button onClick={onView} className="flex items-center gap-5 text-left flex-1 min-w-0">
-        <span className="w-1.5 h-1.5 bg-primary/60 shrink-0" />
-        <span className="text-sm font-bold text-primary tracking-wider">{report.ticker} <span className="text-xs text-muted-foreground">{report.kind==='sector'?'SECTOR':report.kind==='etf'?'ETF':'ACCIÓN'}</span></span>
+        <span className="w-1.5 h-1.5 bg-section-heading/60 shrink-0" />
+        <span className="text-sm font-bold text-section-heading tracking-wider">{report.ticker} <span className="text-xs text-muted-foreground">{report.kind==='sector'?'SECTOR':report.kind==='etf'?'ETF':'ACCIÓN'}</span></span>
         <span className="text-[10px] text-muted-foreground/50 tracking-wider">{report.savedAt}</span>
       </button>
       <div className="flex items-center gap-1.5 shrink-0">
         <button
           onClick={onView}
-          className="text-[10px] tracking-widest text-primary/60 hover:text-primary border border-primary/20 px-3 py-1.5 hover:bg-primary/5 transition-colors"
+          className="text-[10px] tracking-widest text-section-heading/60 hover:text-section-heading border border-section-heading/20 px-3 py-1.5 hover:bg-section-heading/5 transition-colors"
         >
           VER INFORME
         </button>
@@ -1407,7 +1407,7 @@ function QuarterlyHistorySection({
       <div className="mb-6 border border-border overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
           <div className="flex items-center gap-3">
-            <span className="w-1.5 h-1.5 bg-primary shrink-0 animate-pulse" />
+            <span className="w-1.5 h-1.5 bg-section-heading shrink-0 animate-pulse" />
             <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
             <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
           </div>
@@ -1425,7 +1425,7 @@ function QuarterlyHistorySection({
       <div className="mb-6 border border-border overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
           <div className="flex items-center gap-3">
-            <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+            <span className="w-1.5 h-1.5 bg-section-heading shrink-0" />
             <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
             <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
           </div>
@@ -1489,7 +1489,7 @@ function QuarterlyHistorySection({
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
         <div className="flex items-center gap-3">
-          <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+          <span className="w-1.5 h-1.5 bg-section-heading shrink-0" />
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">HISTORICAL FINANCIALS</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">QUARTERLY</span>
         </div>
@@ -1504,7 +1504,7 @@ function QuarterlyHistorySection({
             onClick={() => setTab(t.id)}
             className={`px-4 py-2.5 text-[11px] tracking-wider transition-colors border-b-2 whitespace-nowrap shrink-0 ${
               tab === t.id
-                ? "text-primary border-primary"
+                ? "text-section-heading border-section-heading"
                 : "text-muted-foreground/50 border-transparent hover:text-foreground"
             }`}
           >
@@ -1515,7 +1515,7 @@ function QuarterlyHistorySection({
 
       {/* ── Valoración tab: point-in-time metrics ── */}
       {isValuationTab && (
-        <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--primary) / 0.5) hsl(var(--background))" }}>
+        <div className="overflow-x-auto" style={{ scrollbarWidth: "auto", scrollbarColor: "hsl(var(--section-heading) / 0.5) hsl(var(--background))" }}>
           <table className="w-full" style={{ minWidth: 320 }}>
             <thead>
               <tr className="border-b border-border bg-secondary/20">
@@ -1523,7 +1523,7 @@ function QuarterlyHistorySection({
                     style={{ minWidth: 200 }}>
                   MÉTRICA
                 </th>
-                <th className="px-3 py-3 text-right text-[11px] tracking-widest text-primary font-semibold whitespace-nowrap"
+                <th className="px-3 py-3 text-right text-[11px] tracking-widest text-section-heading font-semibold whitespace-nowrap"
                     style={{ minWidth: 140 }}>
                   VALOR ACTUAL
                 </th>
@@ -1540,7 +1540,7 @@ function QuarterlyHistorySection({
               {currentMetrics.map((m) => {
                 const v = cleanVal(m.value);
                 return (
-                  <tr key={m.label} className="border-b border-border/20 hover:bg-primary/3 transition-colors">
+                  <tr key={m.label} className="border-b border-border/20 hover:bg-section-heading/[0.03] transition-colors">
                     <td className="px-4 py-3 text-[13px] text-foreground/90 font-medium whitespace-nowrap sticky left-0 bg-card z-10 border-r border-border/20">
                       {m.label}
                     </td>
@@ -1584,7 +1584,7 @@ function CatalystCalendarSection({ data }: { data: CatalystCalendar | null }) {
   return (
     <div className="mb-4 border border-border overflow-hidden">
       <div className="px-4 py-2.5 bg-secondary/30 border-b border-border flex items-center gap-2">
-        <span className="w-1.5 h-1.5 bg-primary shrink-0" />
+        <span className="w-1.5 h-1.5 bg-section-heading shrink-0" />
         <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">CATALYST CALENDAR</span>
         <span className="text-[10px] text-muted-foreground/40 tracking-widest ml-auto"></span>
       </div>
@@ -1596,7 +1596,7 @@ function CatalystCalendarSection({ data }: { data: CatalystCalendar | null }) {
             <div className="space-y-1.5">
               {data.earnings.map((e, i) => (
                 <div key={i} className="flex items-center gap-4 flex-wrap">
-                  <span className="text-[12px] text-primary font-mono tabular-nums font-semibold">{e.date}</span>
+                  <span className="text-[12px] text-section-heading font-mono tabular-nums font-semibold">{e.date}</span>
                   {e.epsEstimate && (
                     <span className="text-[11px] text-muted-foreground/60">
                       EPS est. <span className="text-foreground/80">{e.epsEstimate}</span>
@@ -1619,7 +1619,7 @@ function CatalystCalendarSection({ data }: { data: CatalystCalendar | null }) {
             <div className="space-y-1.5">
               {data.dividends.map((d, i) => (
                 <div key={i} className="flex items-center gap-4 flex-wrap">
-                  <span className="text-[12px] text-primary font-mono tabular-nums font-semibold">{d.exDate}</span>
+                  <span className="text-[12px] text-section-heading font-mono tabular-nums font-semibold">{d.exDate}</span>
                   {d.amount && (
                     <span className="text-[11px] text-foreground/80">{d.amount}/share</span>
                   )}
@@ -1724,7 +1724,7 @@ function parseSections(content: string, knownTabs: string[]): Record<string, Rea
       const m = line.match(/^(\d+)\. (.*)$/);
       if (m) {
         currentElements.push(
-          <li key={i} className="ml-4 mb-3 list-decimal text-muted-foreground marker:text-primary marker:font-semibold text-xs">
+          <li key={i} className="ml-4 mb-3 list-decimal text-muted-foreground marker:text-section-heading marker:font-semibold text-xs">
             <span className="text-foreground/75" style={{ fontFamily: "var(--font-sans)" }}>{renderInline(m[2])}</span>
           </li>
         );
@@ -1887,7 +1887,7 @@ function getBulletIcon(text: string): { icon: string; cls: string } {
   if (isNeg) return { icon: "●", cls: "text-destructive text-[9px]" };
   if (isPos) return { icon: "●", cls: "text-primary text-[9px]" };
   if (isNeu) return { icon: "●", cls: "text-amber-400 text-[9px]" };
-  return { icon: "▸", cls: "text-primary/50 text-[10px]" };
+  return { icon: "▸", cls: "text-section-heading/50 text-[10px]" };
 }
 
 const RISK_RED = new Set(["ALTO","HIGH","BEARISH","BAJISTA","SOBRECOMPRADO"]);
@@ -1918,7 +1918,7 @@ function renderInline(text: string): React.ReactNode {
       return codeParts.map((cp, j) => {
         if (cp.startsWith("`") && cp.endsWith("`")) {
           return (
-            <code key={`${si}-${i}-${j}`} className="bg-primary/10 text-primary px-1 py-0.5 text-xs">
+            <code key={`${si}-${i}-${j}`} className="bg-section-heading/10 !text-primary px-1 py-0.5 text-xs">
               {cp.slice(1, -1)}
             </code>
           );

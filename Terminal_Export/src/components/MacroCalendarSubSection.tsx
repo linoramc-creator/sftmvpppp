@@ -63,8 +63,8 @@ function EventsTable({ events, emptyText }: { events: MacroEvent[]; emptyText: s
         </thead>
         <tbody className="divide-y divide-border/30">
           {events.map((e, i) => (
-            <tr key={`${e.date}-${e.event}-${i}`} className="hover:bg-primary/3 transition-colors">
-              <td className="px-3 py-1.5 text-primary tabular-nums whitespace-nowrap">{fmtDate(e.date)}</td>
+            <tr key={`${e.date}-${e.event}-${i}`} className="hover:bg-section-heading/[0.03] transition-colors">
+              <td className="px-3 py-1.5 text-section-heading tabular-nums whitespace-nowrap">{fmtDate(e.date)}</td>
               <td className="px-3 py-1.5 text-foreground/85 max-w-[320px] truncate" style={{ fontFamily: "var(--font-sans)" }}>
                 {e.event}
               </td>
@@ -154,7 +154,7 @@ export function MacroCalendarSubSection() {
   return (
     <div className="space-y-6">
       <div className="flex gap-3 flex-wrap text-xs">
-        <button className="border border-primary/40 px-3 py-2 text-primary" onClick={() => setExpanded(!expanded)}>{expanded ? "Ver selección esencial" : "Ampliar: incluir impacto medio"}</button>
+        <button className="border border-section-heading/40 px-3 py-2 text-section-heading" onClick={() => setExpanded(!expanded)}>{expanded ? "Ver selección esencial" : "Ampliar: incluir impacto medio"}</button>
         <select aria-label="Región del calendario" className="bg-background border border-border px-3" value={region} onChange={e => setRegion(e.target.value)}><option value="all">Todas las regiones</option><option value="us">EE. UU.</option></select>
         <span className="text-muted-foreground self-center">{expanded ? "Hasta 30 próximos y 30 recientes" : "Hasta 10 próximos y 5 recientes"} · sin duplicados</span>
       </div>

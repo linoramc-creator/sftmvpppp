@@ -102,7 +102,7 @@ export function OptionsSubSection({ ticker }: { ticker: string }) {
   if (loading) {
     return (
       <div className="flex items-center gap-3 py-10 text-muted-foreground text-[11px] tracking-widest">
-        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        <Loader2 className="h-4 w-4 animate-spin text-section-heading" />
         CARGANDO DATOS DE OPCIONES...
       </div>
     );
@@ -126,7 +126,7 @@ export function OptionsSubSection({ ticker }: { ticker: string }) {
           <select
             value={expiry}
             onChange={(e) => handleExpiryChange(e.target.value)}
-            className="h-7 px-2 bg-card border border-border text-[11px] text-foreground font-mono focus:outline-none focus:border-primary"
+            className="h-7 px-2 bg-card border border-border text-[11px] text-foreground font-mono focus:outline-none focus:border-section-heading"
           >
             {(meta.expiries ?? []).map((e) => (
               <option key={e} value={e}>{e}</option>

@@ -79,7 +79,7 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
           {data?.name || symbol}
         </h1>
         {kind!=='index'&&kind!=='future'&&<button disabled={!data||busy} onClick={onAnalyze}
-          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/50 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1017] disabled:cursor-wait disabled:opacity-40">
+          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/50 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-section-heading/60 hover:bg-section-heading/10 hover:text-section-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-section-heading/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1017] disabled:cursor-wait disabled:opacity-40">
           Analizar {symbol}<ArrowUpRight size={14} aria-hidden="true"/>
         </button>}
       </div>

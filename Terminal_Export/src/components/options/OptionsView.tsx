@@ -198,8 +198,8 @@ export function OptionsView() {
             <AlertCircle className="h-4 w-4" /> Servicio no disponible temporalmente
           </div>
           <p className="text-[12px] text-muted-foreground leading-relaxed">
-            Define <code className="bg-primary/10 text-primary px-1">VITE_SUPABASE_URL</code> en el entorno de Vercel.
-            Las opciones usan la Edge Function <code className="bg-primary/10 text-primary px-1">options-data</code>,
+            Define <code className="bg-section-heading/10 text-section-heading px-1">VITE_SUPABASE_URL</code> en el entorno de Vercel.
+            Las opciones usan la Edge Function <code className="bg-section-heading/10 text-section-heading px-1">options-data</code>,
             la misma infraestructura que el resto de la app — no requiere ningún servicio aparte.
           </p>
         </div>
@@ -220,13 +220,13 @@ export function OptionsView() {
             onKeyDown={(e) => e.key === "Enter" && loadTicker()}
             placeholder="TICKER DE OPCIONES — AAPL, SPY, NVDA, TSLA..."
             maxLength={12}
-            className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-primary transition-colors font-mono"
+            className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-section-heading transition-colors font-mono"
           />
         </div>
         <button
           onClick={loadTicker}
           disabled={metaLoading || !ticker.trim()}
-          className="h-8 px-5 bg-primary text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-opacity"
+          className="h-8 px-5 bg-section-heading text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-section-heading/90 transition-opacity"
         >
           {metaLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "CARGAR"}
         </button>
@@ -240,7 +240,7 @@ export function OptionsView() {
 
       {!meta && !metaError && !metaLoading && (
         <div className="text-center py-20">
-          <div className="text-3xl font-bold tracking-[0.3em] text-primary/80 mb-2">OPCIONES</div>
+          <div className="text-3xl font-bold tracking-[0.3em] text-section-heading/80 mb-2">OPCIONES</div>
           <p className="text-[12px] text-muted-foreground/60">
             Greeks (BSM), GEX/DEX/VEX, superficie IV, skew, estructura temporal, max pain y mov. esperado.
           </p>
@@ -262,7 +262,7 @@ export function OptionsView() {
               <select
                 value={expiry}
                 onChange={(e) => setExpiry(e.target.value)}
-                className="h-7 px-2 bg-background border border-border text-foreground text-[11px] font-mono focus:outline-none focus:border-primary"
+                className="h-7 px-2 bg-background border border-border text-foreground text-[11px] font-mono focus:outline-none focus:border-section-heading"
               >
                 {meta.expiries.map((e) => (
                   <option key={e} value={e}>{fmtExpiryLabel(e)}</option>
@@ -285,7 +285,7 @@ export function OptionsView() {
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 className={`px-4 py-2.5 text-[10px] tracking-wider transition-colors border-b-2 whitespace-nowrap shrink-0 ${
-                  tab === t.key ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-foreground"
+                  tab === t.key ? "text-section-heading border-section-heading" : "text-muted-foreground border-transparent hover:text-foreground"
                 }`}
               >
                 {t.label}

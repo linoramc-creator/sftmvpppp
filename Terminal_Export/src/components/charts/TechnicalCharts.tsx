@@ -182,7 +182,7 @@ export function TechnicalSubSection({ ticker }: { ticker: string }) {
   if (loading) {
     return (
       <div className="flex items-center gap-3 py-6 text-muted-foreground text-[11px] tracking-widest">
-        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        <Loader2 className="h-4 w-4 animate-spin text-section-heading" />
         CALCULANDO INDICADORES TÉCNICOS...
       </div>
     );
