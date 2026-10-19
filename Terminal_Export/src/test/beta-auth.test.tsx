@@ -48,7 +48,7 @@ it('respects reduced motion and sanitizes the greeting while keeping the two sec
  const session=signedIn();session.user.user_metadata.display_name='<img src=x onerror=alert(1)>';
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'existing.person@example.test',displayName:'<script>danger</script>',isAdmin:false})}));
  const media=vi.spyOn(window,'matchMedia').mockImplementation(query=>({matches:true,media:query,onchange:null,addListener:vi.fn(),removeListener:vi.fn(),addEventListener:vi.fn(),removeEventListener:vi.fn(),dispatchEvent:vi.fn()}));
- try{vi.useFakeTimers();await act(async()=>{render(<MemoryRouter><AuthGate><ReadyFeed/></AuthGate></MemoryRouter>);});expect(screen.getByRole('dialog')).toHaveTextContent('Bienvenido, existing person');expect(document.querySelector('img')).toBeNull();
+ try{vi.useFakeTimers();await act(async()=>{render(<MemoryRouter><AuthGate><ReadyFeed/></AuthGate></MemoryRouter>);});expect(screen.getByRole('dialog')).toHaveTextContent('Bienvenido, existing person');expect(document.querySelectorAll('img')).toHaveLength(1);expect(document.querySelector('img')).toHaveAttribute('src','/mensor-icon.png?v=2');expect(document.querySelector('[onerror]')).toBeNull();
  await act(async()=>vi.advanceTimersByTime(1999));expect(screen.getByRole('dialog')).toBeInTheDocument();
  await act(async()=>vi.advanceTimersByTime(1));await act(async()=>vi.advanceTimersByTime(0));expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
  }finally{media.mockRestore();}
