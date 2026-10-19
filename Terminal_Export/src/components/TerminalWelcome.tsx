@@ -3,7 +3,7 @@ import {ArrowRight,RefreshCw} from 'lucide-react';
 
 export default function TerminalWelcome({name,phase,detail,onRetry,onContinue,onSignOut}:{
  name:string;phase:'loading'|'ready'|'error'|'leaving';detail:string;
- onRetry:()=>void;onContinue:()=>void;onSignOut:()=>void;
+ onRetry:()=>void;onContinue?:()=>void;onSignOut?:()=>void;
 }){
  const dialog=useRef<HTMLDivElement>(null);
  useEffect(()=>{const previous=document.activeElement,overflow=document.body.style.overflow;document.body.style.overflow='hidden';dialog.current?.focus({preventScroll:true});return()=>{document.body.style.overflow=overflow;if(previous instanceof HTMLElement&&previous.isConnected)previous.focus({preventScroll:true});};},[]);
@@ -25,8 +25,8 @@ export default function TerminalWelcome({name,phase,detail,onRetry,onContinue,on
     <p id="terminal-welcome-detail" className="terminal-welcome-detail">{detail}</p>
    </div>
    <div className="terminal-welcome-progress" aria-hidden="true"><span/></div>
-   {phase==='error'&&<div className="terminal-welcome-actions"><button type="button" onClick={onRetry} className="terminal-welcome-retry"><RefreshCw size={14} aria-hidden="true"/>Reintentar</button><button type="button" onClick={onContinue} className="terminal-welcome-continue">Continuar con lo disponible<ArrowRight size={14} aria-hidden="true"/></button></div>}
-   <div className="terminal-welcome-footer"><span aria-hidden="true">MENSOR<span className="terminal-welcome-footer-line"/>TERMINAL</span><button type="button" onClick={onSignOut}>Cerrar sesión</button></div>
+   {phase==='error'&&<div className="terminal-welcome-actions"><button type="button" onClick={onRetry} className="terminal-welcome-retry"><RefreshCw size={14} aria-hidden="true"/>Reintentar</button>{onContinue&&<button type="button" onClick={onContinue} className="terminal-welcome-continue">Continuar con lo disponible<ArrowRight size={14} aria-hidden="true"/></button>}</div>}
+   <div className="terminal-welcome-footer"><span aria-hidden="true">MENSOR<span className="terminal-welcome-footer-line"/>TERMINAL</span>{onSignOut&&<button type="button" onClick={onSignOut}>Cerrar sesión</button>}</div>
   </section>
  </div>;
 }

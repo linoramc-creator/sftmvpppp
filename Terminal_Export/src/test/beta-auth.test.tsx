@@ -10,6 +10,23 @@ afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 async function open(){render(<BrowserRouter><AuthGate><p>Private terminal</p></AuthGate></BrowserRouter>);await screen.findByRole('button',{name:'Entrar a la terminal'});}
 function ReadyFeed(){const entry=useTerminalEntry();useEffect(()=>{if(entry)entry.report(entry.sessionId,entry.attempt,{status:'ready',detail:'Feed listo.'});},[entry?.sessionId,entry?.attempt]);return <button>Open market</button>;}
 function signedIn(){const session={access_token:'test-session',user:{id:'person-id',user_metadata:{display_name:'María'}}};fake.getSession.mockResolvedValue({data:{session}});vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'person@example.test',displayName:'María',isAdmin:false})}));return session;}
+it('keeps one branded welcome mounted through session, profile and feed preparation without the blue access screen',async()=>{
+ const session=signedIn();let restoreSession!:(value:unknown)=>void,restoreProfile!:(value:unknown)=>void;
+ fake.getSession.mockReturnValue(new Promise(resolve=>{restoreSession=resolve;}));
+ vi.stubGlobal('fetch',vi.fn().mockReturnValue(new Promise(resolve=>{restoreProfile=resolve;})));
+ await act(async()=>{render(<MemoryRouter><AuthGate><ReadyFeed/></AuthGate></MemoryRouter>);});
+ const welcome=screen.getByRole('dialog');expect(welcome).toHaveTextContent('MensorTerminal');expect(document.querySelector('.auth-page')).toBeNull();
+ await act(async()=>restoreSession({data:{session}}));
+ expect(screen.getByRole('dialog')).toBe(welcome);expect(welcome).toHaveTextContent('Bienvenido, María');expect(document.querySelector('.auth-intro')).toBeNull();
+ await act(async()=>restoreProfile({ok:true,json:async()=>({id:'person-id',email:'person@example.test',displayName:'María',isAdmin:false})}));
+ expect(screen.getByRole('dialog')).toBe(welcome);expect(document.querySelector('.auth-card')).toBeNull();
+});
+it('keeps failed access checks in the branded welcome without a continue action or private content',async()=>{
+ signedIn();vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:false,json:async()=>({error:'Tu acceso está revocado.'})}));
+ render(<MemoryRouter><AuthGate><p>Private terminal</p></AuthGate></MemoryRouter>);
+ expect(await screen.findByText('Tu acceso está revocado.')).toBeVisible();expect(screen.getByRole('button',{name:'Reintentar'})).toBeEnabled();
+ expect(screen.queryByRole('button',{name:'Continuar con lo disponible'})).toBeNull();expect(screen.queryByText('Private terminal')).toBeNull();expect(document.querySelector('.auth-page')).toBeNull();
+});
 it('waits for feed readiness and the minimum greeting, then never replays on profile or token refresh',async()=>{
  const session=signedIn();vi.useFakeTimers();let channel:TerminalEntry|null=null;
  function Feed(){channel=useTerminalEntry();return <button>Open market</button>;}
@@ -44,12 +61,12 @@ it('uses a bounded loading timeout with explicit recovery rather than opening a 
  signedIn();vi.useFakeTimers();await act(async()=>{render(<MemoryRouter><AuthGate><p>Pending feed</p></AuthGate></MemoryRouter>);});
  await act(async()=>vi.advanceTimersByTime(90000));expect(screen.getByRole('dialog')).toHaveTextContent('La carga está tardando');expect(screen.getByRole('button',{name:'Reintentar'})).toBeEnabled();
 });
-it('respects reduced motion and sanitizes the greeting while keeping the two second minimum',async()=>{
+it('respects reduced motion and sanitizes the greeting while keeping the 3.5 second minimum',async()=>{
  const session=signedIn();session.user.user_metadata.display_name='<img src=x onerror=alert(1)>';
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'existing.person@example.test',displayName:'<script>danger</script>',isAdmin:false})}));
  const media=vi.spyOn(window,'matchMedia').mockImplementation(query=>({matches:true,media:query,onchange:null,addListener:vi.fn(),removeListener:vi.fn(),addEventListener:vi.fn(),removeEventListener:vi.fn(),dispatchEvent:vi.fn()}));
  try{vi.useFakeTimers();await act(async()=>{render(<MemoryRouter><AuthGate><ReadyFeed/></AuthGate></MemoryRouter>);});expect(screen.getByRole('dialog')).toHaveTextContent('Bienvenido, existing person');expect(document.querySelectorAll('img')).toHaveLength(1);expect(document.querySelector('img')).toHaveAttribute('src','/mensor-icon.png?v=2');expect(document.querySelector('[onerror]')).toBeNull();
- await act(async()=>vi.advanceTimersByTime(1999));expect(screen.getByRole('dialog')).toBeInTheDocument();
+ await act(async()=>vi.advanceTimersByTime(3499));expect(screen.getByRole('dialog')).toBeInTheDocument();
  await act(async()=>vi.advanceTimersByTime(1));await act(async()=>vi.advanceTimersByTime(0));expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
  }finally{media.mockRestore();}
 });
