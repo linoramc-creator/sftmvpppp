@@ -5,7 +5,8 @@ import {FeedView,NewsView} from '../components/MarketPanels';
 import type {Article} from '../../../supabase/functions/analyze-ticker/panels';
 
 const api=vi.hoisted(()=>vi.fn());
-vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api}));
+vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api,accountApi:async()=>({groups:(await import('../../../supabase/functions/analyze-ticker/feed-preferences')).defaultFeedPreferences()})}));
+vi.mock('@/components/AuthGate',()=>({useProfile:()=>({id:'feed-news-user'})}));
 const story:Article={title:'La empresa amplía su capacidad - Reuters',url:'https://www.reuters.com/business/example',source:'Reuters',date:'2026-10-15',image:'https://images.example.test/economy-factory.jpg',excerpt:'La empresa anunció una nueva fábrica. La inversión asciende a 100 millones.',keyPoints:['La empresa anunció una nueva fábrica.','La inversión asciende a 100 millones.']};
 
 it('presents article key points without outgoing article links or provider labels',()=>{

@@ -7,15 +7,17 @@ import AssetOverview from '../components/AssetOverview';
 import AssetCandles from '../components/AssetCandles';
 import type {AssetSnapshot} from '../../../supabase/functions/analyze-ticker/asset-snapshot';
 const api=vi.hoisted(()=>vi.fn());
-vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api}));
+vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api,accountApi:async()=>({groups:(await import('../../../supabase/functions/analyze-ticker/feed-preferences')).defaultFeedPreferences()})}));
+vi.mock('@/components/AuthGate',()=>({useProfile:()=>({id:'feed-instruments-user'})}));
 
 it('opens every index and ETF through the watchlist asset route without enabling unrelated quote groups',async()=>{
  const quote=(symbol:string,label:string)=>({symbol,label,price:100,currency:'USD',date:'2026-10-16',change:1,session:'closed'});
- api.mockImplementation(async(_url:string,init:RequestInit)=>({ok:true,json:async()=>JSON.parse(init.body as string).panel==='feedMarkets'?{groups:[{label:'ÍNDICES',items:[quote('^KS11','KOSPI · Corea del Sur'),quote('NQ=F','Nasdaq 100 · Futuro')]},{label:'ETF PRINCIPALES',items:[quote('QQQ','Nasdaq 100 · QQQ')]},{label:'MATERIAS PRIMAS',items:[quote('GC=F','Oro')]}],treasury:[],earnings:[],fetchedAt:'2026-10-16T21:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-16T21:00Z'}}));
+ api.mockImplementation(async(_url:string,init:RequestInit)=>({ok:true,json:async()=>JSON.parse(init.body as string).panel==='feedMarkets'?{groups:[{label:'ÍNDICES',items:[quote('^KS11','KOSPI · Corea del Sur'),quote('NQ=F','Nasdaq 100 · Futuro')]},{label:'ETF PRINCIPALES',items:[quote('QQQ','Nasdaq 100 · QQQ')]},{label:'DIVISAS Y ACTIVOS DIGITALES',items:[{...quote('EURUSD=X','EUR/USD'),price:1.16473}]},{label:'MATERIAS PRIMAS',items:[quote('GC=F','Oro')]}],treasury:[],earnings:[],fetchedAt:'2026-10-16T21:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-16T21:00Z'}}));
  const select=vi.fn();render(<FeedView stocks={[]} data={null} onChange={vi.fn()} onSelect={select}/>);
  fireEvent.click(await screen.findByRole('button',{name:'Abrir ficha de KOSPI · Corea del Sur'}));expect(select).toHaveBeenLastCalledWith('^KS11');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de Nasdaq 100 · Futuro'}));expect(select).toHaveBeenLastCalledWith('NQ=F');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de Nasdaq 100 · QQQ'}));expect(select).toHaveBeenLastCalledWith('QQQ');
+ fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de EUR/USD'}));expect(select).toHaveBeenLastCalledWith('EURUSD=X');expect(screen.getByText('1,16473 USD')).toBeVisible();
  expect(screen.queryByRole('button',{name:'Abrir ficha de Oro'})).toBeNull();
 });
 

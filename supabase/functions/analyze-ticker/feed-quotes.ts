@@ -1,4 +1,6 @@
 import {regularSessionEnd} from './market-session.ts';
+import {instrumentInfo} from './asset-instrument.ts';
+import {feedSymbolAllowed,type FeedGroupKey} from './feed-preferences.ts';
 export type FeedSession='pre'|'regular'|'post'|'closed';
 export type SessionQuote={symbol:string;label:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close';reference:'previous-close'|'regular-close'|null;timezone?:string};
 const commodityUnits:Record<string,string>={'GC=F':'USD/oz t','SI=F':'USD/oz t','CL=F':'USD/barril','BZ=F':'USD/barril','HG=F':'USD/libra','NG=F':'USD/MMBtu','ZW=F':'¢/bushel','ZC=F':'¢/bushel'};
@@ -19,8 +21,8 @@ export function normalizeFeedQuote(symbol:string,label:string,raw:any,intraday:a
  // Agricultural futures arrive in US cents; keep their raw magnitude and
  // display the contract unit instead of incorrectly labelling the price USD.
  const expectedCurrency=symbol==='ZW=F'||symbol==='ZC=F'?'USX':'USD';
- const unit=commodityUnits[symbol]&&currency===expectedCurrency?commodityUnits[symbol]:undefined;
- const result:SessionQuote={symbol,label,price:regularPrice,change:regularPrice!==null&&prior?(regularPrice/prior-1)*100:null,date,currency,...(unit?{unit}:{}),session:regularAt!==null&&phase(meta,now,symbol)==='regular'&&dateAt(regularAt)===dateAt(now)?'regular':'closed',at:regularAt===null?null:new Date(regularAt).toISOString(),delaySeconds:regularAt===null?null:Math.max(0,Math.floor((now-regularAt)/1000)),priceKind:'quote',reference:prior?'previous-close':null,timezone};
+ const unit=instrumentInfo(meta,symbol).priceUnit==='pts'?'pts':commodityUnits[symbol]&&currency===expectedCurrency?commodityUnits[symbol]:undefined;
+ const result:SessionQuote={symbol,label:label===symbol?feedAssetLabel(symbol,meta):label,price:regularPrice,change:regularPrice!==null&&prior?(regularPrice/prior-1)*100:null,date,currency,...(unit?{unit}:{}),session:regularAt!==null&&phase(meta,now,symbol)==='regular'&&dateAt(regularAt)===dateAt(now)?'regular':'closed',at:regularAt===null?null:new Date(regularAt).toISOString(),delaySeconds:regularAt===null?null:Math.max(0,Math.floor((now-regularAt)/1000)),priceKind:'quote',reference:prior?'previous-close':null,timezone};
  const chart=intraday?.chart?.result?.[0],m=chart?.meta??{},active=phase(m,now,symbol),quote=chart?.indicators?.quote?.[0];
  if(m.dataGranularity!=='1m'||active==='closed'||!quote)return result;
  // Yahoo timestamps identify the START of a minute, including a partial last
@@ -35,3 +37,26 @@ export function normalizeFeedQuote(symbol:string,label:string,raw:any,intraday:a
 }
 async function chart(symbol:string,minute:boolean){try{const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=${minute?'1m':'1d'}${minute?'&includePrePost=true':''}`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error',signal:AbortSignal.timeout(8000)});return r.ok?await r.json():null;}catch{return null;}}
 export async function feedSessionQuote(symbol:string,label:string,extended=false){const [daily,intraday]=await Promise.all([chart(symbol,false),extended?chart(symbol,true):null]);return normalizeFeedQuote(symbol,label,daily,intraday);}
+function feedAssetLabel(symbol:string,meta:any):string{
+ if(symbol.endsWith('=X')){const pair=symbol.slice(0,-2);return pair.length===6?`${pair.slice(0,3)}/${pair.slice(3)}`:`USD/${pair}`;}
+ const name=typeof meta?.shortName==='string'?meta.shortName:typeof meta?.longName==='string'?meta.longName:symbol;
+ return name.slice(0,100);
+}
+const verifiedAssets=new Map<string,{at:number;label:string}>();
+const verifyingAssets=new Map<string,Promise<{symbol:string;label:string}|null>>();
+// A metadata check is required when an asset is added. Persisted choices are
+// subsequently priced from the existing quote cache, rather than researched again.
+export async function validateFeedAsset(group:FeedGroupKey,symbol:string):Promise<{symbol:string;label:string}|null>{
+ if(!feedSymbolAllowed(group,symbol))return null;
+ const key=`${group}:${symbol}`,hit=verifiedAssets.get(key);
+ if(hit&&Date.now()-hit.at<300000)return {symbol,label:hit.label};
+ if(verifyingAssets.has(key))return verifyingAssets.get(key)!;
+ const operation=(async()=>{
+  const raw=await chart(symbol,false),data=raw?.chart?.result?.[0],meta=data?.meta??{};
+  const type=String(meta.instrumentType??'').toUpperCase();
+  const allowed=group==='indices'?['INDEX','INDICES','FUTURE']:group==='etfs'?['ETF']:['CURRENCY','CRYPTOCURRENCY'];
+  if(!allowed.includes(type)||!positive(meta.regularMarketPrice)&&!(data?.indicators?.quote?.[0]?.close??[]).some(positive))return null;
+  const label=feedAssetLabel(symbol,meta);if(verifiedAssets.size>=256)verifiedAssets.delete(verifiedAssets.keys().next().value!);
+  verifiedAssets.set(key,{at:Date.now(),label});return {symbol,label};
+ })().finally(()=>verifyingAssets.delete(key));verifyingAssets.set(key,operation);return operation;
+}

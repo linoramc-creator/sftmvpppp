@@ -2,7 +2,8 @@ import {act,render,waitFor} from '@testing-library/react';
 import {FeedView} from '@/components/MarketPanels';
 import {TerminalEntryProvider,type FeedReadiness} from '@/lib/terminal-entry';
 const api=vi.hoisted(()=>vi.fn());
-vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api}));
+vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api,accountApi:async()=>({groups:(await import('../../../supabase/functions/analyze-ticker/feed-preferences')).defaultFeedPreferences()})}));
+vi.mock('@/components/AuthGate',()=>({useProfile:()=>({id:'feed-readiness-user'})}));
 
 it('loads news immediately but waits for personal watchlist, its actual market response and the ticker bar',async()=>{
  const requests:{panel:string;subject:string;resolve:(response:unknown)=>void}[]=[];

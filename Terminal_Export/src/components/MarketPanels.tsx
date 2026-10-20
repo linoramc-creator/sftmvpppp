@@ -1,5 +1,9 @@
 import {usePanelActive} from './KeepPanel';
 import { WatchlistCard } from "./WatchlistCard";
+import {FeedGroupEditor} from './FeedGroupEditor';
+import {useProfile} from './AuthGate';
+import {useFeedPreferences} from '@/hooks/use-feed-preferences';
+import {FEED_GROUP_KEYS,FEED_GROUP_LABELS} from '../../../supabase/functions/analyze-ticker/feed-preferences';
 import type { MarketData } from "@/lib/analyze";
 import {NewsCards,TreasuryCard,EarningsList,FeedQuoteStamp} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
@@ -10,14 +14,15 @@ import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, Mark
 
 const cache = new Map<string, { at: number; data: unknown }>();
 const pending = new Map<string, Promise<unknown>>();
-function request<T>(panel: string, subject: string, sector: boolean, ttl: number): Promise<T> {
-  const key = `${panel}:${subject}:${sector}`;
+const panelKey=(panel:string,subject:string,sector:boolean,configuration='',scope='')=>`${panel}:${subject}:${sector}${configuration?`:${scope}:${configuration}`:''}`;
+function request<T>(panel: string, subject: string, sector: boolean, ttl: number,configuration='',scope=''): Promise<T> {
+  const key = panelKey(panel,subject,sector,configuration,scope);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data as T);
   if (pending.has(key)) return pending.get(key) as Promise<T>;
   const promise = authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', },
-    body: JSON.stringify({ panel, subject, sector }), signal: AbortSignal.timeout(panel === 'business' ? 145000 : 75000),
+    body: JSON.stringify({ panel, subject, sector,...(configuration?{feedGroups:JSON.parse(configuration)}:{}) }), signal: AbortSignal.timeout(panel === 'business' ? 145000 : 75000),
   }).then(async response => {
     if (!response.ok) throw new Error('No se ha podido consultar este apartado.');
     const data = await response.json();
@@ -28,23 +33,23 @@ function request<T>(panel: string, subject: string, sector: boolean, ttl: number
   pending.set(key, promise);
   return promise;
 }
-function usePanel<T>(panel: string, subject = '', sector = false, enabled = true) {
+function usePanel<T>(panel: string, subject = '', sector = false, enabled = true,configuration='',scope='') {
   const active=usePanelActive();
-  const previousKey=useRef(`${panel}:${subject}:${sector}`);
-  const [data, setData] = useState<T | null>(() => (cache.get(`${panel}:${subject}:${sector}`)?.data as T) ?? null);
+  const key=panelKey(panel,subject,sector,configuration,scope);
+  const previousKey=useRef(key);
+  const [data, setData] = useState<T | null>(() => (cache.get(key)?.data as T) ?? null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [loading,setLoading]=useState(active&&enabled);
-  const [loadedKey,setLoadedKey]=useState(cache.has(`${panel}:${subject}:${sector}`)?`${panel}:${subject}:${sector}`:'');
+  const [loadedKey,setLoadedKey]=useState(cache.has(key)?key:'');
   useEffect(() => {
     if(!active||!enabled)return;
     let cancelled = false;
-    const previous=cache.get(`${panel}:${subject}:${sector}`);
-    const key=`${panel}:${subject}:${sector}`;
+    const previous=cache.get(key);
     if(previous&&Date.now()-previous.at<86400000)setData(previous.data as T);else if(previousKey.current!==key)setData(null);
     previousKey.current=key;setError('');setLoading(true);
     const ttl = panel==='feedMarkets'?60000:panel.startsWith('feed') ? 300000 : panel==='news'?600000: ['business', 'institutional'].includes(panel) ? 86400000 : 3600000;
-    const load = () => request<T>(panel, subject, sector, ttl)
+    const load = () => request<T>(panel, subject, sector, ttl,configuration,scope)
       .then(value => { if (!cancelled) { setData(value); setLoadedKey(key); setError(''); setLoading(false); } })
       .catch(() => { if (!cancelled) {setError('No se ha podido actualizar. Inténtalo de nuevo.');setLoading(false);} });
     void load();
@@ -52,16 +57,16 @@ function usePanel<T>(panel: string, subject = '', sector = false, enabled = true
     const timer = window.setInterval(visible, ttl);
     document.addEventListener('visibilitychange',visible);
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange',visible); };
-  }, [panel, subject, sector, retry,active,enabled]);
-  return { data, error, loading, loadedKey, retry: () => { cache.delete(`${panel}:${subject}:${sector}`); setRetry(n => n + 1); } };
+  }, [panel, subject, sector, retry,active,enabled,configuration,scope]);
+  return { data, error, loading, loadedKey, retry: () => { cache.delete(key); setRetry(n => n + 1); } };
 }
 const fmt = (n: number | null | undefined, digits = 2) => n == null ? 'N/D' : n.toLocaleString('es-ES', { maximumFractionDigits: digits });
 const compact = (n: number) => Intl.NumberFormat('es-ES', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 function Status({ error, retry }: { error: string; retry: () => void }) {
   return <div className="border border-border p-8 text-sm text-muted-foreground" role="status">{error || 'Cargando…'}{error && <button className="ml-4 text-section-heading underline" onClick={retry}>Reintentar</button>}</div>;
 }
-function Box({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="border border-border bg-card p-4 min-w-0"><h3 className="text-xs font-semibold tracking-wider text-section-heading mb-4">{title}</h3>{children}</section>;
+function Box({ title, children,action }: { title: string; children: ReactNode;action?:ReactNode }) {
+  return <section className="border border-border bg-card p-4 min-w-0"><div className="flex items-center justify-between gap-2 mb-4"><h3 className="text-xs font-semibold tracking-wider text-section-heading">{title}</h3>{action}</div>{children}</section>;
 }
 function Stamp({ at }: { at: string }) {
   return <p className="text-xs text-muted-foreground">Actualizado: {new Date(at).toLocaleString('es-ES')}</p>;
@@ -76,18 +81,21 @@ export function NewsView({ subject, sector = false }: { subject: string; sector?
   return <div className="space-y-5 py-3">{state.error && <Status {...state} />}<Box title={sector ? 'NOTICIAS DEL SECTOR' : 'NOTICIAS · ' + subject}>{list(state.data.articles)}</Box>
     {!sector && state.data.sectorName && <Box title={'NOTICIAS DEL SECTOR · ' + state.data.sectorName}>{list(state.data.sectorArticles ?? [])}</Box>}<Stamp at={state.data.fetchedAt} /></div>;
 }
-function feedPrice(price: number | null, currency: string) {
+function feedPrice(price: number | null, currency: string,symbol='') {
   if (price === null) return 'N/D';
-  const digits = Math.abs(price) < 10 ? 4 : 2;
+  const pair=symbol.endsWith('=X')?symbol.slice(0,-2):'';
+  const digits = pair?(pair.endsWith('JPY')?3:pair==='JPY'?3:5):Math.abs(price) < 10 ? 4 : 2;
   return `${fmt(price, digits)} ${currency}`;
 }
 function FeedInstrument({item,onSelect}:{item:FeedQuote;onSelect?: (symbol:string)=>void}){
-  const content=<><div className="min-w-0"><p className="text-sm group-hover:text-sky-300 transition-colors">{item.label}</p><FeedQuoteStamp quote={item}/></div><div className="text-right shrink-0"><p className="text-xs sm:text-sm tabular-nums whitespace-nowrap">{feedPrice(item.price,item.symbol.startsWith('^')||item.symbol==='NQ=F'?'pts':item.unit??item.currency)}</p><p className={`text-xs tabular-nums ${item.change===null?'text-muted-foreground':item.change>=0?'text-emerald-400':'text-red-400'}`}>{item.change===null?'N/D':`${item.change>=0?'+':''}${fmt(item.change)}%`}</p></div></>;
+  const content=<><div className="min-w-0"><p className="text-sm group-hover:text-sky-300 transition-colors">{item.label}</p><FeedQuoteStamp quote={item}/></div><div className="text-right shrink-0"><p className="text-xs sm:text-sm tabular-nums whitespace-nowrap">{feedPrice(item.price,item.unit??(item.symbol.startsWith('^')||item.symbol==='NQ=F'?'pts':item.currency),item.symbol)}</p><p className={`text-xs tabular-nums ${item.change===null?'text-muted-foreground':item.change>=0?'text-emerald-400':'text-red-400'}`}>{item.change===null?'N/D':`${item.change>=0?'+':''}${fmt(item.change)}%`}</p></div></>;
   const classes='flex w-full items-center justify-between gap-3 border-b border-border/70 pb-2 last:border-0 last:pb-0';
   return onSelect?<button type="button" aria-label={`Abrir ficha de ${item.label}`} onClick={()=>onSelect(item.symbol)} className={`${classes} group text-left rounded px-1 -mx-1 hover:bg-sky-400/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60`}>{content}</button>:<div className={classes}>{content}</div>;
 }
 export function FeedView({stocks,data:quotes,onChange,onSelect,onMarketSelect,watchlistReady=true,watchlistError='',onRetryWatchlist,tickerReady=true}:{stocks:string[];data:MarketData|null;onChange:(stocks:string[])=>void;onSelect:(symbol:string)=>void;onMarketSelect?:(symbol:string)=>void;watchlistReady?:boolean;watchlistError?:string;onRetryWatchlist?:()=>void;tickerReady?:boolean}) {
-  const market=usePanel<MarketFeed>('feedMarkets',stocks.join(','),false,watchlistReady);
+  const profile=useProfile(),preferences=useFeedPreferences(profile.id),configuration=JSON.stringify(preferences.groups);
+  const marketKey=panelKey('feedMarkets',stocks.join(','),false,configuration,profile.id);
+  const market=usePanel<MarketFeed>('feedMarkets',stocks.join(','),false,watchlistReady&&preferences.ready,configuration,profile.id);
   const state = usePanel<MarketFeed>('feedNews');
   const entry=useTerminalEntry(),root=useRef<HTMLDivElement>(null),lastAttempt=useRef('');
   useEffect(()=>{
@@ -95,22 +103,23 @@ export function FeedView({stocks,data:quotes,onChange,onSelect,onMarketSelect,wa
     const key=`${entry.sessionId}:${entry.attempt}`;if(lastAttempt.current===key)return;lastAttempt.current=key;
     if(entry.attempt<1)return;
     if(watchlistError)onRetryWatchlist?.();
-    if(market.error||!market.data)market.retry();
+    if(preferences.error||market.error)preferences.retry();
+    if(!market.error&&!market.data)market.retry();
     if(state.error||!state.data)state.retry();
   },[entry?.sessionId,entry?.attempt]);
   useEffect(()=>{
     if(!entry)return;
     const report=(status:'loading'|'ready'|'error',detail:string)=>entry.report(entry.sessionId,entry.attempt,{status,detail});
-    if(watchlistError||market.error||state.error){report('error',watchlistError?'No se ha podido sincronizar tu lista de seguimiento.':state.error?'No se han podido cargar las noticias del feed.':'No se han podido cargar los datos de mercado.');return;}
-    if(!watchlistReady||!tickerReady||market.loading||state.loading||!market.data||!state.data||market.loadedKey!==`feedMarkets:${stocks.join(',')}:false`){report('loading',!watchlistReady?'Sincronizando tu lista de seguimiento…':!state.data||state.loading?'Preparando las noticias del día…':'Preparando los datos de mercado…');return;}
+    if(watchlistError||preferences.error||market.error||state.error){report('error',watchlistError?'No se ha podido sincronizar tu lista de seguimiento.':preferences.error|| (state.error?'No se han podido cargar las noticias del feed.':'No se han podido cargar los datos de mercado.'));return;}
+    if(!watchlistReady||!preferences.ready||!tickerReady||market.loading||state.loading||!market.data||!state.data||market.loadedKey!==marketKey){report('loading',!watchlistReady||!preferences.ready?'Sincronizando tu configuración…':!state.data||state.loading?'Preparando las noticias del día…':'Preparando los datos de mercado…');return;}
     const controller=new AbortController();report('loading','Preparando las portadas…');
     if(root.current)void waitForVisibleFeedImages(root.current,controller.signal).then(ready=>{if(!controller.signal.aborted)report(ready?'ready':'error',ready?'Tu feed está preparado.':'Algunas portadas están tardando demasiado en cargar.');});
     return()=>controller.abort();
-  },[entry?.sessionId,entry?.attempt,watchlistReady,watchlistError,tickerReady,stocks.join(','),market.data,market.error,market.loading,market.loadedKey,state.data,state.error,state.loading]);
-  const data = market.data ?? {groups:[],treasury:[],earnings:[],fetchedAt:''};
+  },[entry?.sessionId,entry?.attempt,watchlistReady,watchlistError,preferences.ready,preferences.error,tickerReady,marketKey,market.data,market.error,market.loading,market.loadedKey,state.data,state.error,state.loading]);
+  const data = preferences.ready&&market.loadedKey===marketKey&&market.data?market.data:{groups:[],treasury:[],earnings:[],fetchedAt:''};
   return <div ref={root} className="space-y-6">
-    {(!market.data||market.error) && <Status {...market} />}
-    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => <Box key={group.label} title={group.label}><div className="space-y-2">{group.items.map(item=><FeedInstrument key={item.symbol} item={item} onSelect={group.label==='ÍNDICES'||group.label==='ETF PRINCIPALES'?onMarketSelect??onSelect:undefined}/>)}</div></Box>)}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={market.data?.watchlist} onChange={onChange} onSelect={onSelect}/></Box></div>
+    {preferences.error?<Status error={preferences.error} retry={preferences.retry}/>:(!data.fetchedAt||market.error)&&<Status {...market} retry={preferences.retry}/>}
+    <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => {const editable=FEED_GROUP_KEYS.find(key=>FEED_GROUP_LABELS[key]===group.label);return <Box key={group.label} title={group.label} action={editable?<FeedGroupEditor key={`${profile.id}:${editable}`} group={editable} preferences={preferences.groups} labels={Object.fromEntries(group.items.map(item=>[item.symbol,item.label]))} onSave={preferences.save}/>:undefined}><div className="space-y-2">{group.items.map(item=><FeedInstrument key={item.symbol} item={item} onSelect={editable?onMarketSelect??onSelect:undefined}/>)}</div></Box>;})}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={preferences.ready&&market.loadedKey===marketKey?market.data?.watchlist:undefined} onChange={onChange} onSelect={onSelect}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
       <div className="space-y-4"><Box title="PORTADAS DEL DÍA">{state.data&&<div className="mb-3"><Stamp at={state.data.fetchedAt}/></div>}{state.data?<NewsCards articles={state.data.headlines}/>:<Status {...state}/>}</Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS">{state.data?<NewsCards articles={state.data.geopolitics??[]} geo/>:<Status {...state}/>}</Box></div>
       <Box title="RESULTADOS · PRÓXIMOS 7 DÍAS"><EarningsList events={data.earnings??[]} onSelect={onSelect}/></Box>

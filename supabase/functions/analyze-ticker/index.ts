@@ -1,6 +1,7 @@
 import {streamReport,REPORT_MODELS,type GeminiResult} from './report-models.ts';
 import {reportNewsContext} from './news-sources.ts';
 import {feedSymbols} from './feed-quotes.ts';
+import {normalizeFeedPreferences,feedPreferencesKey} from './feed-preferences.ts';
 import {tavilyJson} from './tavily-client.ts';
 import {extendedHours} from './extended-hours.ts';
 import {regularReportQuote} from './regular-quote.ts';
@@ -3958,7 +3959,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if(body.panel === "regularQuote") return panelJson(await regularReportQuote(String(body.subject).trim().toUpperCase()));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
-      if(body.panel==='marketPulse')return panelJson(await marketPulse(String(body.subject).trim().toUpperCase()));
+      if(body.panel==='marketPulse')return panelJson(await marketPulse(String(body.subject).trim().toUpperCase(),env));
       if(body.panel==='bondsCredit')return panelJson(await bondsCreditPanel(env));
       if(body.panel==='sectorActivity')return panelJson(await sectorActivity(body.subject.trim(),body.peers.map((p:{symbol:string;name:string})=>({symbol:p.symbol.trim().toUpperCase(),name:p.name.trim()})),deps));
       if (body.panel === "relativeComparison"||body.panel === "marketComparison") {
@@ -3976,7 +3977,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
         const symbols=body.symbols.map((s:string)=>s.trim().toUpperCase());
         return panelJson(body.panel==='marketComparison'?await marketComparison(symbols,body.range??'6m',body.includeAnalysis===true,env,relativeDeps):await relativeComparison(symbols as [string,string],body.includeAi===true,env,relativeDeps));
       }
-      if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v7:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
+      if (body.panel === "feedMarkets") {const symbols=feedSymbols(body.subject)!,groups=normalizeFeedPreferences(body.feedGroups)!;return panelJson(await sharedFeed(await feedPreferencesKey(symbols,groups),()=>feedMarketsPanel(env,symbols,groups),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));}
       if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v7",()=>marketFeedPanel(env,"news")));
       if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v10",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));

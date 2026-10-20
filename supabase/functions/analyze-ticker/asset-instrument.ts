@@ -1,14 +1,19 @@
 import {regularSessionEnd} from './market-session.ts';
-export type InstrumentKind='index'|'etf'|'equity'|'future'|'other';
-export type InstrumentInfo={kind:InstrumentKind;priceUnit:string;volumeUnit:'shares'|'fund-units'|'published'|'unavailable'};
+export type InstrumentKind='index'|'etf'|'equity'|'future'|'forex'|'crypto'|'other';
+export type InstrumentInfo={kind:InstrumentKind;priceUnit:string;volumeUnit:'shares'|'fund-units'|'published'|'unavailable';baseCurrency?:string;quoteCurrency?:string;priceDecimals?:number};
 export type SessionStats={date:string|null;partial:boolean;open:number|null;high:number|null;low:number|null;previousClose:number|null;volume:number|null;averageVolume20:number|null;volumeRatio:number|null;rangePercent:number|null;gapPercent:number|null;vol20:number|null;atr14:number|null;riskDate:string|null};
 type Bar={time:number;open:number;high:number;low:number;close:number;volume:number|null};
 const finite=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
 const positive=(value:unknown)=>finite(value)&&value>0?value:null;
+const EQUITY_INDEX_FUTURES=new Set(['ES','NQ','YM','RTY','MES','MNQ','MYM','M2K'].map(root=>root+'=F'));
+export function isEquityIndexFuture(symbol:string):boolean{return EQUITY_INDEX_FUTURES.has(symbol.toUpperCase());}
 export function instrumentInfo(meta:Record<string,any>,symbol:string):InstrumentInfo{
   const type=String(meta.instrumentType??meta.quoteType??'').toUpperCase();
-  const kind:InstrumentKind=type==='INDEX'||type==='INDICES'||symbol.startsWith('^')?'index':type==='FUTURE'||symbol.endsWith('=F')?'future':type==='ETF'?'etf':type==='EQUITY'?'equity':'other';
-  return {kind,priceUnit:kind==='index'||symbol==='NQ=F'?'pts':String(meta.currency??''),volumeUnit:kind==='index'?'unavailable':kind==='etf'?'fund-units':kind==='equity'?'shares':'published'};
+  const kind:InstrumentKind=type==='INDEX'||type==='INDICES'||symbol.startsWith('^')?'index':type==='FUTURE'||symbol.endsWith('=F')?'future':type==='CURRENCY'||symbol.endsWith('=X')?'forex':type==='CRYPTOCURRENCY'?'crypto':type==='ETF'?'etf':type==='EQUITY'?'equity':'other';
+  const fx=symbol.match(/^([A-Z]{3})([A-Z]{3})?=X$/),crypto=kind==='crypto'?symbol.match(/^([A-Z0-9]+)-([A-Z]{3})$/):null;
+  const baseCurrency=kind==='forex'&&fx?(fx[2]?fx[1]:'USD'):crypto?.[1],quoteCurrency=kind==='forex'&&fx?(fx[2]??fx[1]):crypto?.[2];
+  const priceDecimals=kind==='forex'?(quoteCurrency==='JPY'?3:5):kind==='crypto'?Math.min(8,Math.max(2,Number.isInteger(meta.priceHint)?meta.priceHint:2)):undefined;
+  return {kind,priceUnit:kind==='index'||kind==='future'&&isEquityIndexFuture(symbol)?'pts':quoteCurrency??String(meta.currency??''),volumeUnit:['index','forex','crypto'].includes(kind)?'unavailable':kind==='etf'?'fund-units':kind==='equity'?'shares':'published',...(baseCurrency?{baseCurrency,quoteCurrency,priceDecimals}:priceDecimals!==undefined?{priceDecimals}:{})};
 }
 export function sessionStats(meta:Record<string,any>,daily:Bar[],info:InstrumentInfo,now=Date.now(),symbol=String(meta.symbol??'')):SessionStats{
   let zone=String(meta.exchangeTimezoneName??'UTC');try{new Intl.DateTimeFormat('en',{timeZone:zone});}catch{zone='UTC';}
@@ -31,7 +36,7 @@ export function sessionStats(meta:Record<string,any>,daily:Bar[],info:Instrument
   const averageVolume20=info.volumeUnit!=='unavailable'&&prior.length===20&&prior.every(b=>positive(b.volume)!==null)?prior.reduce((sum,b)=>sum+b.volume!,0)/20:null;
   const returns=closed.slice(-21).slice(1).map((b,i)=>Math.log(b.close/closed.slice(-21)[i].close));
   const mean=returns.length?returns.reduce((sum,v)=>sum+v,0)/returns.length:0;
-  const vol20=returns.length===20?Math.sqrt(returns.reduce((sum,v)=>sum+(v-mean)**2,0)/19)*Math.sqrt(252)*100:null;
+  const vol20=returns.length===20?Math.sqrt(returns.reduce((sum,v)=>sum+(v-mean)**2,0)/19)*Math.sqrt(info.kind==='crypto'?365:252)*100:null;
   let atr14:number|null=null;
   closed.forEach((b,i)=>{const tr=i?Math.max(b.high-b.low,Math.abs(b.high-closed[i-1].close),Math.abs(b.low-closed[i-1].close)):b.high-b.low;if(i===13){atr14=closed.slice(0,14).reduce((sum,c,j)=>sum+(j?Math.max(c.high-c.low,Math.abs(c.high-closed[j-1].close),Math.abs(c.low-closed[j-1].close)):c.high-c.low),0)/14;}else if(i>13)atr14=(atr14!*13+tr)/14;});
   return {date,partial,open,high,low,previousClose,volume,averageVolume20,volumeRatio:volume!==null&&averageVolume20?volume/averageVolume20:null,rangePercent:high!==null&&low!==null&&previousClose?(high-low)/previousClose*100:null,gapPercent:open!==null&&previousClose?(open/previousClose-1)*100:null,vol20,atr14,riskDate};

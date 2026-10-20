@@ -1,4 +1,5 @@
 import {feedSessionQuote,type SessionQuote} from './feed-quotes.ts';
+import {defaultFeedPreferences,FEED_GROUP_LABELS,feedPreferenceLabel,feedPreferencesKey,type FeedPreferences} from './feed-preferences.ts';
 import {ironReferenceQuote} from './iron-reference.ts';
 import {geopoliticalNews,isGeopolitical,isGeopoliticalTopic} from './geopolitical-news.ts';
 import {NEWS_DOMAINS,PRIMARY_NEWS_DOMAINS,SPANISH_NEWS_DOMAINS,publisherNews,articleTime,newsKey,newsOrder,fundNewsPattern} from './news-sources.ts';
@@ -163,12 +164,8 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     return { fetchedAt: new Date().toISOString(), articles: summaries.slice(0, articles.length), sectorArticles: summaries.slice(articles.length), sectorName };
   });
 }
-const FEED_MARKETS: { label: string; items: [string, string][] }[] = [
-  { label: 'ÍNDICES', items: [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq Composite'], ['NQ=F', 'Nasdaq 100 · Futuro'], ['^DJI', 'Dow Jones'], ['^KS11', 'KOSPI · Corea del Sur'], ['^N225', 'Nikkei 225 · Japón'], ['^VIX', 'Volatilidad']] },
-  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['SI=F', 'Plata'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural'], ['SGX-IODEX', 'Hierro · IODEX']] },
-  { label: 'DIVISAS Y ACTIVOS DIGITALES', items: [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['JPY=X', 'USD/JPY'], ['CHF=X', 'USD/CHF'], ['CAD=X', 'USD/CAD'], ['CNY=X', 'USD/CNY'], ['BTC-USD', 'Bitcoin']] },
-  { label: 'ETF PRINCIPALES', items: [['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM'],['VEA','Desarrollados fuera de EE. UU. · VEA'],['VWO','Emergentes · VWO'],['TLT','Tesoro a largo plazo · TLT'],['GLD','Oro · GLD']] },
-];
+const FEED_COMMODITIES: { label: string; items: [string, string][] } =
+  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['SI=F', 'Plata'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural'], ['SGX-IODEX', 'Hierro · IODEX']] };
 const validFeedImage = photoUrl;
 export function curateFeed(articles: Article[], limit=9): Article[] {
   const important = /\b(geopolitics|ceasefire|conflict|military|shipping|strait|fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos|ibex|bolsas?|acciones|resultados|beneficios|deuda|renta variable)\b/i;
@@ -190,11 +187,13 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
     words.push(current); return true;
   }).sort(newsOrder).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 650) })),limit);
 }
-export async function feedMarketsPanel(env:Env,symbols:string[]=[]):Promise<MarketFeed>{
+export async function feedMarketsPanel(env:Env,symbols:string[]=[],preferences:FeedPreferences=defaultFeedPreferences()):Promise<MarketFeed>{
   const quote=(symbol:string,label:string,extended:boolean)=>symbol==='SGX-IODEX'?cached('iron-iodex-v1',3600000,()=>ironReferenceQuote()):cached(`feed-price-v4:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
-  return cached('feed-markets-v7:'+symbols.join(','),45000,async()=>{
+  const editable=(key:keyof FeedPreferences)=>({label:FEED_GROUP_LABELS[key],items:preferences[key].map(symbol=>[symbol,feedPreferenceLabel(key,symbol)] as [string,string])});
+  const groupsToLoad=[editable('indices'),FEED_COMMODITIES,editable('currencies'),editable('etfs')];
+  return cached(await feedPreferencesKey(symbols,preferences),45000,async()=>{
     const [groups,bonds,events,watchlist]=await Promise.all([
-      Promise.all(FEED_MARKETS.map(async group=>({label:group.label,items:await Promise.all(group.items.map(([symbol,label])=>quote(symbol,label,group.label==='ETF PRINCIPALES'||symbol==='NQ=F')))}))),
+      Promise.all(groupsToLoad.map(async group=>({label:group.label,items:await Promise.all(group.items.map(async([symbol,label])=>{const result=await quote(symbol,label,group.label==='ETF PRINCIPALES'||symbol==='NQ=F');return {...result,label:label===symbol?result.label:label};}))}))),
       cached('feedTreasury-v1',600000,()=>treasury(env.FRED_KEY)),cached('feedEarnings-v1',3600000,()=>earnings(env.FMP_KEY,env.FINNHUB_KEY)),
       Promise.all(symbols.map(symbol=>quote(symbol,symbol,!symbol.startsWith('^')&&!symbol.includes('=')&&!symbol.endsWith('-USD'))))
     ]);

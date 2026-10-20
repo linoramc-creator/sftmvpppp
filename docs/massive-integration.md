@@ -159,3 +159,24 @@ deducir festivos únicamente por el día de la semana:
 [KRX](https://global.krx.co.kr/contents/GLB/06/0602/0602020204/GLB0602020204T1.jsp),
 [HKEX](https://www.hkex.com.hk/Services/Trading-hours-and-Severe-Weather-Arrangements/Trading-Hours/Securities-Market?sc_lang=en),
 [SSE](https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml).
+
+## Gráficos y divisas (20-10-2026)
+
+Las fichas de mercado incorporan divisas y sus métricas de sesión, tendencia,
+volatilidad y drawdown. Se conserva la precisión de cada par. El mercado de
+divisas no tiene un volumen consolidado: no se muestran contratos, volumen
+negociado ni VWAP derivados de recuentos de cotizaciones. Las criptomonedas
+conservan su calendario continuo al anualizar la volatilidad.
+
+Se han verificado mediante Massive MCP barras diarias EUR/USD del 12 al 16 de
+octubre y barras de cinco minutos del 16 de octubre. La consulta intradiaria del
+19 de octubre no devolvió barras; esa ausencia no se rellena artificialmente.
+`marketPulse` usa Massive como respaldo acotado cuando falta el histórico nativo
+de divisas. Reemplaza las series juntas, conserva sus cortes UTC y distingue
+internamente el cierre de una barra de una cotización. La clave sigue en el
+servidor y el camino normal no añade consultas a Massive.
+
+Velas, línea, medias móviles, escalas, zoom y exportación SVG se calculan en el
+navegador con las barras ya disponibles. Los intervalos de 15/30/60 minutos se
+agrupan desde barras de cinco minutos, conservando las barras incompletas como
+parciales y el volumen desconocido como desconocido. No requieren llamadas a IA.
