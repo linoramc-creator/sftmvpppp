@@ -3971,14 +3971,14 @@ Deno.serve((req) => secureRequest(req, async (body) => {
             if(!expiries.length)return null;const raw=await oYahooOptions(symbol,expiries[0]);return {...raw,expiry:oIsoFromEpoch(expiries[0])};
           }catch{return null;}
         }),
-        news:async()=>{const feed=await sharedFeed('feed-news-v6',()=>marketFeedPanel(env,'news'));return [...feed.geopolitics,...feed.headlines];},
+        news:async()=>{const feed=await sharedFeed('feed-news-v7',()=>marketFeedPanel(env,'news'));return [...feed.geopolitics,...feed.headlines];},
         };
         const symbols=body.symbols.map((s:string)=>s.trim().toUpperCase());
         return panelJson(body.panel==='marketComparison'?await marketComparison(symbols,body.range??'6m',body.includeAnalysis===true,env,relativeDeps):await relativeComparison(symbols as [string,string],body.includeAi===true,env,relativeDeps));
       }
       if (body.panel === "feedMarkets") return panelJson(await sharedFeed("feed-markets-v7:"+feedSymbols(body.subject)!.join(","),()=>feedMarketsPanel(env,feedSymbols(body.subject)!),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));
-      if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v6",()=>marketFeedPanel(env,"news")));
-      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v9",()=>marketFeedPanel(env)));
+      if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v7",()=>marketFeedPanel(env,"news")));
+      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v10",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       if (body.panel === "comparison") return panelJson(await comparison(body.symbols.map((s:string)=>s.trim().toUpperCase()),env.FMP_KEY));
       if (body.panel === "correlation") return panelJson(await correlations(body.symbols.map((s:string)=>s.trim().toUpperCase()),typeof body.range==="string"?body.range:"3m"));

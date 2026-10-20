@@ -1,6 +1,6 @@
 import {feedSessionQuote,type SessionQuote} from './feed-quotes.ts';
 import {ironReferenceQuote} from './iron-reference.ts';
-import {geopoliticalNews,isGeopolitical} from './geopolitical-news.ts';
+import {geopoliticalNews,isGeopolitical,isGeopoliticalTopic} from './geopolitical-news.ts';
 import {NEWS_DOMAINS,PRIMARY_NEWS_DOMAINS,SPANISH_NEWS_DOMAINS,publisherNews,articleTime,newsKey,newsOrder,fundNewsPattern} from './news-sources.ts';
 import { balanceAccess, type NewsAccess } from './news-access.ts';
 import { massiveNews, sectorMassiveNews } from './massive-news.ts';
@@ -176,6 +176,7 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
   const words: Set<string>[] = [];
   return balanceAccess(articles.filter(article => {
     const stamp = articleTime(article);
+    if(isGeopoliticalTopic(article)&&!isGeopolitical(article))return false;
     if(/globenewswire\.com|businesswire\.com|prnewswire\.com|news\.google\.com|\/video\//i.test(article.url)||/CCTV Script|transcript|press release|investor deadline/i.test(article.title))return false;
     if (/stocks? to buy|should you buy|investing radar|prediction:|sponsored|motley fool/i.test(article.title+' '+article.source)) return false;
     if (!article.title || !article.url || !Number.isFinite(stamp) || stamp < Date.now() - 3 * 86400000 || stamp > Date.now() + 60000 || !important.test(`${article.title} ${article.excerpt ?? ''}`)&&!isGeopolitical(article)) return false;
@@ -201,7 +202,7 @@ export async function feedMarketsPanel(env:Env,symbols:string[]=[]):Promise<Mark
   });
 }
 export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Promise<MarketFeed> {
-  const cacheKey = `feed:${part}:${new Date().toISOString().slice(0, 13)}`;
+  const cacheKey = `feed:v2:${part}:${new Date().toISOString().slice(0, 13)}`;
   return cached(cacheKey, 5 * 60000, async () => {
     const [market, yahoo, finnhub, fmp, web, geopolitical, massive, openWeb, spanishGeo, rss] = await Promise.all([
       part==="all"?feedMarketsPanel(env):null,
@@ -210,10 +211,10 @@ export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Pro
       env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 2, 18),
 
-      search('latest war ceasefire attacks oil gas shipping stock markets political announcements sanctions tariffs',env.TAVILY_KEY,true,[...NEWS_DOMAINS,'bbc.com','theguardian.com','aljazeera.com','euronews.com'],1,20),
+      search('latest geopolitical decisions sanctions tariffs sovereign bond yields equities oil supply commercial shipping disruption',env.TAVILY_KEY,true,NEWS_DOMAINS,1,20),
       massiveNews(env.MASSIVE_API_KEY),
       search('markets economy geopolitics oil interest rates latest news',env.TAVILY_KEY,true,PRIMARY_NEWS_DOMAINS,2,20),
-      search('última hora guerra Ucrania Irán Oriente Medio China aranceles declaraciones políticas petróleo mercados',env.TAVILY_KEY,true,SPANISH_NEWS_DOMAINS,2,14),
+      search('última hora geopolítica aranceles sanciones bonos soberanos bolsas petróleo interrupción suministro comercio',env.TAVILY_KEY,true,SPANISH_NEWS_DOMAINS,2,14),
       cached('publisher-rss-v2',300000,publisherNews),
     ]);
     const headlines: Article[] = [];
@@ -224,7 +225,7 @@ export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Pro
     const geopolitics=curateFeed(geopoliticalNews([...geopolitical,...spanishGeo,...headlines]),8).sort(newsOrder);
     // Partition BEFORE either limit. Political stories beyond the eight selected
     // must not spill into the main feed, including tracking URL variants.
-    const selected=curateFeed(headlines.filter(a=>!isGeopolitical(a)));
+    const selected=curateFeed(headlines.filter(a=>!isGeopoliticalTopic(a)));
     const enrich=async (article:Article):Promise<Article>=>({...article,image:validFeedImage(article.image)??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
     const [covers,geoCovers,summaries]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich)),summarizeNews([...selected,...geopolitics],env.GEMINI_API_KEY)]);
     covers.forEach((article,index)=>article.keyPoints=summaries[index].keyPoints);

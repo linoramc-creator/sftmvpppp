@@ -31,9 +31,9 @@ test('geopolitics-only selections are persisted but a complete news outage prese
  const fetchedAt=new Date().toISOString();
  try{
   const politics={fetchedAt,headlines:[],geopolitics:[{title:'Confirmed ceasefire talks'}]};
-  assert.deepEqual(await sharedFeed('feed-news-v6',async()=>politics),politics);
-  assert.equal(writes.length,1);assert.equal(writes[0].cache_key,'feed-news-v6');assert.deepEqual(writes[0].payload,politics);
-  await sharedFeed('feed-news-v6',async()=>({fetchedAt,headlines:[],geopolitics:[]}));
+  assert.deepEqual(await sharedFeed('feed-news-v7',async()=>politics),politics);
+  assert.equal(writes.length,1);assert.equal(writes[0].cache_key,'feed-news-v7');assert.deepEqual(writes[0].payload,politics);
+  await sharedFeed('feed-news-v7',async()=>({fetchedAt,headlines:[],geopolitics:[]}));
   assert.equal(writes.length,1);
  }finally{globalThis.fetch=original;if(oldDeno===undefined)delete runtime.Deno;else runtime.Deno=oldDeno;}
 });
