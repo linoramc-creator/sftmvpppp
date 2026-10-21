@@ -13,6 +13,9 @@ it('saves the selected server schedule and waits for the real watchlist to sync 
  await screen.findByText('Horario guardado: 08:15 · Madrid');expect(state.bodies).toContainEqual({operation:'saveSettings',time:'08:15'});
  fireEvent.click(screen.getByText('Nueva prueba'));await waitFor(()=>expect(state.bodies.some(b=>b.operation==='test')).toBe(true));expect(synced).toBe(true);expect(sync).toHaveBeenCalledTimes(1);
  expect(state.bodies.find(b=>b.operation==='test')?.requestId).toMatch(/^[0-9a-f-]{36}$/);expect(screen.getByText('NVDA · MU · TLT')).toBeVisible();
+ const reader=await screen.findByTitle('Morning Brief 2026-10-12');
+ expect(reader.getAttribute('sandbox')?.split(' ')).toContain('allow-scripts');
+ expect(reader.getAttribute('sandbox')?.split(' ')).not.toContain('allow-same-origin');
 });
 it('does not expose brief controls or make brief requests for another user',async()=>{
  state.admin=false;const {container}=render(<DailyBrief watchlist={['NVDA']} syncWatchlist={vi.fn()}/>);expect(container).toBeEmptyDOMElement();expect(state.bodies).toHaveLength(0);

@@ -1,4 +1,4 @@
-import {renderBrief,CHART_COLORS,type ChartSpec} from './render.ts';
+import {renderBrief,CHART_COLORS,escape,type ChartSpec} from './render.ts';
 import {geopoliticalFallback,type BriefData} from './data.ts';
 import {Buffer} from 'node:buffer';
 const env=(key:string)=>Deno.env.get(key)??'';
@@ -12,17 +12,21 @@ async function rasterChart(chart:ChartSpec):Promise<Uint8Array>{
  const rgb=(hex:string)=>hex.match(/[a-f0-9]{2}/gi)!.map(v=>parseInt(v,16));const bg=rgb(CHART_COLORS.background),grid=rgb(CHART_COLORS.grid);
  for(let y=0;y<height;y++)for(let x=0;x<width;x++)pixel(x,y,bg[0],bg[1],bg[2]);
  for(const ratio of [.25,.5,.75])for(let x=padding;x<width-padding;x++)if(x%8<3)pixel(x,Math.round(height*ratio),grid[0],grid[1],grid[2]);
- const min=Math.min(...chart.points.map(p=>p.value)),max=Math.max(...chart.points.map(p=>p.value)),span=max-min||Math.max(Math.abs(max)*.01,1),left=chart.x?.[0]??0,right=chart.x?.at(-1)??chart.points.length-1;
- const pos=chart.points.map((p,i)=>({x:padding+((chart.x?.[i]??i)-left)/Math.max(right-left,1)*(width-2*padding),y:height-padding-(p.value-min)/span*(height-2*padding)}));
+ const min=Math.min(...chart.points.map(p=>p.value),...(chart.kind==='bar'?[0]:[])),max=Math.max(...chart.points.map(p=>p.value),...(chart.kind==='bar'?[0]:[])),span=max-min||Math.max(Math.abs(max)*.01,1),left=chart.x?.[0]??0,right=chart.x?.at(-1)??chart.points.length-1;
+ const pos=chart.points.map((p,i)=>({x:chart.kind==='bar'?padding+(i+.5)/Math.max(chart.points.length,1)*(width-2*padding):padding+((chart.x?.[i]??i)-left)/Math.max(right-left,1)*(width-2*padding),y:height-padding-(p.value-min)/span*(height-2*padding)}));
  const color=chart.color.match(/[a-f0-9]{2}/gi)!.map(v=>parseInt(v,16));
- for(let i=1;i<pos.length;i++){const a=pos[i-1],b=pos[i],steps=Math.ceil(Math.max(Math.abs(b.x-a.x),Math.abs(b.y-a.y))*2);for(let j=0;j<=steps;j++){const x=Math.round(a.x+(b.x-a.x)*j/steps),y=Math.round(a.y+(b.y-a.y)*j/steps);for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)pixel(x+dx,y+dy,color[0],color[1],color[2]);}}
+ if(chart.kind==='bar'){
+  const zero=height-padding-(0-min)/span*(height-2*padding),barWidth=Math.min(42,(width-2*padding)/Math.max(chart.points.length,1)*.55);
+  for(let x=0;x<width;x++)pixel(x,Math.round(zero),grid[0],grid[1],grid[2]);
+  for(const p of pos)for(let x=Math.max(0,Math.round(p.x-barWidth/2));x<Math.min(width,p.x+barWidth/2);x++)for(let y=Math.max(0,Math.round(Math.min(zero,p.y)));y<=Math.min(height-1,Math.round(Math.max(zero,p.y)));y++)pixel(x,y,color[0],color[1],color[2]);
+ }else for(let i=1;i<pos.length;i++){const a=pos[i-1],b=pos[i],steps=Math.ceil(Math.max(Math.abs(b.x-a.x),Math.abs(b.y-a.y))*2);for(let j=0;j<=steps;j++){const x=Math.round(a.x+(b.x-a.x)*j/steps),y=Math.round(a.y+(b.y-a.y)*j/steps);for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)pixel(x+dx,y+dy,color[0],color[1],color[2]);}}
  return PNG.sync.write(png,{colorType:2});
 }
 export async function prepareBriefMail(data:BriefData){
- const charts:ChartSpec[]=[],html=renderBrief(data,chart=>{charts.push(chart);return `<img src="cid:${chart.id}@terminal" alt="${chart.title.replace(/[&<>"']/g,'')}" width="760" style="display:block;width:100%;height:auto"/>`;});
+ const charts:ChartSpec[]=[],html=renderBrief(data,chart=>{charts.push(chart);return `<img src="cid:${chart.id}@terminal" alt="${escape(chart.title)}" width="760" style="display:block;width:100%;height:auto"/>`;},{interactive:false});
  const attachments=await Promise.all(charts.map(async chart=>({filename:chart.id+'.png',content:await rasterChart(chart),contentType:'image/png',cid:chart.id+'@terminal'})));
- const subject=`${data.preview?'Prueba · ':''}Terminal · Mercados · ${data.date}`;
- const text=`Brief de mercados · ${data.date}\n\n${data.asia?'Sesión asiática\n'+(data.asia.editorial??data.asia.summary)+'\n\n':''}${data.futures?.length?'Futuros antes de la apertura\n'+data.futures.map(f=>f.name+': '+(f.price===null?'sin observación':f.price+' puntos')+' · '+(f.status==='previous-close'?'último cierre del '+f.date:f.at??'sin hora')).join('\n')+'\n\n':''}${data.lead}\n\n${data.takeaways.map(t=>t.title+'\n'+t.text).join('\n\n')}\n\n${data.watchlist.map(a=>a.symbol+'\n'+a.note).join('\n\n')}\n\nEntorno geopolítico internacional\n${(data.geopoliticalSummary??geopoliticalFallback(data)).paragraphs.join('\n\n')}\n\nAbre la terminal para ver los gráficos y el informe completo: https://sftmvpppp.vercel.app/`;
+ const subject=`${data.preview?'Prueba · ':''}MensorTerminal · Morning Brief · ${data.date}`;
+ const text=`MensorTerminal · Morning Brief · ${data.date}\n\n${data.asia?'Sesión asiática\n'+(data.asia.editorial??data.asia.summary)+'\n\n':''}${data.futures?.length?'Futuros antes de la apertura\n'+data.futures.map(f=>f.name+': '+(f.price===null?'sin observación':f.price+' puntos')+' · '+(f.status==='previous-close'?'último cierre del '+f.date:f.at??'sin hora')).join('\n')+'\n\n':''}${data.lead}\n\n${data.takeaways.map(t=>t.title+'\n'+t.text).join('\n\n')}\n\n${data.watchlist.map(a=>a.symbol+'\n'+a.note).join('\n\n')}\n\nEntorno geopolítico internacional\n${(data.geopoliticalSummary??geopoliticalFallback(data)).paragraphs.join('\n\n')}\n\nAbre la terminal para ver los gráficos y el informe completo: https://sftmvpppp.vercel.app/`;
  return {subject,html,text,attachments};
 }
 export async function sendBrief(to:string,id:string,data:BriefData):Promise<string>{
