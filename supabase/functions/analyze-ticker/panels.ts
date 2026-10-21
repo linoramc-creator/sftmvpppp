@@ -171,7 +171,9 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
       selection(fundTopic, rows, thematic, nasdaqFund?'Nasdaq 100 technology stocks earnings markets':broadUsMarket ? `${subject} S&P 500 ETF` : company, thematic&&!sector?fundRequired:!thematic&&company!==subject?companyRequired:undefined),
       !sector && sectorName ? selection(`${sectorContexts[sectorName] ?? sectorName} ${profile?.assetProfile?.industry ?? ''}`, [], true, broadUsMarket ? 'US stock market' : `${profile?.assetProfile?.industry || sectorName} industry`) : Promise.resolve([]),
     ]);
-    const summaries = await summarizeNews([...articles, ...sectorArticles], env.GEMINI_API_KEY);
+    const selected=[...articles,...sectorArticles];
+    const [summaries,covers]=await Promise.all([summarizeNews(selected,env.GEMINI_API_KEY),Promise.all(selected.map(article=>photoUrl(article.image)?Promise.resolve(photoUrl(article.image)):cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))))]);
+    summaries.forEach((article,index)=>article.image=covers[index]);
     return { fetchedAt: new Date().toISOString(), articles: summaries.slice(0, articles.length), sectorArticles: summaries.slice(articles.length), sectorName };
   });
 }

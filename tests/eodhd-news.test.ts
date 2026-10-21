@@ -42,6 +42,15 @@ test('complete primary ticker stories avoid duplicate search and market-news cal
  try{const result=await newsPanel('AAPL',false,{FMP_KEY:'test',FRED_KEY:'',FINNHUB_KEY:'test',TAVILY_KEY:'test'},{summary:async()=>({quoteType:{longName:'Apple Inc.',quoteType:'EQUITY'}})});assert.equal(result.articles.length,6);assert.deepEqual(requests,['eodhd.com/api/news']);}finally{globalThis.fetch=originalFetch;(globalThis as any).Deno=originalDeno;}
 });
 
+test('primary ticker articles without images resolve real publisher covers after selection without extra data-provider requests',async()=>{
+ const originalFetch=globalThis.fetch,originalDeno=(globalThis as any).Deno,requests:string[]=[];
+ const titles=['Microsoft quarterly earnings top guidance as service revenue accelerates','Microsoft signs an India factory supply contract for new devices','Microsoft faces European antitrust regulation following court decision','Microsoft raises dividend and authorizes fresh share buybacks','Microsoft supplier cuts production following revenue guidance warning','Microsoft secures export approval for advanced chip manufacturing'];
+ const articles=titles.map((title,i)=>({...row(title,300+i),date:new Date(Date.now()-i*3600000).toISOString(),image_url:undefined}));
+ (globalThis as any).Deno={env:{get:(key:string)=>key==='EODHD_API_KEY'?'test-primary-ticker-covers':''}};
+ globalThis.fetch=async input=>{const u=new URL(String(input));requests.push(u.hostname+u.pathname);if(u.hostname==='eodhd.com')return Response.json(articles);if(u.hostname==='www.cnbc.com')return new Response('<html><head><meta property="og:image" content="https://images.cnbc.com/news/real-article-cover.jpg"></head></html>',{headers:{'Content-Type':'text/html'}});throw Error('Unexpected fallback request');};
+ try{const result=await newsPanel('MSFT',false,{FMP_KEY:'test',FRED_KEY:'',FINNHUB_KEY:'test',TAVILY_KEY:'test'},{summary:async()=>({quoteType:{longName:'Microsoft Corp.',quoteType:'EQUITY'}})});assert.equal(result.articles.length,6);assert.ok(result.articles.every(a=>a.image?.includes('real-article-cover')));assert.equal(requests.filter(u=>u.startsWith('eodhd.com')).length,1);assert.equal(requests.filter(u=>u.startsWith('www.cnbc.com')).length,6);}finally{globalThis.fetch=originalFetch;(globalThis as any).Deno=originalDeno;}
+});
+
 test('complete primary sovereign news does not trigger specialist feeds or paid discovery',async()=>{
  const originalFetch=globalThis.fetch,originalDeno=(globalThis as any).Deno,requests:string[]=[];
  const titles=['US Treasury bond auctions draw strong foreign demand as federal borrowing expands','Federal Reserve rate decision steepens the US government bond yield curve','Inflation report drives Treasury yields sharply higher across maturities','US sovereign bond issuance rises amid widening fiscal deficit','American bond investors reassess Treasury liquidity after market volatility','US government bond prices recover as investors rotate from equities'];
