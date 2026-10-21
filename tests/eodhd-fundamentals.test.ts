@@ -75,3 +75,22 @@ test('fundamentals reject a response for another ticker and skip unsupported non
  assert.equal(calls,1);
  const index=await eodhdFundamentalRaw('GSPC.INDX',async()=>({General:{Code:'GSPC',Type:'INDEX',Name:'S&P 500'}} as any));assert.equal(index?.General.Type,'INDEX');
 });
+
+test('verified SEC identifiers reach document research while malformed and all-zero identifiers stay unavailable',()=>{
+ const raw=stock();(raw.General as any).CIK='1652044';assert.equal(normalizeEodhdSummary(raw,'TEST')?.eodhd.cik,'0001652044');
+ for(const cik of ['0000000000','CIK=123','12345678901','../123']){(raw.General as any).CIK=cik;assert.equal(normalizeEodhdSummary(raw,'TEST')?.eodhd.cik,null);}
+});
+
+test('timeseries expose longer verified history with a hard cap while report rows remain bounded and preserve zero versus gaps',()=>{
+ const quarterly=Object.fromEntries(Array.from({length:240},(_,i)=>{const day=new Date(Date.UTC(2026,6-i*3,0)).toISOString().slice(0,10);return [day,{date:day,currency_symbol:'USD',totalRevenue:i===0?'0':String(1e9+i),netIncome:i===1?null:'0'}];}));
+ const raw={General:{Code:'TEST',Type:'Common Stock'},Financials:{Income_Statement:{currency_symbol:'USD',quarterly}}};
+ assert.equal(normalizeEodhdQuarterly(raw).length,24);assert.equal(normalizeEodhdQuarterly(raw,1000).length,200);assert.equal(normalizeEodhdQuarterly(raw,0).length,0);
+ const series=normalizeEodhdTimeseries(raw,'TEST'),revenue=series.find(row=>row.meta.type[0]==='quarterlyTotalRevenue')!.quarterlyTotalRevenue,net=series.find(row=>row.meta.type[0]==='quarterlyNetIncome')!.quarterlyNetIncome;
+ assert.equal(revenue.length,200);assert.equal(revenue[0].reportedValue.raw,0);assert.equal(revenue[0].currencyCode,'USD');assert.equal(net.length,199);assert.equal(net[0].reportedValue.raw,0);
+});
+
+test('future fiscal periods and future filing dates cannot enter published quarterly statements',()=>{
+ const raw=statements();(raw.Financials.Income_Statement.quarterly as any)[2]={date:'2026-12-31',filing_date:'2027-01-31',totalRevenue:'9000000000'};(raw.Financials.Income_Statement.quarterly as any)[3]={date:'2026-09-30',filing_date:'2026-11-01',totalRevenue:'8000000000'};
+ const rows=normalizeEodhdQuarterly(raw,200,Date.parse('2026-10-21T12:00:00Z'));assert.deepEqual(rows.map(row=>row.period),['2026-06-30','2025-06-30']);
+ (raw.Financials.Cash_Flow.quarterly[0] as any).filing_date='2026-11-01';(raw.Earnings.History[0] as any).reportDate='2026-11-01';const strict=normalizeEodhdQuarterly(raw,24,Date.parse('2026-10-21T12:00:00Z'))[0];assert.equal(strict.numeric.operatingCF,null);assert.equal(strict.numeric.freeCashFlow,null);assert.equal(strict.numeric.eps,null);
+});

@@ -1,8 +1,20 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeEodhdBondSeries,normalizeEodhdTreasury,normalizeEodhdRates,normalizeEodhdCmdi,dailyYieldChange,buildEodhdBondsData,eodhdBondsData,eodhdTreasury,preferEodhdTreasury,getEodhdBondSeries} from '../supabase/functions/analyze-ticker/eodhd-bonds.ts';
+import {normalizeEodhdBondSeries,normalizeEodhdTreasury,normalizeEodhdRates,normalizeEodhdCmdi,dailyYieldChange,buildEodhdBondsData,eodhdBondsData,eodhdTreasury,preferEodhdTreasury,getEodhdBondSeries,treasuryDerivedSeries} from '../supabase/functions/analyze-ticker/eodhd-bonds.ts';
 import type {eodhdGet} from '../supabase/functions/analyze-ticker/eodhd-client.ts';
 const now=Date.parse('2026-10-21T15:00:00Z');
+
+test('directory outages retain previously verified sovereign endpoints without inventing a French thirty-year benchmark',async()=>{
+ const paths:string[]=[];
+ const request=(async(path:string)=>{paths.push(path);return path.startsWith('eod/')?[{date:'2026-10-20',close:4}]:null;}) as typeof eodhdGet;
+ const result=await eodhdBondsData(request,now);assert.equal(result?.sovereigns.length,4);assert.equal(paths.filter(p=>p.startsWith('eod/')).length,16);assert.ok(!paths.includes('eod/FR30Y.GBOND'));assert.ok(paths.includes('eod/FR1Y.GBOND'));
+});
+
+test('available Treasury curves supply coincident-date breakevens and term spreads without redundant legacy requests',()=>{
+ const input=normalizeEodhdTreasury({data:[{date:'2026-10-20',tenor:'10Y',rate:5},{date:'2026-10-20',tenor:'2Y',rate:4}]},false,now);
+ const real=normalizeEodhdTreasury({data:[{date:'2026-10-20',tenor:'10Y',rate:2.7}]},true,now);
+ const rows=treasuryDerivedSeries([...input,...real]);assert.ok(Math.abs(rows.find(s=>s.id==='T10YIE')!.points[0].value-2.3)<1e-10);assert.equal(rows.find(s=>s.id==='T10Y2Y')?.unit,'pp');assert.equal(rows.find(s=>s.id==='T10Y2Y')?.points[0].value,1);
+});
 test('GBOND uses the actual unadjusted yield close, retains zero and negative yields, and excludes incomplete days and weekend observations',()=>{
  const data=normalizeEodhdBondSeries('DE10Y.GBOND',[{date:'2026-10-15',close:-.1,adjusted_close:99,volume:999},{date:'2026-10-16',close:0},{date:'2026-10-17',close:4},{date:'2026-10-20',close:3.42},{date:'2026-10-21',close:3.43},{date:'2026-02-30',close:5},{date:'2026-10-19',close:null}],now)!;
  assert.equal(data.unit,'%');assert.equal(data.currency,'EUR');assert.equal(data.frequency,'daily');assert.deepEqual(data.points,[{date:'2026-10-15',value:-.1},{date:'2026-10-16',value:0},{date:'2026-10-20',value:3.42}]);assert.equal((data as any).volume,undefined);

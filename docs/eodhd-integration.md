@@ -49,6 +49,56 @@ como flujos, órdenes ni recomendaciones de una institución concreta.
 
 ## Nuevos bloques
 
+### Investigación y fiabilidad (21 de octubre de 2026)
+
+- Los informes finales de acciones, ETF, sectores y comparación usan
+  `gemini-3.1-pro-preview`, con razonamiento medio y límites de salida y tiempo.
+  No existe degradación silenciosa a Flash. Este último queda reservado para
+  tareas auxiliares pequeñas. Un informe real de VRT confirmó el modelo Pro.
+- La búsqueda admite símbolos y nombres. Los nombres con varias cotizaciones
+  requieren elegir mercado; las clases de acciones, sufijos y monedas se
+  conservan. Un 403 de un recurso no desactiva todo el producto del proveedor.
+- VRT y GOOGL se comprobaron en producción: identidad, moneda, 16 trimestres,
+  consenso y estimaciones. El CIK de EODHD permite recuperar documentos SEC sin
+  depender del acceso a FMP para identificar al emisor.
+- El desglose intenta primero los datos estructurados. Si faltan, puede leer
+  hechos anuales Inline XBRL directamente del informe oficial: entidad,
+  concepto, moneda, fechas y eje único deben coincidir y cuadrar con el total
+  consolidado. No se buscan subconjuntos arbitrarios para hacer cuadrar cifras.
+  Para VRT esto recuperó productos, servicios y cinco destinos de ventas sin
+  generación adicional. Los documentos sin hechos compatibles conservan la
+  extracción asistida y validada; no se promete cobertura universal.
+- La selección de pasajes conserva las unidades globales, desagregaciones y
+  ventas por destino, elimina encabezados XBRL ocultos completos y admite
+  documentos hasta 12 MB. Los excesos se rechazan, no se analizan como documentos
+  completos truncados. La extracción asistida contrasta escala, divisa explícita,
+  período, evidencia literal, signos y totales.
+- La memoria solo guarda informes con finalización `stop` y marcador `[DONE]`.
+  La interfaz descarta informes incompletos; el panel de administración registra
+  correctamente las interrupciones y cancelaciones. Los resúmenes PDF tienen
+  un plazo propio que permite terminar al modelo Pro.
+- Noticias de la ficha rápida: EODHD primero y fuentes previas para completar
+  huecos. Riesgo, alertas y contexto asiático reutilizan la prioridad de mercado
+  y conservan los cortes temporales de las sesiones.
+- Velas: bandas de Bollinger opcionales, ATR de Wilder, zoom y ventanas ampliadas,
+  ejes intradía y precisión de divisas. No se añade una vela plana artificial
+  para representar un cierre ni una guía de precio al señalar volumen.
+
+### Bonos y crédito
+
+- Cuatro curvas soberanas verificadas, referencias de respaldo y filtrado
+  individual de tenores desactualizados. La curva estadounidense separa 20 años,
+  nominales y reales; la inflación implícita utiliza fechas coincidentes.
+- MOVE y VIX auténticos con fecha, percentiles históricos y volatilidad realizada
+  del tipo a diez años en puntos básicos diarios. La volatilidad realizada de
+  tipos no se presenta como si fuera el índice MOVE.
+- El crédito privado utiliza también la publicación oficial S.124.8.s de la
+  Reserva Federal, con su frecuencia trimestral y precisión publicada.
+- Durante la validación, la exportación CSV de FRED devolvió una página de
+  mantenimiento: las series OAS afectadas no se fabrican ni se sustituyen por
+  indicadores con otro significado. Se ocultan gráficos vacíos y se conserva
+  una indicación discreta de disponibilidad.
+
 `issuerResearch` sirve consenso de analistas, objetivos de precio comparables,
 estimaciones con rangos y revisiones, EPS publicado frente a consenso y calidad
 de caja. Los ETF incorporan referencia, posiciones, rentabilidades totales,

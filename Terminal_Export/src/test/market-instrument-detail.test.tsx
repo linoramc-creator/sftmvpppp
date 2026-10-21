@@ -40,6 +40,20 @@ it('shows an explicit empty intraday state and still permits the historical sess
  expect(screen.getByText('Sin barras intradiarias verificadas para esta sesión.')).toBeVisible();
  fireEvent.click(screen.getByRole('button',{name:'3 meses'}));expect(screen.getByRole('application',{name:'Gráfico interactivo de ^GSPC'})).toBeVisible();
 });
+it('respects a coarser source interval and exposes only real available longer history',()=>{
+ const data=fixture();data.intraday.intervalMinutes=15;
+ const {container}=render(<MarketPulseChart data={data}/>);
+ expect(screen.queryByRole('button',{name:'Intervalo de mercado 5 min'})).toBeNull();
+ expect(screen.getByRole('button',{name:'Intervalo de mercado 15 min'})).toHaveAttribute('aria-pressed','true');
+ fireEvent.click(screen.getByRole('button',{name:'Intervalo de mercado 4H'}));
+ expect(screen.getByRole('button',{name:'Intervalo de mercado 4H'})).toHaveAttribute('aria-pressed','true');
+ fireEvent.click(screen.getByRole('button',{name:'1 año'}));
+ expect(screen.getByRole('heading',{name:'Histórico de precios'})).toBeVisible();
+ expect(container.querySelectorAll('[data-candle-time]')).toHaveLength(data.daily.length);
+ expect(screen.getByText(/Sesiones diarias · 30 disponibles/)).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Histórico'}));
+ expect(container.querySelectorAll('[data-candle-time]')).toHaveLength(data.daily.length);
+});
 it('offers retry after a failed market context request without showing invented quotes',async()=>{
  api.mockResolvedValue({ok:false});render(<MarketInstrumentDetail symbol="FAILED" onBack={vi.fn()}/>);
  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('No se ha podido actualizar el contexto de mercado.'));

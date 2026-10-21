@@ -2,12 +2,14 @@ import {bondsPanel,cached,type BondsPanel,type Point,type Series} from './panels
 import type {PriceSeries} from './market-analytics.ts';
 import {relativeHistory} from './relative-comparison.ts';
 import {buildBondsCreditAnalytics,CURVE_TENORS,type BondsCreditAnalytics} from './bonds-credit-analytics.ts';
-import {eodhdTreasury,eodhdBondsData,preferEodhdTreasury,type EodhdBondsData} from './eodhd-bonds.ts';
+import {eodhdTreasury,eodhdBondsData,preferEodhdTreasury,treasuryDerivedSeries,type EodhdBondsData} from './eodhd-bonds.ts';
+import {eodhdMacroIndices,buildBondsMacroIndicators,type BondsMacroIndicators} from './macro-indicators.ts';
+import {fedPrivateCredit,FED_PRIVATE_URL} from './fed-private-credit.ts';
 export type CreditFrequency='daily'|'weekly'|'monthly'|'quarterly';
 export type CreditSeries=Series&{frequency:CreditFrequency;currency:string|null;scope:'sovereign'|'private-funds'|'banking'|'financial-conditions'|'derived'};
 export type SovereignMarket={code:'US'|'FR'|'DE'|'GB';name:string;currency:string;series:CreditSeries;monthChangeBp:number|null;yearChangeBp:number|null};
 export type CreditProxy={symbol:string;label:string;currency:string;price:number|null;date:string|null;returnsDate:string|null;return21:number|null;return63:number|null;points:Point[]};
-export type BondsCreditPanel={fetchedAt:string;base:BondsPanel;sovereigns:SovereignMarket[];sovereignCommonDate:string|null;sovereignSpreads:{code:string;value:number|null}[];credit:CreditSeries[];privateValuation:CreditSeries;privateLiabilities:CreditSeries;privateGrowth:CreditSeries;proxies:CreditProxy[];analytics?:BondsCreditAnalytics;marketRates?:EodhdBondsData};
+export type BondsCreditPanel={fetchedAt:string;base:BondsPanel;sovereigns:SovereignMarket[];sovereignCommonDate:string|null;sovereignSpreads:{code:string;value:number|null}[];credit:CreditSeries[];privateValuation:CreditSeries;privateLiabilities:CreditSeries;privateGrowth:CreditSeries;proxies:CreditProxy[];analytics?:BondsCreditAnalytics;marketRates?:EodhdBondsData;macroIndicators?:BondsMacroIndicators};
 export type BondsCreditEnv={FRED_KEY:string;MASSIVE_API_KEY?:string;FMP_KEY?:string;FINNHUB_KEY?:string};
 type Config={id:string;label:string;unit:string;frequency:CreditFrequency;currency:string|null;scope:CreditSeries['scope'];scale?:number;start?:string};
 export const SOVEREIGN_MARKETS=[{code:'US',name:'Estados Unidos',currency:'USD',id:'IRLTLT01USM156N'},{code:'FR',name:'Francia',currency:'EUR',id:'IRLTLT01FRM156N'},{code:'DE',name:'Alemania',currency:'EUR',id:'IRLTLT01DEM156N'},{code:'GB',name:'Reino Unido',currency:'GBP',id:'IRLTLT01GBM156N'}] as const;
@@ -40,7 +42,12 @@ async function observations(id:string,key:string,start:string){
  if(key)try{const response=await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${encodeURIComponent(key)}&file_type=json&observation_start=${start}`,{redirect:'error',signal:AbortSignal.timeout(10000)});if(response.ok){const raw=await response.json();if(Array.isArray(raw.observations))return raw.observations;}}catch{/* The official public export is an independent fallback. */}
  try{const response=await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${start}`,{redirect:'error',signal:AbortSignal.timeout(10000)});return response.ok?parseCsv(await response.text(),id):[];}catch{return [];}
 }
-async function loadSeries(config:Config,key:string):Promise<CreditSeries>{return cached('bonds-credit-series:'+config.id,3600000,async()=>({id:config.id,label:config.label,unit:config.unit,source:`https://fred.stlouisfed.org/series/${config.id}`,frequency:config.frequency,currency:config.currency,scope:config.scope,points:normalizeCreditPoints(await observations(config.id,key,config.start??day(Date.now()-3660*86400000)),config.scale??1)}));}
+async function loadSeries(config:Config,key:string):Promise<CreditSeries>{return cached('bonds-credit-series:'+config.id,3600000,async()=>{
+ const source=`https://fred.stlouisfed.org/series/${config.id}`,points=normalizeCreditPoints(await observations(config.id,key,config.start??day(Date.now()-3660*86400000)),config.scale??1);
+ if(points.length||config.scope!=='private-funds')return {...config,source,points};
+ const official=(await fedPrivateCredit())[config.id];
+ return {...config,source:official?.length?FED_PRIVATE_URL:source,points:official??[]};
+ });}
 const shiftMonth=(date:string,months:number)=>{const d=new Date(date+'T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+months);return d.toISOString().slice(0,10);};
 export function periodChange(points:Point[],months:number):number|null{const last=points.at(-1);if(!last)return null;const old=points.find(p=>p.date===shiftMonth(last.date,-months));return old?(last.value-old.value)*100:null;}
 function derived(id:string,label:string,unit:string,a:CreditSeries|undefined,b:CreditSeries|undefined,fn:(a:number,b:number)=>number|null):CreditSeries{
@@ -89,15 +96,15 @@ async function recoverBase(base:BondsPanel,massiveKey?:string):Promise<BondsPane
  const fallback=await Promise.all(series.filter(s=>!s.points.length).map(async s=>({...s,points:normalizeCreditPoints(await observations(s.id,'',day(Date.now()-3660*86400000)))})));
  return {...base,series:series.map(s=>s.points.length?s:fallback.find(f=>f.id===s.id)??s)};
 }
-export async function bondsCreditPanel(env:BondsCreditEnv):Promise<BondsCreditPanel>{return cached('bonds-credit-v4',900000,async()=>{
+export async function bondsCreditPanel(env:BondsCreditEnv):Promise<BondsCreditPanel>{return cached('bonds-credit-v5',900000,async()=>{
  const sovereigns:Config[]=SOVEREIGN_MARKETS.map(m=>({id:m.id,label:m.name+' · 10 años',unit:'%',frequency:'monthly',currency:m.currency,scope:'sovereign'}));
- const primaryRequest=Promise.all([eodhdTreasury(10),eodhdTreasury(10,true)]).then(([nominal,real])=>[...nominal,...real]);
+ const primaryRequest=Promise.all([eodhdTreasury(10),eodhdTreasury(10,true)]).then(([nominal,real])=>treasuryDerivedSeries([...nominal,...real]));
  const marketRequest=eodhdBondsData();
  const baseRequest=primaryRequest.then(primary=>bondsPanel({FRED_KEY:env.FRED_KEY,FMP_KEY:env.FMP_KEY??'',FINNHUB_KEY:env.FINNHUB_KEY??'',TAVILY_KEY:''},undefined,primary).then(base=>recoverBase(base,env.MASSIVE_API_KEY)).then(base=>({...base,series:preferEodhdTreasury(base.series,primary)})));
  const sovereignRequest=marketRequest.then(market=>market?.sovereigns.length===SOVEREIGN_MARKETS.length?sovereigns.map(c=>({...c,source:'',points:[]} as CreditSeries)):Promise.all(sovereigns.map(c=>loadSeries(c,env.FRED_KEY))));
  const extraRequest=primaryRequest.then(primary=>Promise.all(ADDITIONAL_MARKET_CONFIG.map(config=>{const found=primary.find(s=>s.id===config.id&&s.points.length);return found?Promise.resolve({...found,frequency:config.frequency,currency:config.currency,scope:config.scope} as CreditSeries):loadSeries(config,env.FRED_KEY);})));
- const [base,credit,monthly,additional,proxies,marketRates]=await Promise.all([baseRequest,Promise.all(CREDIT_CONFIG.map(c=>loadSeries(c,env.FRED_KEY))),sovereignRequest,extraRequest,listedProxies(env.MASSIVE_API_KEY),marketRequest]);
+ const [base,credit,monthly,additional,proxies,marketRates,indices]=await Promise.all([baseRequest,Promise.all(CREDIT_CONFIG.map(c=>loadSeries(c,env.FRED_KEY))),sovereignRequest,extraRequest,listedProxies(env.MASSIVE_API_KEY),marketRequest,eodhdMacroIndices()]);
  const series=[...monthly,...credit,...additional];
  const extra=series.find(s=>s.id==='DGS20');if(extra?.points.length&&!base.series.some(s=>s.id==='DGS20'))base.series.push(extra);
- return {...buildBondsCredit(base,series,proxies),...(marketRates?{marketRates}:{})};
+ return {...buildBondsCredit(base,series,proxies),...(marketRates?{marketRates}:{}),macroIndicators:buildBondsMacroIndicators([...base.series,...series],marketRates,indices)};
 });}

@@ -8,6 +8,39 @@ export const chartIndicators: Record<ChartIndicator, { label: string; color: str
   ema20: { label: 'EMA 20', color: '#22d3ee', period: 20, exponential: true },
 };
 
+export type BollingerPoint = { middle: number; upper: number; lower: number };
+// Population deviation of the same closes used by the simple moving average.
+// Recalculate from the small window to avoid catastrophic cancellation on FX.
+export function bollingerBands(rows: readonly PriceBar[], period = 20, multiplier = 2): Array<BollingerPoint | null> {
+  const result: Array<BollingerPoint | null> = Array(rows.length).fill(null);
+  if (!Number.isInteger(period) || period < 2 || !Number.isFinite(multiplier) || multiplier <= 0) return result;
+  for (let i = period - 1; i < rows.length; i++) {
+    const window = rows.slice(i - period + 1, i + 1).map(row => row.close);
+    if (window.some(value => !Number.isFinite(value))) continue;
+    const middle = window.reduce((sum, value) => sum + value, 0) / period;
+    const deviation = Math.sqrt(window.reduce((sum, value) => sum + (value - middle) ** 2, 0) / period);
+    result[i] = { middle, upper: middle + multiplier * deviation, lower: middle - multiplier * deviation };
+  }
+  return result;
+}
+
+// Wilder ATR in the units and interval of the input bars, not annualized risk.
+export function averageTrueRange(rows: readonly PriceBar[], period = 14): Array<number | null> {
+  const result: Array<number | null> = Array(rows.length).fill(null);
+  if (!Number.isInteger(period) || period < 1) return result;
+  let previousClose: number | null = null, average: number | null = null, sum = 0, count = 0;
+  rows.forEach((row, i) => {
+    if (![row.high, row.low, row.close].every(Number.isFinite) || row.high < row.low) {
+      previousClose = null; average = null; sum = 0; count = 0; return;
+    }
+    const range = previousClose === null ? row.high - row.low : Math.max(row.high - row.low, Math.abs(row.high - previousClose), Math.abs(row.low - previousClose));
+    if (average === null) { sum += range; count++; if (count === period) average = sum / period; }
+    else average = (average * (period - 1) + range) / period;
+    result[i] = average; previousClose = row.close;
+  });
+  return result;
+}
+
 // Seed both averages with a full period. Calculate before cutting the viewport so
 // moving or zooming the chart never changes an indicator's historical value.
 export function movingAverage(rows: readonly PriceBar[], period: number, exponential = false): Array<number | null> {

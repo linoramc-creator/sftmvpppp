@@ -18,13 +18,16 @@ export function alignedTransform(id:string,label:string,unit:string,left:Series|
 const shifted=(date:string,months:number)=>{const [y,m,d]=date.split('-').map(Number);const target=new Date(Date.UTC(y,m-1+months,1));const last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();target.setUTCDate(Math.min(d,last));return target.toISOString().slice(0,10);};
 
 export function yieldCurveSnapshots(series:Series[],tenors:readonly CurveTenor[]=CURVE_TENORS):YieldCurveSnapshot[]{
- const available=tenors.flatMap(([id,label,maturityYears])=>{const s=series.find(s=>s.id===id);return s?.points.length?[{id,label,maturityYears,byDate:new Map(s.points.filter(p=>finite(p.value)).map(p=>[p.date,p.value]))}]:[];});
+ const populated=tenors.flatMap(([id,label,maturityYears])=>{const s=series.find(s=>s.id===id);return s?.points.length?[{id,label,maturityYears,byDate:new Map(s.points.filter(p=>finite(p.value)).map(p=>[p.date,p.value]))}]:[];});
+ const newest=populated.flatMap(s=>[...s.byDate.keys()]).sort().at(-1);
+ // One stale tenor must not blank three or more current tenors. Removed
+ // maturities are absent from this curve rather than interpolated or relabelled.
+ const available=populated.filter(s=>newest&&[...s.byDate.keys()].some(date=>Date.parse(newest)-Date.parse(date)<=7*DAY));
  if(available.length<3)return [];
  const common=[...available[0].byDate.keys()].filter(date=>available.every(s=>s.byDate.has(date))).sort();
  const current=common.at(-1);if(!current)return [];
  // Do not present an old common date as today's curve when a tenor is stale.
- const newest=available.flatMap(s=>[...s.byDate.keys()]).sort().at(-1)!;
- if(Date.parse(newest)-Date.parse(current)>7*DAY)return [];
+ if(Date.parse(newest!)-Date.parse(current)>7*DAY)return [];
  return ([['current','Última curva',0],['monthAgo','Hace un mes',-1],['yearAgo','Hace un año',-12]] as const).flatMap(([key,label,months])=>{
   const target=shifted(current,months),date=common.filter(d=>d<=target).at(-1);
   if(!date||Date.parse(target)-Date.parse(date)>7*DAY)return [];

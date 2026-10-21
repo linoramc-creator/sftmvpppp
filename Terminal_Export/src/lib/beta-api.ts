@@ -10,8 +10,10 @@ export async function authenticatedFetch(url: string, init: RequestInit = {}) {
   if (response.status === 401 || response.status === 403) window.dispatchEvent(new Event('beta-access-check'));
   return response;
 }
-export async function accountApi<T>(accountAction: string, body: Record<string, unknown> = {}): Promise<T> {
-  const response = await authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, { method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountAction,...body}),signal:AbortSignal.timeout(20000) });
+export async function accountApi<T>(accountAction: string, body: Record<string, unknown> = {},options:{signal?:AbortSignal}={}): Promise<T> {
+  const deadline=AbortSignal.timeout(accountAction==='summarizeReport'?85000:20000);
+  const signal=options.signal?AbortSignal.any([options.signal,deadline]):deadline;
+  const response = await authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, { method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountAction,...body}),signal });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'No se ha podido completar la operación.');
   return data;

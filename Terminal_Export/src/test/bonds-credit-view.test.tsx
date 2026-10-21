@@ -70,3 +70,20 @@ it('opens daily sovereign curves when available and keeps their frequency distin
  fireEvent.click(screen.getByRole('button',{name:'Condiciones de crédito'}));
  expect(screen.getByRole('heading',{name:'Estrés del mercado de bonos corporativos'})).toBeVisible();expect(screen.getByRole('heading',{name:'Tensiones de financiación en dólares'})).toBeVisible();expect(screen.getByText('3,70 %')).toBeVisible();
 });
+
+it('presents authentic implied volatility separately from realized yield dispersion and suppresses unavailable banking charts',async()=>{
+ const value=fixture(),s=(id:string,label:string,n:number,unit:string)=>({...make(id,label,n),unit,frequency:'daily' as const,scope:'financial-conditions' as const});
+ value.credit=value.credit.filter(row=>row.scope==='private-funds');
+ value.macroIndicators={move:s('MOVE.INDX','MOVE',101.7,'puntos'),vix:s('VIX.INDX','VIX',17.31,'%'),stressPercentiles:[s('MOVE_PERCENTILE','MOVE · percentil 1 año',70,'percentil'),s('VIX_PERCENTILE','VIX · percentil 1 año',40,'percentil')],yieldVolatility:[s('US10Y_REALIZED_20','Estados Unidos · 10 años',5.1,'pb/día')],breakevens:[],hyIgPremium:{...s('HY_IG_PREMIUM','HY − IG',0,'pb'),points:[]},commonStressDate:'2026-04-01',percentileWindow:252,realizedWindow:20};
+ // The fake fixture has no reported banking observations, only private-fund data.
+ value.credit=value.credit.filter(row=>!['DRTSCILM','DRBLACBS','DRSDCILM','NFCI'].includes(row.id));
+ api.mockImplementation((_url,init)=>{const body=JSON.parse(init.body);return Promise.resolve({ok:true,json:async()=>body.panel==='bondsCreditNews'?{subject:body.subject,fetchedAt:new Date().toISOString(),articles:[]}:value});});
+ render(<BondsCreditView/>);fireEvent.click(screen.getByRole('button',{name:'Actualizar bonos y créditos'}));
+ await waitFor(()=>expect(api.mock.calls.map(call=>JSON.parse(call[1].body))).toContainEqual({panel:'bondsCredit'}));
+ fireEvent.click(screen.getByRole('button',{name:'Condiciones de crédito'}));
+ expect(await screen.findByRole('heading',{name:'MOVE · riesgo implícito de tipos'})).toBeVisible();
+ expect(screen.getByLabelText('Percentiles comparables de MOVE y VIX')).toBeVisible();
+ expect(screen.getByRole('heading',{name:'Volatilidad realizada · soberanos a 10 años'})).toBeVisible();
+ expect(screen.queryByRole('heading',{name:'Morosidad de préstamos empresariales'})).toBeNull();
+ expect(screen.getByText('Los diferenciales de crédito no están disponibles temporalmente.')).toBeVisible();
+});

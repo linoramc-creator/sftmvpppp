@@ -71,7 +71,8 @@ export function normalizeEodhdSummary(input:unknown,symbol:string):Row|null{
  const raw=object(input),g=object(raw.General),h=object(raw.Highlights),v=object(raw.Valuation),s=object(raw.SharesStats),t=object(raw.Technicals),d=object(raw.SplitsDividends),a=object(raw.AnalystRatings),etf=object(raw.ETF_Data);
  if(!text(g.Code,32)||!text(g.Type,40))return null;
  const isEtf=String(g.Type).toUpperCase()==='ETF',isFund=/^(fund|mutual fund)$/i.test(String(g.Type)),kind=isEtf?'ETF':isFund?'MUTUALFUND':/index/i.test(String(g.Type))?'INDEX':'EQUITY';
- const result:Row={},profile:Row={},price:Row={},detail:Row={},stats:Row={},financial:Row={},quoteType:Row={symbol,quoteType:kind},meta:Row={provider:'eodhd',symbol:eodhdSymbol(symbol),updatedAt:date(g.UpdatedAt),financialCurrency:financialCurrency(raw)};
+ const cik=typeof g.CIK==='string'?g.CIK:typeof g.CIK==='number'&&Number.isSafeInteger(g.CIK)?String(g.CIK):'';
+ const result:Row={},profile:Row={},price:Row={},detail:Row={},stats:Row={},financial:Row={},quoteType:Row={symbol,quoteType:kind},meta:Row={provider:'eodhd',symbol:eodhdSymbol(symbol),updatedAt:date(g.UpdatedAt),financialCurrency:financialCurrency(raw),cik:/^\d{1,10}$/.test(cik)&&Number(cik)>0?cik.padStart(10,'0'):null};
  put(quoteType,'longName',text(g.Name,300));put(quoteType,'shortName',text(g.Name,300));put(quoteType,'exchange',text(g.Exchange,40));
  for(const [key,value] of Object.entries({currency:text(g.CurrencyCode,12),longName:text(g.Name,300),shortName:text(g.Name,300),exchangeName:text(g.Exchange,40),quoteType:kind,marketCap:number(h.MarketCapitalization)}))put(price,key,value);
  for(const [key,value] of Object.entries({longBusinessSummary:text(g.Description,16000),sector:text(g.Sector,150),industry:text(g.Industry,150),country:text(g.AddressData?.Country,100),address1:text(g.AddressData?.Street,240),city:text(g.AddressData?.City,100),state:text(g.AddressData?.State,100),zip:text(g.AddressData?.ZIP,30),website:text(g.WebURL,1000),phone:text(g.Phone,100),fullTimeEmployees:number(g.FullTimeEmployees)}))put(profile,key,value);
@@ -137,16 +138,18 @@ const percent=(value:number|null)=>value===null?'N/D':`${value>=0?'+':''}${value
 /** Quarterly observations join on their reported fiscal period and currency.
  * No forward fill, synthetic Q4, annual/quarterly mixing or missing-as-zero.
  */
-export function normalizeEodhdQuarterly(input:unknown):EodhdQuarter[]{
+export function normalizeEodhdQuarterly(input:unknown,limit=24,now=Date.now()):EodhdQuarter[]{
  const raw=object(input),financials=object(raw.Financials),income=values(financials.Income_Statement?.quarterly),cash=values(financials.Cash_Flow?.quarterly),balance=values(financials.Balance_Sheet?.quarterly),history=values(raw.Earnings?.History),baseCurrency=financialCurrency(raw);
- const dates=[...new Set(income.map(row=>date(row.date)).filter((d):d is string=>!!d))].sort((a,b)=>b.localeCompare(a));
- return dates.slice(0,24).map(period=>{
-  const p=income.find(row=>row.date===period)!,currency=text(p.currency_symbol,12)??baseCurrency;
-  const compatible=(row:Row|undefined)=>row&&(text(row.currency_symbol,12)??currency)===currency?row:{};
+ const cutoff=new Date(now).toISOString().slice(0,10),count=Number.isFinite(limit)?Math.max(0,Math.min(200,Math.trunc(limit))):24;
+ const eligible=income.filter(row=>{const reported=date(row.date),filing=date(row.filing_date);return reported!==null&&reported<=cutoff&&(!filing||filing<=cutoff);});
+ const dates=[...new Set(eligible.map(row=>date(row.date)).filter((d):d is string=>!!d))].sort((a,b)=>b.localeCompare(a));
+ return dates.slice(0,count).map(period=>{
+  const p=eligible.find(row=>row.date===period)!,currency=text(p.currency_symbol,12)??baseCurrency;
+  const compatible=(row:Row|undefined)=>row&&(text(row.currency_symbol,12)??currency)===currency&&(!date(row.filing_date)||date(row.filing_date)!<=cutoff)?row:{};
   const c=compatible(cash.find(row=>row.date===period)),b=compatible(balance.find(row=>row.date===period));
   const revenue=number(p.totalRevenue),netIncome=number(p.netIncome),gross=number(p.grossProfit),op=number(c.totalCashFromOperatingActivities),capital=number(c.capitalExpenditures),capex=capital===null?null:Math.abs(capital),short=number(b.shortTermDebt),long=number(b.longTermDebt),totalDebt=first(b.shortLongTermDebtTotal,short!==null&&long!==null?short+long:null),cashValue=first(b.cashAndEquivalents,b.cash);
   const previous=income.filter(row=>{const days=(Date.parse(period)-Date.parse(row.date))/86400000;return days>=350&&days<=380&&(text(row.currency_symbol,12)??baseCurrency)===currency;}).sort((a,b)=>Math.abs(Date.parse(period)-Date.parse(a.date)-365.25*86400000)-Math.abs(Date.parse(period)-Date.parse(b.date)-365.25*86400000))[0],before=number(previous?.totalRevenue);
-  const epsRow=history.find(row=>row.date===period),eps=epsRow&&(text(epsRow.currency,12)??currency)===currency?number(epsRow.epsActual):null;
+  const epsRow=history.find(row=>row.date===period&&(!date(row.reportDate)||date(row.reportDate)!<=cutoff)),eps=epsRow&&(text(epsRow.currency,12)??currency)===currency?number(epsRow.epsActual):null;
   const numeric={revenue,grossProfit:gross,ebitda:number(p.ebitda),netIncome,eps,operatingCF:op,freeCashFlow:first(c.freeCashFlow,op!==null&&capex!==null?op-capex:null),capex,investingCF:number(c.totalCashflowsFromInvestingActivities),financingCF:number(c.totalCashFromFinancingActivities),cash:cashValue,totalDebt,netDebt:first(b.netDebt,totalDebt!==null&&cashValue!==null?totalDebt-cashValue:null),equity:number(b.totalStockholderEquity),totalAssets:number(b.totalAssets)};
   const result:any={period,currency,filingDate:date(p.filing_date),numeric,revenueGrowth:revenue!==null&&before!==null&&before!==0?percent((revenue-before)/Math.abs(before)*100):'N/D',grossMargin:revenue!==null&&revenue!==0&&gross!==null?percent(gross/revenue*100):'N/D',netMargin:revenue!==null&&revenue!==0&&netIncome!==null?percent(netIncome/revenue*100):'N/D',eps:eps===null?'N/D':`${currency==='USD'?'$':currency==='EUR'?'€':currency==='GBP'?'£':''}${eps.toFixed(2)}`};
   for(const [key,value] of Object.entries(numeric))if(key!=='eps')result[key]=amount(value,currency);
@@ -160,7 +163,7 @@ export async function eodhdQuarterly(symbol:string):Promise<EodhdQuarter[]>{cons
  * Capital expenditure is negative here to match Yahoo's cash-flow convention.
  */
 export function normalizeEodhdTimeseries(input:unknown,symbol=''):Row[]{
- const rows=normalizeEodhdQuarterly(input),fields:Record<string,string>={quarterlyTotalRevenue:'revenue',quarterlyGrossProfit:'grossProfit',quarterlyEBITDA:'ebitda',quarterlyNetIncome:'netIncome',quarterlyDilutedEPS:'eps',quarterlyOperatingCashFlow:'operatingCF',quarterlyCapitalExpenditure:'capex',quarterlyFreeCashFlow:'freeCashFlow',quarterlyInvestingCashFlow:'investingCF',quarterlyFinancingCashFlow:'financingCF',quarterlyCashAndCashEquivalents:'cash',quarterlyTotalDebt:'totalDebt',quarterlyStockholdersEquity:'equity',quarterlyTotalAssets:'totalAssets'};
+ const rows=normalizeEodhdQuarterly(input,200),fields:Record<string,string>={quarterlyTotalRevenue:'revenue',quarterlyGrossProfit:'grossProfit',quarterlyEBITDA:'ebitda',quarterlyNetIncome:'netIncome',quarterlyDilutedEPS:'eps',quarterlyOperatingCashFlow:'operatingCF',quarterlyCapitalExpenditure:'capex',quarterlyFreeCashFlow:'freeCashFlow',quarterlyInvestingCashFlow:'investingCF',quarterlyFinancingCashFlow:'financingCF',quarterlyCashAndCashEquivalents:'cash',quarterlyTotalDebt:'totalDebt',quarterlyStockholdersEquity:'equity',quarterlyTotalAssets:'totalAssets'};
  return Object.entries(fields).flatMap(([type,field])=>{
   const observations=rows.flatMap(row=>{const value=row.numeric[field];return value===null||value===undefined?[]:[{asOfDate:row.period,periodType:'3M',currencyCode:row.currency,reportedValue:{raw:type==='quarterlyCapitalExpenditure'?-Math.abs(value):value}}];});
   return observations.length?[{meta:{type:[type],symbol:[symbol]},[type]:observations}]:[];

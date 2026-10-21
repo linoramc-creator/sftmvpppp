@@ -1,4 +1,5 @@
 import { authenticatedFetch } from "@/lib/beta-api";
+import {createReportCompletion,observeReportCompletion,reportCompleted,reportCompletionError} from '../../../supabase/functions/analyze-ticker/report-completion';
 // Single unified Supabase function — dispatches by body shape ({ticker} | {sector} | {marketData})
 const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
 
@@ -117,23 +118,26 @@ async function streamSSE({
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let textBuffer = "";
-  let streamDone = false;
-  let streamFailed = false;
+  const completion=createReportCompletion();
+  let errorSent=false;
+  const fail=(message:string)=>{if(!errorSent){errorSent=true;onError(message);}};
 
   const parseLine = (line: string) => {
     if (!line.startsWith("data: ")) return;
     const jsonStr = line.slice(6).trim();
-    if (jsonStr === "[DONE]") { streamDone = true; return; }
-    try {
-      const parsed = JSON.parse(jsonStr);
-      if (parsed.__error || parsed.error) { streamFailed = true; onError(typeof parsed.__error === 'string' ? parsed.__error : 'No se pudo completar el informe.'); return; }
-      if (onEvent) onEvent(parsed);
-      const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-      if (content) onDelta(content);
-    } catch { /* ignore partial chunks */ }
+    if (jsonStr === "[DONE]") { observeReportCompletion(completion,'[DONE]');return; }
+    let parsed:any;
+    try { parsed=JSON.parse(jsonStr); }
+    catch {completion.failed=true;completion.failureReason='invalid-event';return;}
+    observeReportCompletion(completion,parsed);
+    if (parsed.__error || parsed.error) {fail(typeof parsed.__error === 'string' ? parsed.__error : 'No se pudo completar el informe.');return;}
+    if(completion.failed)return;
+    if (onEvent) onEvent(parsed);
+    const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+    if (content) onDelta(content);
   };
 
-  while (!streamDone) {
+  try{while (!completion.done&&!completion.failed) {
     const { done, value } = await reader.read();
     if (done) break;
     textBuffer += decoder.decode(value, { stream: true });
@@ -144,18 +148,22 @@ async function streamSSE({
       if (line.endsWith("\r")) line = line.slice(0, -1);
       if (line.trim() === "" || line.startsWith(":")) continue;
       parseLine(line);
-      if (streamDone) break;
+      if (completion.done||completion.failed) break;
     }
   }
 
-  for (let raw of textBuffer.split("\n")) {
+  if(!completion.done&&!completion.failed)textBuffer+=decoder.decode();
+  for (let raw of completion.done||completion.failed?[]:textBuffer.split("\n")) {
     if (!raw || raw.startsWith(":")) continue;
     if (raw.endsWith("\r")) raw = raw.slice(0, -1);
     parseLine(raw);
+    if(completion.done||completion.failed)break;
   }
 
-  if (!streamDone && !streamFailed) onError('La generación se interrumpió antes de terminar. Inténtalo de nuevo.');
-  onDone();
+  if(reportCompleted(completion))onDone();
+  else fail(reportCompletionError(completion)!);
+  }catch(error){if(!signal?.aborted)fail(reportCompletionError(completion)!);}
+  finally{if(!reportCompleted(completion))try{await reader.cancel();}catch{/* A failed or closed stream is already released. */}reader.releaseLock();}
 }
 
 export interface QuarterlyDebug {

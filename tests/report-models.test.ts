@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {streamReport,evidenceJson,REPORT_MODELS} from '../supabase/functions/analyze-ticker/report-models.ts';
-test('report uses Pro first and only falls back after explicit provider unavailability',async()=>{
+test('reports use bounded medium reasoning on Pro and never silently downgrade after unavailability',async()=>{
  const models:string[]=[];
  const fetcher=(async(_url,init)=>{models.push(JSON.parse(String(init?.body)).model);return models.length===1?new Response('',{status:429}):new Response('data: [DONE]');}) as typeof fetch;
  const result=await streamReport([],'test',fetcher);
- assert.equal(result.ok,true);assert.deepEqual(models,REPORT_MODELS.slice(0,2));if(result.ok)assert.equal(result.model,REPORT_MODELS[1]);
+ assert.equal(result.ok,false);assert.deepEqual(models,[REPORT_MODELS[0]]);
+ let body:any;const successful=await streamReport([],'test',(async(_url,init)=>{body=JSON.parse(String(init?.body));return new Response('data: [DONE]');}) as typeof fetch);
+ assert.equal(successful.ok,true);assert.equal(body.reasoning_effort,'medium');assert.equal(body.max_tokens,14000);assert.equal(body.model,REPORT_MODELS[0]);
  let calls=0;
  const denied=await streamReport([],'test',(async()=>{calls++;return new Response('',{status:403});}) as typeof fetch);
  assert.equal(denied.ok,false);assert.equal(calls,1);

@@ -3,15 +3,30 @@ type Query=Record<string,string|number|undefined>;
 export type EodhdOptions={ttlMs?:number;cost?:number;timeoutMs?:number};
 const readKey=()=>{try{return (globalThis as any).Deno?.env?.get('EODHD_API_KEY')??'';}catch{return '';}};
 export const eodhdEnabled=()=>Boolean(readKey());
+// Provider exchange identifiers verified with exchanges-list on 21 Oct 2026.
+// Keeping native codes permits supported listings without guessing a US ticker.
+export const EODHD_EXCHANGES=new Set('US LSE NEO V TO F STU MU HA DU HM XETRA LU VI PA BR SW MC LS AS CO ST OL HE IR PR KQ KO BUD WAR PSE BK AU SHE AT SHG JK JSE KAR SN CM VN KLSE RO BA SA MX ZSE TW TWO LIM HK MI GBOND CC FOREX INDX EUFUND MONEY VFEX XZIM XBOT LUSE EGX GSE USE XNAI RSE DSE BC SEM MSE XNSA'.split(' '));
+const YAHOO_EXCHANGES:Record<string,string>={L:'LSE',DE:'XETRA',AX:'AU',KS:'KO',SS:'SHG',SZ:'SHE',WA:'WAR',JO:'JSE',KL:'KLSE',PS:'PSE'};
+const INDEX_CODES:Record<string,string>={'^GSPC':'GSPC','^NDX':'NDX','^IXIC':'IXIC','^DJI':'DJI','^VIX':'VIX','^N225':'N225','^KS11':'KS11','^HSI':'HSI','^STOXX50E':'STOXX50E'};
 export function eodhdSymbol(value:string):string|null{
  const symbol=value.trim().toUpperCase();if(!/^[A-Z0-9^][A-Z0-9.^=-]{0,24}$/.test(symbol))return null;
- const index=({'^GSPC':'GSPC','^NDX':'NDX','^IXIC':'IXIC','^DJI':'DJI','^VIX':'VIX','^N225':'N225','^KS11':'KS11','^HSI':'HSI','^STOXX50E':'STOXX50E'} as Record<string,string>)[symbol];if(index)return index+'.INDX';
+ const shareClass=/^BRK\.([AB])(?:\.US)?$/.exec(symbol);if(shareClass)return 'BRK-'+shareClass[1]+'.US';
+ const index=INDEX_CODES[symbol];if(index)return index+'.INDX';
  if(symbol.endsWith('=X')){const pair=symbol.slice(0,-2);return /^[A-Z]{6}$/.test(pair)?pair+'.FOREX':/^[A-Z]{3}$/.test(pair)?'USD'+pair+'.FOREX':null;}
  if(/^[A-Z0-9]+-USD$/.test(symbol))return symbol+'.CC';
  if(symbol.startsWith('^')||symbol.includes('='))return null;
  const suffix=symbol.match(/\.([A-Z]+)$/)?.[1];
- if(suffix){const exchange=({L:'LSE',DE:'XETRA',PA:'PA',AS:'AS',MI:'MI',MC:'MC',SW:'SW',TO:'TO',V:'V',AX:'AU',HK:'HK',US:'US',LSE:'LSE',XETRA:'XETRA',FOREX:'FOREX',CC:'CC',INDX:'INDX',GBOND:'GBOND'} as Record<string,string>)[suffix];return exchange?symbol.slice(0,-suffix.length)+exchange:null;}
+ if(suffix){const exchange=YAHOO_EXCHANGES[suffix]??(EODHD_EXCHANGES.has(suffix)?suffix:null);return exchange?symbol.slice(0,-suffix.length)+exchange:null;}
  return symbol+'.US';
+}
+export function terminalInstrumentSymbol(value:string):string|null{
+ const id=eodhdSymbol(value);if(!id)return null;const dot=id.lastIndexOf('.'),code=id.slice(0,dot),exchange=id.slice(dot+1);
+ if(exchange==='US')return code;
+ if(exchange==='INDX')return Object.entries(INDEX_CODES).find(([,name])=>name===code)?.[0]??id;
+ if(exchange==='FOREX')return /^[A-Z]{6}$/.test(code)?(['USDJPY','USDCHF','USDCAD','USDCNY'].includes(code)?code.slice(3):code)+'=X':null;
+ if(exchange==='CC')return /^[A-Z0-9]+-USD$/.test(code)?code:id;
+ const suffix=({LSE:'L',XETRA:'DE',AU:'AX',KO:'KS',SHG:'SS',SHE:'SZ',WAR:'WA',JSE:'JO',KLSE:'KL',PSE:'PS'} as Record<string,string>)[exchange]??exchange;
+ return code+'.'+suffix;
 }
 export function mergeEodhdPriority<T>(primary:T|null|undefined,fallback:T|null|undefined):T|null{
  const absent=(v:any)=>v===null||v===undefined||typeof v==='number'&&!Number.isFinite(v)||typeof v==='string'&&!v.trim()||Array.isArray(v)&&v.length===0;
@@ -26,16 +41,17 @@ export function createEodhdClient({apiKey,fetcher=fetch,now=Date.now}:{apiKey:st
  const slot=async()=>{if(active>=6)await new Promise<void>(resolve=>queue.push(resolve));active++;};
  const release=()=>{active--;queue.shift()?.();};
  return async function get<T=unknown>(path:string,query:Query={},options:EodhdOptions={}):Promise<T|null>{
-  if(!apiKey||!/^[-A-Za-z0-9_/+.]+$/.test(path)||path.includes('..')||path.startsWith('/')||Object.keys(query).some(k=>/api_token|token|key|fmt/i.test(k)))return null;
+  if(!apiKey||path.length>600||!/^[-A-Za-z0-9_/+.%]+$/.test(path)||path.includes('..')||path.startsWith('/')||Object.keys(query).some(k=>/api_token|token|key|fmt/i.test(k)))return null;
+  try{const decoded=decodeURIComponent(path);if(decoded.includes('..')||/[?#\\:\u0000-\u001f\u007f]/.test(decoded))return null;}catch{return null;}
   const args=new URLSearchParams();for(const[k,v]of Object.entries(query).sort(([a],[b])=>a.localeCompare(b)))if(v!==undefined)args.set(k,String(v));
-  const id=path+'?'+args.toString(),hit=cache.get(id),family=path.split('/')[0];if(hit&&hit.until>now())return hit.value as T;
+  const id=path+'?'+args.toString(),hit=cache.get(id),family=path;if(hit&&hit.until>now())return hit.value as T;
   if(unavailableUntil>now()||(denied.get(family)??0)>now())return null;
   if(pending.has(id))return pending.get(id) as Promise<T|null>;
   const task=(async()=>{await slot();try{
    if(unavailableUntil>now()||(denied.get(family)??0)>now())return null;
    args.set('api_token',apiKey);args.set('fmt','json');const url=new URL('https://eodhd.com/api/'+path);url.search=args.toString();
    const response=await fetcher(url,{redirect:'error',signal:AbortSignal.timeout(Math.min(15000,options.timeoutMs??8000)),headers:{Accept:'application/json'}});
-   if(!response.ok){if(response.status===401)unavailableUntil=now()+1800000;else if(response.status===403)denied.set(family,now()+1800000);else if(response.status===402)unavailableUntil=Date.parse(new Date(now()+86400000).toISOString().slice(0,10)+'T00:00:00Z');else if(response.status===429){const retry=response.headers.get('Retry-After'),seconds=Number(retry),date=Date.parse(retry??'');unavailableUntil=now()+Math.max(1000,Math.min(300000,Number.isFinite(seconds)&&seconds>0?seconds*1000:Number.isFinite(date)?date-now():60000));}await response.body?.cancel();remember(id,null,60000);return null;}
+   if(!response.ok){if(response.status===401)unavailableUntil=now()+1800000;else if(response.status===403){if(denied.size>=256)denied.delete(denied.keys().next().value!);denied.set(family,now()+1800000);}else if(response.status===402)unavailableUntil=Date.parse(new Date(now()+86400000).toISOString().slice(0,10)+'T00:00:00Z');else if(response.status===429){const retry=response.headers.get('Retry-After'),seconds=Number(retry),date=Date.parse(retry??'');unavailableUntil=now()+Math.max(1000,Math.min(300000,Number.isFinite(seconds)&&seconds>0?seconds*1000:Number.isFinite(date)?date-now():60000));}await response.body?.cancel();remember(id,null,60000);return null;}
    const raw=await response.json();if(raw===null||typeof raw!=='object'||(!Array.isArray(raw)&&(raw.error||raw.errors)))return null;
    remember(id,raw,Array.isArray(raw)&&!raw.length?60000:options.ttlMs??300000,JSON.stringify(raw).length*2);return raw as T;
   }catch{return null;}finally{release();}})().finally(()=>pending.delete(id));pending.set(id,task);return task as Promise<T|null>;

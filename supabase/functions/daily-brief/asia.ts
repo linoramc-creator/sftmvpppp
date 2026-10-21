@@ -1,3 +1,4 @@
+import {marketJson} from '../analyze-ticker/eodhd-market-fetch.ts';
 export type AsiaStatus='open'|'pause'|'closed'|'awaiting-close'|'previous'|'unavailable';
 export type AsiaMarket={symbol:string;name:string;country:string;timezone:string;open:number;close:number;pause?:[number,number]};
 // Local regular-session hours, verified against JPX, KRX, HKEX and SSE.
@@ -26,13 +27,14 @@ export function normalizeAsiaSession(market:AsiaMarket,daily:any,intraday:any,cu
  const nativeTime=positive(meta.regularMarketTime)?meta.regularMarketTime*1000:null,nativeToday=nativeTime!==null&&nativeTime<=cutoff&&local(nativeTime,market.timezone).date===today.date&&local(nativeTime,market.timezone).minute>=opening&&positive(meta.regularMarketPrice);
  const base:AsiaSession={symbol:market.symbol,name:market.name,country:market.country,timezone:market.timezone,status:'unavailable',date:null,price:null,change:null,at:null,previousClose:null,previousDate:null};
  let price:number|null=null,at:number|null=null,status:AsiaStatus='unavailable',date:string|null=null;
- // Only a completed five-minute observation may enter a historical cutoff.
+ // Only a completed observation may enter a historical cutoff.
  // A native quote is usable only when its own timestamp is no later than cutoff.
  const minute=intraday?.chart?.result?.[0],mq=minute?.indicators?.quote?.[0];
- const bars=minute?.meta?.dataGranularity==='5m'?(minute.timestamp??[]).flatMap((t:number,i:number)=>{
-  if(!positive(t)||t*1000+300000>cutoff||t*1000<cutoff-7*86400000)return [];
-  const start=t*1000,end=start+300000,p=local(start,market.timezone);
-  return positive(t)&&end<=cutoff&&p.date===today.date&&p.minute>=opening&&p.minute<closing&&positive(mq?.close?.[i])?[{at:end,price:mq.close[i]}]:[];
+ const duration=minute?.meta?.dataGranularity==='1m'?60000:minute?.meta?.dataGranularity==='5m'?300000:null;
+ const bars=duration?(minute.timestamp??[]).flatMap((t:number,i:number)=>{
+  if(!positive(t)||t*1000+duration>cutoff||t*1000<cutoff-7*86400000)return [];
+  const start=t*1000,end=start+duration,p=local(start,market.timezone),paused=market.pause&&p.minute>=market.pause[0]&&p.minute<market.pause[1];
+  return end<=cutoff&&p.date===today.date&&p.minute>=opening&&p.minute<closing&&!paused&&positive(mq?.close?.[i])?[{at:end,price:mq.close[i]}]:[];
  }).sort((a:any,b:any)=>a.at-b.at):[];
  const last=bars.at(-1);
  const earliestClose=market.symbol==='^HSI'?closing-2:closing; // HKEX's closing auction ends randomly within its final two minutes.
@@ -58,9 +60,9 @@ export function asiaSummary(markets:AsiaSession[],cutoff:number):string{
  if(current.length<markets.length)parts.push('Los demás mercados conservan su última sesión disponible o figuran sin datos.');
  return parts.join(' ');
 }
-async function minuteChart(symbol:string){try{const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=5m`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error',signal:AbortSignal.timeout(10000)});return r.ok?await r.json():null;}catch{return null;}}
-export async function collectAsia(cutoff:number,daily:(symbol:string)=>Promise<any>):Promise<AsiaOpening>{
+async function minuteChart(market:AsiaMarket,cutoff:number,read:typeof marketJson){return read(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(market.symbol)}?range=5d&interval=1m`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error'},{timeoutMs:10000,acceptPrimary:raw=>normalizeAsiaSession(market,null,raw,cutoff).price!==null});}
+export async function collectAsia(cutoff:number,daily:(symbol:string)=>Promise<any>,read:typeof marketJson=marketJson):Promise<AsiaOpening>{
  const markets:AsiaSession[]=new Array(ASIA_MARKETS.length);let cursor=0;
- await Promise.all(Array.from({length:2},async()=>{while(cursor<ASIA_MARKETS.length){const i=cursor++,market=ASIA_MARKETS[i],[d,m]=await Promise.all([daily(market.symbol),minuteChart(market.symbol)]);markets[i]=normalizeAsiaSession(market,d,m,cutoff);}}));
+ await Promise.all(Array.from({length:2},async()=>{while(cursor<ASIA_MARKETS.length){const i=cursor++,market=ASIA_MARKETS[i],[d,m]=await Promise.all([daily(market.symbol),minuteChart(market,cutoff,read)]);markets[i]=normalizeAsiaSession(market,d,m,cutoff);}}));
  return {cutoff:new Date(cutoff).toISOString(),markets,summary:asiaSummary(markets,cutoff)};
 }

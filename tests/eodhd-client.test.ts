@@ -17,5 +17,9 @@ test('quota and entitlement failures trip bounded circuits instead of consuming 
  let now=Date.parse('2026-10-21T15:00Z'),calls=0;const limited=createEodhdClient({apiKey:'test-only',now:()=>now,fetcher:async()=>{calls++;return new Response('',{status:429,headers:{'Retry-After':'2'}});}});
  await limited('news');await limited('eod/AAPL.US');assert.equal(calls,1);now+=2001;await limited('eod/AAPL.US');assert.equal(calls,2);
  calls=0;const denied=createEodhdClient({apiKey:'test-only',fetcher:async input=>{calls++;return String(input).includes('fundamentals')?new Response('',{status:403}):Response.json([{close:1}]);}});
- await denied('v1.1/fundamentals/AAPL.US');await denied('v1.1/fundamentals/SPY.US');assert.equal(calls,1);assert.ok(await denied('eod/AAPL.US'));assert.equal(calls,2);
+ await denied('v1.1/fundamentals/AAPL.US');await denied('v1.1/fundamentals/AAPL.US');assert.equal(calls,1);await denied('v1.1/fundamentals/SPY.US');assert.equal(calls,2);assert.ok(await denied('eod/AAPL.US'));assert.equal(calls,3);
+});
+test('a denied foreign listing cannot disable the entitled US fundamentals family',async()=>{
+ const calls:string[]=[],get=createEodhdClient({apiKey:'test-only',fetcher:async input=>{const path=new URL(String(input)).pathname;calls.push(path);return path.includes('VOD.LSE')?new Response('',{status:403}):Response.json({General:{Code:'GOOGL'}});}});
+ assert.equal(await get('v1.1/fundamentals/VOD.LSE'),null);assert.ok(await get('v1.1/fundamentals/GOOGL.US'));assert.equal(await get('v1.1/fundamentals/VOD.LSE'),null);assert.equal(calls.length,2);
 });

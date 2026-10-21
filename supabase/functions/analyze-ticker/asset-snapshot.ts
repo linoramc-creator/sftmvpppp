@@ -6,6 +6,7 @@ import {newsAccess} from './news-access.ts';
 import {summarizeNews} from './news-summary-ai.ts';
 import {instrumentInfo,sessionStats,indexDescription,type InstrumentInfo,type SessionStats} from './asset-instrument.ts';
 import {marketJson} from './eodhd-market-fetch.ts';
+import {eodhdNews} from './eodhd-news.ts';
 export type Candle={time:number;open:number;high:number;low:number;close:number;volume:number|null;partial?:boolean};
 export type CandleInterval='1h'|'4h'|'1d'|'1w';
 export type CandleSeries={candles:Candle[];timezone:string;session:string};
@@ -85,17 +86,18 @@ async function brief(symbol:string,description:string,key?:string){
   });
 }
 export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string,modules:string)=>Promise<any>):Promise<AssetSnapshot>{
-  return cached('asset-snapshot-v5:'+symbol,120000,async()=>{
+  return cached('asset-snapshot-v6:'+symbol,120000,async()=>{
     const end=new Date().toISOString().slice(0,10),start=new Date(Date.now()-35*86400000).toISOString().slice(0,10),since=new Date(Date.now()-86400000).toISOString();
-    const security=!symbol.startsWith('^')&&!symbol.endsWith('=F');
-    const [chartRaw,profile,marketBars,massive,finnhub,search,company,dailyRaw,weeklyRaw]=await Promise.all([
+    const security=!/[=^]/.test(symbol)&&!/-USD$/.test(symbol);
+    const [profile,primaryNews]=await Promise.all([cached('asset-profile:'+symbol,86400000,()=>summary(symbol,'quoteType,assetProfile,fundProfile')),eodhdNews(symbol)]);
+    const primaryComplete=lastDayNews(primaryNews,`${symbol} ${profile?.quoteType?.longName??symbol}`).length>=6;
+    const [chartRaw,marketBars,massive,finnhub,search,company,dailyRaw,weeklyRaw]=await Promise.all([
       get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=60m&includePrePost=false`,{'User-Agent':'Mozilla/5.0'}),
-      cached('asset-profile:'+symbol,86400000,()=>summary(symbol,'quoteType,assetProfile,fundProfile')),
       security&&env.MASSIVE_API_KEY?get(`https://api.massive.com/v2/aggs/ticker/${encodeURIComponent(symbol)}/range/4/hour/${start}/${end}?adjusted=true&sort=asc&limit=50000`,{Authorization:`Bearer ${env.MASSIVE_API_KEY}`}):null,
-      security?massiveNews(env.MASSIVE_API_KEY,symbol):[],
-      security&&env.FINNHUB_KEY?get(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}&from=${since.slice(0,10)}&to=${end}&token=${encodeURIComponent(env.FINNHUB_KEY)}`):null,
-      get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=30&quotesCount=1`,{'User-Agent':'Mozilla/5.0'}),
-      security&&env.FMP_KEY?cached('asset-fmp:'+symbol,86400000,()=>get(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(env.FMP_KEY)}`)):null,
+      !primaryComplete&&security?massiveNews(env.MASSIVE_API_KEY,symbol):[],
+      !primaryComplete&&security&&env.FINNHUB_KEY?get(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}&from=${since.slice(0,10)}&to=${end}&token=${encodeURIComponent(env.FINNHUB_KEY)}`):null,
+      !primaryComplete?get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=30&quotesCount=1`,{'User-Agent':'Mozilla/5.0'}):null,
+      security&&env.FMP_KEY&&!profile?.assetProfile?.longBusinessSummary?cached('asset-fmp:'+symbol,86400000,()=>get(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(env.FMP_KEY)}`)):null,
       cached('asset-daily:'+symbol,300000,()=>get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d&includePrePost=false`,{'User-Agent':'Mozilla/5.0'})),
       cached('asset-weekly:'+symbol,300000,()=>get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5y&interval=1wk&includePrePost=false`,{'User-Agent':'Mozilla/5.0'})),
     ]);
@@ -115,7 +117,7 @@ export async function assetSnapshot(symbol:string,env:Env,summary:(ticker:string
     };
     if(instrument.kind==='index')for(const value of Object.values(series))value.candles=value.candles.map(c=>({...c,volume:null}));
     const stats=sessionStats(meta,series['1d']!.candles,instrument,Date.now(),symbol);
-    const rows:Article[]=[...massive];
+    const rows:Article[]=[...primaryNews,...massive];
     for(const r of Array.isArray(finnhub)?finnhub:[])if(finite(r.datetime)&&r.url)rows.push({title:r.headline??'',url:r.url,source:r.source??'',date:new Date(r.datetime*1000).toISOString().slice(0,10),publishedAt:new Date(r.datetime*1000).toISOString(),excerpt:r.summary??'',image:photoUrl(r.image)});
     for(const r of search?.news??[])if(finite(r.providerPublishTime)&&r.link)rows.push({title:r.title??'',url:r.link,source:r.publisher??'',date:new Date(r.providerPublishTime*1000).toISOString().slice(0,10),publishedAt:new Date(r.providerPublishTime*1000).toISOString(),image:photoUrl(r.thumbnail?.resolutions?.[0]?.url)});
     const marketZone=meta.exchangeTimezoneName??'America/New_York';

@@ -3,6 +3,7 @@ import KeepPanel from '@/components/KeepPanel';
 import { ReportLoading } from "@/components/ReportLoading";
 import { accountApi } from "@/lib/beta-api";
 import { useProfile } from "@/components/AuthGate";
+import InstrumentSearchResults,{useInstrumentSearch} from '@/components/InstrumentSearch';
 import { cleanReportText } from "@/lib/editorial";
 import { RevenueGrowthSection } from "@/components/charts/RevenueGrowthChart";
 import { buildGrowthChartData } from "@/lib/revenue-growth";
@@ -208,13 +209,7 @@ function buildMarginsChartData(data: QuarterlyPeriod[]): MarginsData[] {
         const net = parseMoney(q.netIncome);
         if (rev != null && rev !== 0 && net != null) netMargin = (net / rev) * 100;
       }
-      if (grossMargin == null) {
-        const rev   = parseMoney(q.revenue);
-        const ebit  = parseMoney(q.ebitda);  // use EBITDA margin as gross proxy only when both missing
-        if (rev != null && rev !== 0 && ebit != null && netMargin == null) {
-          grossMargin = (ebit / rev) * 100;
-        }
-      }
+      if(grossMargin==null&&q.numeric?.grossProfit!=null&&q.numeric?.revenue!=null&&q.numeric.revenue!==0)grossMargin=q.numeric.grossProfit/q.numeric.revenue*100;
       if (grossMargin == null && netMargin == null) return null;
       return { period: fmtPeriod(q.period), grossMargin, netMargin };
     })
@@ -247,6 +242,7 @@ function extractCurrentMetrics(content: string): { label: string; value: string 
 
 const Index = () => {
   const profile = useProfile();
+  const stockSearch=useInstrumentSearch(),fundSearch=useInstrumentSearch();
   const [saving,setSaving] = useState(false);
   const saveLock = useRef(false);
   const [reportsError,setReportsError] = useState("");
@@ -355,9 +351,10 @@ const Index = () => {
     setSectorExpanded(all);
   };
 
-  const handleAnalyze = useCallback(async () => {
-    const clean = ticker.trim().toUpperCase();
-    if (!clean) return;
+  const handleAnalyze = useCallback(async (symbol?:string) => {
+    const resolved=await stockSearch.resolve(symbol??ticker);if(!resolved)return;
+    const clean=resolved.symbol;setTicker(clean);
+    if(resolved.type==='etf'||resolved.type==='fund'){setTickerIsEtf(clean);return;}
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -397,6 +394,7 @@ const Index = () => {
         onDone: () => setIsLoading(false),
         onError: (err) => {
           setError(err);
+          setAnalysis('');
           setIsLoading(false);
           toast({ title: "Error", description: err, variant: "destructive" });
         },
@@ -410,13 +408,14 @@ const Index = () => {
       const msg = e instanceof Error ? e.message : "Error de conexión. Inténtalo de nuevo.";
       setError(msg);
     }
-  }, [ticker, toast]);
+  }, [ticker, toast,stockSearch.resolve]);
 
   // ETF apartado: verifies the symbol IS a fund, then streams the ETF-mode
   // report (basic valuation only) while the deterministic deep-dive loads.
   const handleEtfAnalyze = useCallback(async (symbol?: string) => {
-    const clean = (symbol ?? etfInput).trim().toUpperCase();
-    if (!clean) return;
+    const resolved=await fundSearch.resolve(symbol??etfInput);if(!resolved)return;
+    const clean=resolved.symbol;setEtfInput(clean);
+    if(resolved.type==='stock'&&resolved.providerSymbol){setEtfNotFund(clean);return;}
 
     etfAbortRef.current?.abort();
     const controller = new AbortController();
@@ -457,6 +456,7 @@ const Index = () => {
         onDone: () => setIsEtfLoading(false),
         onError: (err) => {
           setEtfError(err);
+          setEtfAnalysis('');
           setIsEtfLoading(false);
           toast({ title: "Error", description: err, variant: "destructive" });
         },
@@ -467,7 +467,7 @@ const Index = () => {
       const msg = e instanceof Error ? e.message : "Error de conexión. Inténtalo de nuevo.";
       setEtfError(msg);
     }
-  }, [etfInput, toast]);
+  }, [etfInput, toast,fundSearch.resolve]);
 
   // Jump from the ticker tab to the ETF apartado with the symbol pre-loaded.
   const analyzeAsEtf = useCallback((symbol: string) => {
@@ -500,6 +500,7 @@ const Index = () => {
         onDone: () => setIsSectorLoading(false),
         onError: (err) => {
           setSectorError(err);
+          setSectorAnalysis('');
           setIsSectorLoading(false);
           toast({ title: "Error", description: err, variant: "destructive" });
         },
@@ -657,16 +658,16 @@ const Index = () => {
                 onChange={(e) => setTicker(e.target.value.toUpperCase())}
                 onKeyDown={handleKeyDown}
                 placeholder="TICKER — AAPL, MSFT, NVDA, ASML..."
-                maxLength={20}
+                maxLength={100}
                 className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-section-heading transition-colors font-mono"
               />
             </div>
             <button
-              onClick={handleAnalyze}
-              disabled={isLoading || !ticker.trim()}
+              onClick={()=>void handleAnalyze()}
+              disabled={isLoading || stockSearch.busy || !ticker.trim()}
               className="h-8 px-5 bg-section-heading text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-section-heading/90 transition-opacity"
             >
-              {isLoading
+              {isLoading||stockSearch.busy
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 : "ANALIZAR"}
             </button>
@@ -682,6 +683,7 @@ const Index = () => {
             )}
           </div>
 
+          <InstrumentSearchResults state={stockSearch} onSelect={symbol=>void handleAnalyze(symbol)}/>
           {/* Error */}
           {error && (
             <div className="mb-4 p-3 border border-destructive/40 bg-destructive/5 flex items-start gap-2">
@@ -763,22 +765,23 @@ const Index = () => {
                 onChange={(e) => setEtfInput(e.target.value.toUpperCase())}
                 onKeyDown={handleEtfKeyDown}
                 placeholder="ETF — SPY, QQQ, GLD, TAN, VWCE.DE..."
-                maxLength={20}
+                maxLength={100}
                 className="w-full h-8 pl-8 pr-3 bg-card border border-border text-foreground text-xs placeholder:text-muted-foreground/25 focus:outline-none focus:border-section-heading transition-colors font-mono"
               />
             </div>
             <button
               onClick={() => handleEtfAnalyze()}
-              disabled={isEtfLoading || !etfInput.trim()}
+              disabled={isEtfLoading || fundSearch.busy || !etfInput.trim()}
               className="h-8 px-5 bg-section-heading text-black font-bold text-[11px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-section-heading/90 transition-opacity whitespace-nowrap"
             >
-              {isEtfLoading
+              {isEtfLoading||fundSearch.busy
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 : "ANALIZAR ETF"}
             </button>
           </div>
 
           {/* Error */}
+          <InstrumentSearchResults state={fundSearch} onSelect={symbol=>void handleEtfAnalyze(symbol)}/>
           {etfError && (
             <div className="mb-4 p-3 border border-destructive/40 bg-destructive/5 flex items-start gap-2">
               <AlertCircle className="h-3.5 w-3.5 text-destructive mt-0.5 shrink-0" />

@@ -2,7 +2,7 @@ import {cached,type Article} from './panels.ts';
 import {institutions,pearson,risk,stdev} from './market-analytics.ts';
 import {relativeHistory,relativeQuant,summarizeRelativeAsset,summarizeRelativeOptions,type History,type RelativeAsset,type RelativeDependencies} from './relative-comparison.ts';
 import {readRelativeCache,writeRelativeCache} from './relative-cache.ts';
-import {REPORT_MODELS} from './report-models.ts';
+import {PRIMARY_REPORT_MODEL} from './report-models.ts';
 
 export type ComparisonRange='1m'|'3m'|'6m'|'1y';
 export type ComparisonChartRow={date:string;[symbol:string]:string|number|null};
@@ -125,7 +125,7 @@ export async function marketComparison(symbols:string[],range:ComparisonRange,in
  });await writeRelativeCache(key,result,300000);}
  result=structuredClone(result);if(!includeAnalysis)return result;
  const items=comparisonFindings(result.assets,result.pairs);
- const analysisKey='market-metrics-v6:'+await fingerprint({symbols,range,items,assets:comparisonAnalysisInput(result,items).assets,pairs:result.pairs.map(({ratio,...pair})=>pair),factors:result.factors});
+ const analysisKey='market-metrics-v7:'+await fingerprint({symbols,range,items,assets:comparisonAnalysisInput(result,items).assets,pairs:result.pairs.map(({ratio,...pair})=>pair),factors:result.factors});
  const saved=await readRelativeCache(analysisKey);if(saved?.analysis){result.analysis={...saved.analysis,cached:true};result.news=saved.news??[];return result;}
  const editorial=await cached(analysisKey,300000,async()=>{
   const newsRows:Article[]=await deps.news().catch(()=>[]),news=[...new Map(newsRows.map((n):[string,Article]=>[n.url,n])).values()].slice(0,6);
@@ -158,7 +158,7 @@ const schema={type:'object',properties:{notes:{type:'array',maxItems:14,items:{t
 export async function enhanceComparisonAnalysis(result:MarketComparison,items:MetricFinding[],key:string,fetcher:typeof fetch=fetch):Promise<MarketComparison['analysis']>{
  const base:MarketComparison['analysis']={status:'ready',items,context:[],enhanced:false};
  if(!key||!items.length)return {...base,diagnostics:{reason:!key?'not-configured':'insufficient-evidence'}};
- const model=REPORT_MODELS[1],input=comparisonAnalysisInput(result,items);
+ const model=PRIMARY_REPORT_MODEL,input=comparisonAnalysisInput(result,items);
  const evidence=new Map<string,string>([
   ...items.map((f):[string,string]=>[f.id,JSON.stringify(f)]),
   ...input.assets.map((a):[string,string]=>['asset:'+a.symbol,JSON.stringify({asset:a,finding:items.find(f=>f.id==='asset:'+a.symbol)})]),
@@ -169,7 +169,7 @@ export async function enhanceComparisonAnalysis(result:MarketComparison,items:Me
  const precision='Describe hechos comprobables con lenguaje moderado. Estar bajo una media no demuestra ruptura de soporte ni capitulación; limitarse a la posición observada. La caída de precios no confirma presión vendedora ni la diferencia de rentabilidad demuestra rotación de capital. Presenta escenarios como condiciones a vigilar, nunca como causas confirmadas. La volatilidad implícita es un precio del riesgo, no una previsión cierta del movimiento ni evidencia de protección contratada. Distingue siempre volatilidad del período elegido y volatilidad reciente de veinte sesiones. No atribuyas un movimiento al dólar o a noticias sólo por correlación. Evita etiquetas dramáticas o conclusiones sobre flujos ausentes.';
  const noteStyle='Las cifras exactas ya están impresas en la tarjeta: todas las notas y el contexto se redactan sin dígitos ni porcentajes repetidos, salvo los caracteres del propio ticker. Expresa los horizontes en palabras. Prioriza explicar condiciones y diferencias concretas entre activos a partir de sus métricas, en lugar de repetir cifras. Debe haber una nota para cada id asset:TICKER incluido en items.';
  let response:Response;
- try{response=await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},redirect:'error',signal:AbortSignal.timeout(35000),body:JSON.stringify({systemInstruction:{parts:[{text:instruction},{text:precision},{text:noteStyle}]},contents:[{parts:[{text:JSON.stringify(input)}]}],generationConfig:{temperature:.2,maxOutputTokens:4200,responseMimeType:'application/json',responseJsonSchema:schema,thinkingConfig:{thinkingLevel:'minimal'}}})});}
+ try{response=await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},redirect:'error',signal:AbortSignal.timeout(65000),body:JSON.stringify({systemInstruction:{parts:[{text:instruction},{text:precision},{text:noteStyle}]},contents:[{parts:[{text:JSON.stringify(input)}]}],generationConfig:{temperature:.2,maxOutputTokens:8000,responseMimeType:'application/json',responseJsonSchema:schema,thinkingConfig:{thinkingLevel:'medium'}}})});}
  catch{return {...base,diagnostics:{reason:'request-timeout-or-network',model}};}
  if(!response.ok){await response.body?.cancel();return {...base,diagnostics:{reason:'provider-rejected',model,httpStatus:response.status}};}
  let raw:any;try{raw=await response.json();}catch{return {...base,diagnostics:{reason:'invalid-response',model}};}

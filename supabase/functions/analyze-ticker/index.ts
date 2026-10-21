@@ -9,6 +9,8 @@ import {assetContext} from './asset-context.ts';
 import { assetSnapshot } from './asset-snapshot.ts';
 import { sharedFeed } from './feed-cache.ts';
 import { sectorFundamentalsContext } from './sector-fundamentals.ts';
+import {resolveInstrument} from './instrument-resolver.ts';
+import {createReportCompletion,observeReportCompletion,reportCompleted} from './report-completion.ts';
 import {relativeComparison,type RelativeDependencies} from './relative-comparison.ts';
 import {marketComparison} from './market-comparison.ts';
 import {marketPulse} from './market-pulse.ts';
@@ -89,28 +91,29 @@ async function fetchTavilySearchUncached(
 }
 
 async function fetchFredData(key: string): Promise<string> {
-  if (!key) return "";
+  const preferred=await eodhdTreasury(1),treasury=preferred.flatMap(series=>{const last=series.points.at(-1);return last&&['DGS2','DGS5','DGS10','DGS20','DGS30'].includes(series.id)?[`${series.label}: ${last.value}% (${last.date})`]:[];});
+  if (!key) return treasury.length?['--- TIPOS SOBERANOS VERIFICADOS ---',...treasury].join('\n'):'';
   try {
     const series = [
       { id: "FEDFUNDS", label: "Fed Funds Rate" },
-      { id: "DGS10",    label: "10Y Treasury Yield" },
+      ...(!treasury.length?[{ id: "DGS10",label: "10Y Treasury Yield" }]:[]),
       { id: "UNRATE",   label: "Unemployment Rate" },
     ];
 
     const results = await Promise.all(
       series.map(async (s) => {
         const res = await fetch(
-          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}&api_key=${key}&limit=1&sort_order=desc&file_type=json`
+          `https://api.stlouisfed.org/fred/series/observations?series_id=${s.id}&api_key=${key}&limit=1&sort_order=desc&file_type=json`,{signal:AbortSignal.timeout(8000)}
         ).catch(() => null);
         if (!res?.ok) return null;
         const data = await res.json().catch(() => null);
         const obs = data?.observations?.[0];
-        return obs ? `${s.label}: ${obs.value}% (${obs.date})` : null;
+        return obs&&Number.isFinite(Number(obs.value)) ? `${s.label}: ${obs.value}% (${obs.date})` : null;
       })
     );
 
     const cpiRes = await fetch(
-      `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key=${key}&limit=14&sort_order=desc&file_type=json`
+      `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key=${key}&limit=14&sort_order=desc&file_type=json`,{signal:AbortSignal.timeout(8000)}
     ).catch(() => null);
     let cpiLine: string | null = null;
     if (cpiRes?.ok) {
@@ -125,10 +128,10 @@ async function fetchFredData(key: string): Promise<string> {
       }
     }
 
-    const valid = [...results.filter(Boolean), cpiLine].filter(Boolean);
+    const valid = [...treasury,...results.filter(Boolean), cpiLine].filter(Boolean);
     if (!valid.length) return "";
     return ["--- INDICADORES MACRO USA (FRED / RESERVA FEDERAL) ---", ...valid].join("\n");
-  } catch (_) { return ""; }
+  } catch (_) { return treasury.join('\n'); }
 }
 
 function fmt(val: number | null | undefined, unit: "M" | "B" | "pct" | "x" | "raw" = "M"): string {
@@ -455,7 +458,8 @@ async function finnhubGet(path: string, key: string) {
 }
 
 async function fetchFinnhubData(ticker: string, key: string) {
-  const [summary,preferredQuote]=await Promise.all([eodhdSummary(ticker),eodhdQuote(ticker)]);
+  const [summary,primaryQuote]=await Promise.all([eYahooQuoteSummary(ticker,'quoteType,assetProfile,financialData,summaryDetail,defaultKeyStatistics,price'),eodhdQuote(ticker)]);
+  const fallbackPrice=eNum(summary?.price?.regularMarketPrice),preferredQuote=primaryQuote??(fallbackPrice!==null&&fallbackPrice>0?{close:fallbackPrice,change_p:eNum(summary?.price?.regularMarketChangePercent),timestamp:eNum(summary?.price?.regularMarketTime)}:null);
   if(summary){const p=summary.price??{},f=summary.financialData??{},s=summary.summaryDetail??{},k=summary.defaultKeyStatistics??{},a=summary.assetProfile??{},r=summary.recommendationTrend?.trend?.[0];return {profile:{name:summary.quoteType?.longName??ticker,ticker,country:a.country,currency:p.currency,exchange:p.exchangeName,finnhubIndustry:a.industry??a.sector,marketCapitalization:p.marketCap==null?null:p.marketCap/1e6,shareOutstanding:k.sharesOutstanding==null?null:k.sharesOutstanding/1e6},quote:preferredQuote?{c:preferredQuote.close,dp:preferredQuote.change_p,t:preferredQuote.timestamp}:null,metrics:{peTTM:s.trailingPE,pbAnnual:k.priceToBook,evToEbitda:k.enterpriseToEbitda,enterpriseValue:k.enterpriseValue,roeTTM:f.returnOnEquity==null?null:f.returnOnEquity*100,netProfitMarginTTM:f.profitMargins==null?null:f.profitMargins*100,revenueGrowthTTMYoy:f.revenueGrowth==null?null:f.revenueGrowth*100,beta:k.beta},recommendations:r?{...r,period:summary.eodhd?.updatedAt}:null,allRecommendations:r?[r]:[],news:[],peers:[],structuredSummary:summary};}
   const t = encodeURIComponent(ticker);
   const today = new Date().toISOString().slice(0, 10);
@@ -1905,30 +1909,32 @@ function sseData(value: unknown) { return `data: ${JSON.stringify(value)}\n\n`; 
 async function cachedReportResponse(kind: "ticker"|"etf"|"sector", subject: string, create: () => Promise<Response>): Promise<Response> {
   const encoder = new TextEncoder();
   const hit = await readSharedReport(kind, subject);
-  if (hit?.analysis && Date.now() - Number(hit.savedAt) < REPORT_CACHE_TTL) {
+  if (hit?.analysis && hit.reportComplete===true && Date.now() - Number(hit.savedAt) < REPORT_CACHE_TTL) {
     const stream = new ReadableStream<Uint8Array>({ start(controller) {
       if(hit.reportModel)controller.enqueue(encoder.encode(sseData({__reportModel:hit.reportModel})));
       if (hit.quarterlyData) controller.enqueue(encoder.encode(sseData({ __quarterly: hit.quarterlyData, __quarterlyDebug: hit.quarterlyDebug, __catalystCalendar: hit.catalystCalendar })));
-      controller.enqueue(encoder.encode(sseData({ choices: [{ delta: { content: hit.analysis } }] })));
+      controller.enqueue(encoder.encode(sseData({ choices: [{ index:0,delta: { content: hit.analysis },finish_reason:'stop' }] })));
       controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close();
     }});
     return new Response(stream,{headers:{...corsHeaders,"Content-Type":"text/event-stream","Cache-Control":"no-cache"}});
   }
   const response = await create();
   if (!response.ok || !response.body || !response.headers.get("Content-Type")?.includes("text/event-stream")) return response;
-  let analysis="", lineBuffer="", complete=false;
+  let analysis="", lineBuffer="";
+  const completion=createReportCompletion();
   const payload: Record<string,unknown>={savedAt:Date.now()};
   const decoder=new TextDecoder();
   const reader=response.body.getReader();
   const stream=new ReadableStream<Uint8Array>({
     async pull(controller){try{
       const part=await reader.read();
-      if(part.done){if(complete&&analysis.length>500){payload.analysis=analysis;await writeSharedReport(kind,subject,payload);}controller.close();return;}
+      if(part.done){if(reportCompleted(completion)&&analysis.length>500){payload.analysis=analysis;payload.reportComplete=true;await writeSharedReport(kind,subject,payload);}controller.close();return;}
       const decoded=decoder.decode(part.value,{stream:true});lineBuffer+=decoded;
       const lines=lineBuffer.split("\n");lineBuffer=lines.pop()??"";
-      for(const line of lines){if(!line.startsWith("data: "))continue;const raw=line.slice(6).trim();if(raw==="[DONE]"){complete=true;continue;}try{const event=JSON.parse(raw);if(event.__reportModel)payload.reportModel=event.__reportModel;if(event.__quarterly){payload.quarterlyData=event.__quarterly;payload.quarterlyDebug=event.__quarterlyDebug;payload.catalystCalendar=event.__catalystCalendar;}const delta=event.choices?.[0]?.delta?.content;if(typeof delta==="string")analysis+=delta;if(event.__error||event.error)complete=false;}catch{}}
+      for(const line of lines){if(!line.startsWith("data: "))continue;const raw=line.slice(6).trim();if(raw==="[DONE]"){observeReportCompletion(completion,raw);continue;}try{const event=JSON.parse(raw);observeReportCompletion(completion,event);if(event.__reportModel)payload.reportModel=event.__reportModel;if(event.__quarterly){payload.quarterlyData=event.__quarterly;payload.quarterlyDebug=event.__quarterlyDebug;payload.catalystCalendar=event.__catalystCalendar;}const delta=event.choices?.[0]?.delta?.content;if(typeof delta==="string")analysis+=delta;}catch{completion.failed=true;}}
       controller.enqueue(part.value);
-    }catch{try{await reader.cancel();}catch{}controller.error(new Error("Stream error"));}}
+    }catch{try{await reader.cancel();}catch{}controller.error(new Error("Stream error"));}},
+    async cancel(reason){await reader.cancel(reason).catch(()=>{});}
   });
   return new Response(stream,{status:response.status,headers:response.headers});
 }
@@ -1953,6 +1959,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
       try {
         // Step 1: Finnhub profile (sequential — companyName/sector/peers needed for Tavily queries)
         const finnhubData = await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY);
+        if(!finnhubData?.profile?.name){controller.enqueue(encoder.encode(sseData({__error:'No se ha podido verificar este activo. Comprueba el símbolo y el mercado.'})));return;}
         const companyName = finnhubData?.profile?.name ?? cleanTicker;
         const sector      = finnhubData?.profile?.finnhubIndustry ?? "";
         let peers: string[] = finnhubData?.peers ?? [];
@@ -3986,6 +3993,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
     };
 
     if (typeof body.panel === "string") {
+      if(body.panel==='instrumentSearch')return panelJson(await resolveInstrument(body.query,{type:body.kind}));
       const deps = { summary: eYahooQuoteSummary };
       if(body.panel==='issuerResearch')return panelJson(await issuerResearch(String(body.subject).trim().toUpperCase()));
       if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));

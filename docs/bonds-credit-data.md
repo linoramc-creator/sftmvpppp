@@ -148,6 +148,58 @@ ni se inventa. La distinción entre valoración, apalancamiento y liquidez sigue
 las dimensiones de riesgo examinadas por el [FMI en su análisis de crédito
 privado](https://www.imf.org/-/media/Files/Publications/GFSR/2024/April/English/ch2.ashx).
 
+### Recuperación oficial y cobertura comprobada el 21 de octubre de 2026
+
+La exportación pública de FRED puede responder `200 OK` con HTML de mantenimiento.
+Ese contenido se rechaza; nunca se interpreta como una serie numérica. Para las
+cinco series de fondos privados se usa entonces una sola lectura compartida de la
+[tabla oficial S124.8.s](https://www.federalreserve.gov/releases/z1/current/html/S124_8_s.htm).
+Solo se extraen columnas explícitas de trimestre, no se confunden los totales
+anuales con observaciones trimestrales. La tabla publica miles de millones USD
+redondeados a una decimal: no se aplica la conversión `.001` propia de los
+millones USD de FRED. Se conserva esa limitación de precisión e histórico en la UI.
+No se trasladan datos de fondos privados a las métricas bancarias faltantes.
+
+GBOND ofrece históricos diarios reales para cuatro vencimientos de cada país:
+EE. UU., Alemania y Reino Unido a 2/5/10/30 años, y Francia a 1/2/5/10 años.
+No se inventa un bono francés a 30 años. El directorio y los dieciséis históricos
+se verificaron con respuesta satisfactoria; si falla posteriormente el directorio,
+se permiten esos símbolos ya comprobados. Las observaciones ausentes no se
+rellenan y las curvas requieren al menos tres vencimientos con fecha común.
+Un vencimiento aislado obsoleto se omite para no borrar los demás actuales.
+
+El breakeven a diez años y la pendiente 10–2 se calculan directamente cuando
+los rendimientos nominales/reales o los dos plazos coinciden en fecha. Las
+comparaciones por países usan referencias benchmark; la curva oficial par del
+Tesoro queda separada. Las series y el cuadro privado conservan su última fecha
+publicada, aunque la petición de actualización sea posterior.
+
+### MOVE y otras medidas de riesgo
+
+`MOVE.INDX` y `VIX.INDX` se verificaron contra el catálogo EODHD y sus históricos:
+respectivamente 2.535 y 2.562 cierres en la consulta 2016-10-01 a 2026-10-20.
+Se consultan con dos peticiones y caché de seis horas, sin usar un modelo de IA.
+MOVE es el [índice de volatilidad implícita de ICE](https://developer.ice.com/fixed-income-data-services/catalog/ice-data-indices-move-index),
+mostrado en puntos del índice, sin moneda ni supuesto volumen negociado.
+VIX conserva su propia unidad; los niveles brutos no se dividen ni se representan
+como si compartieran escala económica. `MOVE3M` fue descubierto, pero no se
+publica: su tramo reciente coincidía con MOVE y no se verificó una estructura
+temporal independiente fiable.
+
+La comparación de tensión usa percentiles móviles de cada índice sobre 252
+observaciones **comunes**, disponibles hasta cada fecha; requiere la ventana
+completa y no usa información futura. Es una posición histórica relativa, no
+una probabilidad de pérdida ni una recomendación.
+
+La volatilidad realizada de rendimientos a diez años es una medida distinta:
+desviación estándar muestral de 20 cambios diarios absolutos, convertidos de
+porcentaje a puntos básicos, en `pb/día`. No se anualiza ni se etiqueta como MOVE.
+Se excluyen saltos entre observaciones separadas por más de siete días y ventanas
+excesivamente discontinuas. Se añaden breakevens a 5/10/30 años sobre fechas
+nominales/reales comunes, y prima HY–IG en puntos básicos únicamente si existen
+ambas series OAS. La ausencia de OAS o de datos bancarios durante el mantenimiento
+se muestra como indisponibilidad; no se sustituye por retornos de ETF o por CMDI.
+
 ## Noticias de renta fija
 
 `panel: bondsCreditNews` acepta únicamente `US`, `FR`, `DE`, `GB` o `private`,

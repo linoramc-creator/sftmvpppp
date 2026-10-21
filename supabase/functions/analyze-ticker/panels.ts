@@ -323,21 +323,21 @@ export function extractChannels(documents: Article[]): Channel[] {
   });
 }
 export async function businessPanel(ticker: string, env: Env, deps: Dependencies): Promise<BusinessPanel> {
-  return cached(`business:v3:${ticker}`, 24 * HOUR, async () => {
-    const [summary, annualProducts, quarterlyProducts, annualGeography, quarterlyGeography, profileRaw] = await Promise.all([
-      deps.summary(ticker, 'assetProfile,quoteType'),
+  return cached(`business:v5:${ticker}`, 24 * HOUR, async () => {
+    const summary=await deps.summary(ticker,'assetProfile,quoteType');
+    const [annualProducts, quarterlyProducts, annualGeography, quarterlyGeography, profileRaw] = await Promise.all([
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-product-segmentation?symbol=${encodeURIComponent(ticker)}&period=annual&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-product-segmentation?symbol=${encodeURIComponent(ticker)}&period=quarter&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-geographic-segmentation?symbol=${encodeURIComponent(ticker)}&period=annual&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/revenue-geographic-segmentation?symbol=${encodeURIComponent(ticker)}&period=quarter&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
-      env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
+      env.FMP_KEY&&(!summary?.eodhd?.cik||!summary?.assetProfile?.website) ? get(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
     ]);
     const profile = Array.isArray(profileRaw) ? profileRaw[0] : null;
-    const company = profile?.companyName ?? summary?.quoteType?.longName ?? summary?.quoteType?.shortName ?? ticker;
+    const company = summary?.quoteType?.longName ?? summary?.quoteType?.shortName ?? profile?.companyName ?? ticker;
     const description = summary?.assetProfile?.longBusinessSummary ?? profile?.description ?? '';
     const rows = (...values: (Row | Row[] | null)[]) => values.flatMap(value => Array.isArray(value) ? value : []);
     const structuredProducts=segmentPeriods(rows(annualProducts, quarterlyProducts)), structuredGeography=segmentPeriods(rows(annualGeography, quarterlyGeography));
-    const researchPromise=(!structuredProducts.length||!structuredGeography.length) ? researchBusiness(company,ticker,profile?.website??summary?.assetProfile?.website??'',env.TAVILY_KEY,env.GEMINI_API_KEY??'',String(profile?.cik ?? '')) : Promise.resolve({products:[],geography:[],context:''});
+    const researchPromise=(!structuredProducts.length||!structuredGeography.length) ? researchBusiness(company,ticker,summary?.assetProfile?.website??profile?.website??'',env.TAVILY_KEY,env.GEMINI_API_KEY??'',String(summary?.eodhd?.cik??profile?.cik??'')) : Promise.resolve({products:[],geography:[],context:''});
     const shortCompany = company.replace(/ (inc\.?|corporation|corp\.?)$/i, '');
     const partnershipDomains = [...NEWS_DOMAINS];
     try { if (profile?.website) partnershipDomains.push(new URL(profile.website).hostname); } catch { /* optional company website */ }

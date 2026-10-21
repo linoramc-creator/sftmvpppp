@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {briefWindow,zonedTime,normalizeAsset,datedNews,marketNews,watchNewsFor,marketLead,watchContext,MARKETS,briefAiInput,applyBriefSummary,writeBriefSummary,type BriefData} from '../supabase/functions/daily-brief/data.ts';
-import {deliveryTime,editionDate,BRIEF_MODEL,BRIEF_FALLBACK_MODEL,BRIEF_OUTPUT_TOKENS} from '../supabase/functions/daily-brief/preferences.ts';
+import {deliveryTime,editionDate,BRIEF_MODEL,BRIEF_OUTPUT_TOKENS} from '../supabase/functions/daily-brief/preferences.ts';
 import {chartSvg,renderBrief,renderMarketPages} from '../supabase/functions/daily-brief/render.ts';
 import {extractCover,publisherUrl} from '../supabase/functions/analyze-ticker/news-covers.ts';
 test('morning brief follows Madrid daylight saving and yesterday rather than subtracting 24 hours',()=>{
@@ -42,11 +42,11 @@ test('AI input deduplicates articles and excludes chart and image payloads; geop
  applyBriefSummary(data,{geopoliticalSummary:{paragraphs:[paragraph,paragraph],evidence:[article.url]}});assert.deepEqual(data.geopoliticalSummary?.paragraphs,[paragraph,paragraph]);assert.equal(data.ai,true);
 });
 
-test('brief uses one bounded Gemini generation, with cheaper fallback only after an explicit unavailable response',async()=>{
+test('brief uses one bounded Gemini generation, without silently downgrading on provider unavailability',async()=>{
  const data=edition(),calls:{url:string;body:any}[]=[],paragraph=Array.from({length:60},()=> 'contexto').join(' ');
  const fetcher:typeof fetch=async(url,init)=>{calls.push({url:String(url),body:JSON.parse(init!.body as string)});return new Response(JSON.stringify({usageMetadata:{promptTokenCount:1000,candidatesTokenCount:500,thoughtsTokenCount:20},candidates:[{content:{parts:[{text:JSON.stringify({geopoliticalSummary:{paragraphs:[paragraph,paragraph],evidence:[data.politics[0].url]}})}]}}]}));};
- await writeBriefSummary(data,'test-key',fetcher);assert.equal(calls.length,1);assert.ok(calls[0].url.includes(BRIEF_MODEL));assert.equal(calls[0].body.generationConfig.maxOutputTokens,BRIEF_OUTPUT_TOKENS);assert.deepEqual(calls[0].body.generationConfig.thinkingConfig,{thinkingLevel:'minimal'});assert.equal(data.model,BRIEF_MODEL);assert.equal(data.usage?.estimatedUsd,.00206);
- let attempts=0;const fallback=edition();await writeBriefSummary(fallback,'test-key',async(url,init)=>++attempts===1?new Response('{}',{status:429}):fetcher(url,init));assert.equal(attempts,2);assert.equal(fallback.model,BRIEF_FALLBACK_MODEL);
+ await writeBriefSummary(data,'test-key',fetcher);assert.equal(calls.length,1);assert.ok(calls[0].url.includes(BRIEF_MODEL));assert.equal(calls[0].body.generationConfig.maxOutputTokens,BRIEF_OUTPUT_TOKENS);assert.deepEqual(calls[0].body.generationConfig.thinkingConfig,{thinkingLevel:'medium'});assert.equal(data.model,BRIEF_MODEL);assert.equal(data.usage?.estimatedUsd,.00824);
+ let attempts=0;const fallback=edition();await writeBriefSummary(fallback,'test-key',async(url,init)=>++attempts===1?new Response('{}',{status:429}):fetcher(url,init));assert.equal(attempts,1);assert.equal(fallback.model,undefined);
  let timeouts=0;await writeBriefSummary(edition(),'test-key',async()=>{timeouts++;throw new Error('timeout');});assert.equal(timeouts,1);
 });
 test('brief separates incomplete sessions from close history and does not fabricate risk metrics',()=>{

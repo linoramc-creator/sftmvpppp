@@ -7,6 +7,12 @@ const series=(id:string,points:Point[],unit='%'):Series=>({id,label:id,unit,sour
 const credit=(id:string,points:Point[],unit='%'):CreditSeries=>({...series(id,points,unit),frequency:'daily',scope:'financial-conditions',currency:null});
 const base=(rows:Series[]):BondsPanel=>({fetchedAt:'2026-10-20T10:00Z',series:rows,etfs:[]});
 
+test('an isolated stale tenor does not blank three current curve maturities or invent the removed maturity',()=>{
+ const rows=['DGS2','DGS5','DGS10'].map((id,i)=>series(id,[{date:'2026-10-20',value:4+i/10}]));
+ rows.push(series('DGS30',[{date:'2026-08-01',value:5}]));
+ const curve=yieldCurveSnapshots(rows);assert.equal(curve[0].date,'2026-10-20');assert.deepEqual(curve[0].points.map(p=>p.id),['DGS2','DGS5','DGS10']);
+});
+
 test('curve snapshots use the same actual observation date for every tenor, and bounded prior calendar anniversaries',()=>{
  const dates=['2025-10-17','2026-09-18','2026-10-16','2026-10-19'];
  const rows=['DGS3MO','DGS2','DGS10','DGS30'].map((id,i)=>series(id,dates.flatMap((date,j)=>id==='DGS30'&&date==='2026-10-19'?[]:[{date,value:i+j}])));

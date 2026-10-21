@@ -53,4 +53,32 @@ describe('consistent chart tools across clickable markets', () => {
     expect(screen.getByRole('button', { name: 'Mostrar volumen' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByText('VOLUMEN')).toBeNull();
   });
+
+  it('adds honest Bollinger envelopes and ATR from history without recalculating them on zoom', () => {
+    const {container}=render(<InteractivePriceChart {...common} candles={history.slice(-20)} history={history}/>);
+    expect(screen.getByLabelText('Resumen del tramo visible')).toHaveTextContent('ATR · 14 velas');
+    expect(screen.getByLabelText('Resumen del tramo visible')).toHaveTextContent('5,00');
+    fireEvent.click(screen.getByRole('button',{name:'Bandas Bollinger 20'}));
+    expect(container.querySelectorAll('[data-bollinger]')).toHaveLength(3);
+    const bands=screen.getByLabelText('Valores Bollinger').textContent;
+    fireEvent.click(screen.getByRole('button',{name:'Acercar velas'}));
+    expect(screen.getByLabelText('Valores Bollinger').textContent).not.toEqual('Bollinger: requiere 20 velas');
+    fireEvent.click(screen.getByRole('button',{name:'Restablecer gráfico'}));
+    expect(screen.getByLabelText('Valores Bollinger').textContent).toBe(bands);
+    expect(container.innerHTML).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('does not invent a price guide when hovering the separate volume panel',()=>{
+    const original=window.PointerEvent;window.PointerEvent=MouseEvent as typeof PointerEvent;
+    try{
+      render(<InteractivePriceChart {...common} candles={history}/>);
+      const plot=screen.getByRole('application');
+      vi.spyOn(plot,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:960,bottom:390,width:960,height:390,toJSON:()=>({})});
+      fireEvent.pointerMove(plot,{clientX:400,clientY:320});
+      expect(screen.getByTestId('candle-crosshair')).toBeVisible();
+      expect(screen.queryByTestId('price-crosshair-line')).toBeNull();
+      fireEvent.pointerMove(plot,{clientX:400,clientY:100});
+      expect(screen.getByTestId('price-crosshair-line')).toBeVisible();
+    }finally{window.PointerEvent=original;}
+  });
 });

@@ -8,6 +8,9 @@ export type SovereignCode='US'|'FR'|'DE'|'GB';
 export type DailySovereignMarket={code:SovereignCode;name:string;currency:string;definition:'benchmark';frequency:'daily';tenors:{years:number;series:CreditSeries}[];reference10y:CreditSeries;dayChangeBp:number|null;monthChangeBp:number|null;yearChangeBp:number|null;curveSnapshots:YieldCurveSnapshot[];slopes:CreditSeries[]};
 export type EodhdBondsData={sovereigns:DailySovereignMarket[];commonDate:string|null;spreads:{code:SovereignCode;date:string|null;value:number|null;points:Point[]}[];policyRates:CreditSeries[];referenceRates:CreditSeries[];fundingStress:CreditSeries[];corporateDistress:CreditSeries[]};
 export const EODHD_SOVEREIGN_MARKETS=[{code:'US',prefix:'US',name:'Estados Unidos',currency:'USD',country:'USA'},{code:'FR',prefix:'FR',name:'Francia',currency:'EUR',country:'France'},{code:'DE',prefix:'DE',name:'Alemania',currency:'EUR',country:'Germany'},{code:'GB',prefix:'UK',name:'Reino Unido',currency:'GBP',country:'UK'}] as const;
+// Actual GBOND symbols verified against the provider directory and historical
+// responses on 2026-10-21. France has no listed 30Y benchmark; never infer one.
+const VERIFIED_TENORS:Record<SovereignCode,readonly string[]>={US:['2Y','5Y','10Y','30Y'],FR:['1Y','2Y','5Y','10Y'],DE:['2Y','5Y','10Y','30Y'],GB:['2Y','5Y','10Y','30Y']};
 const DAY=86400000,HOUR=3600000;
 const day=(now=Date.now())=>new Date(now).toISOString().slice(0,10);
 const completedDay=(now=Date.now())=>day(now-DAY);
@@ -46,6 +49,13 @@ export async function eodhdTreasury(years=1,real=false,request:Request=eodhdGet,
 export function preferEodhdTreasury(fallback:Series[],primary:Series[]):Series[]{
  const ids=new Set([...fallback.map(s=>s.id),...primary.map(s=>s.id)]);return [...ids].map(id=>{const old=fallback.find(s=>s.id===id),fresh=primary.find(s=>s.id===id);if(!fresh?.points.length)return old!;if(!old?.points.length)return fresh;const merged=new Map(old.points.map(p=>[p.date,p.value]));fresh.points.forEach(p=>merged.set(p.date,p.value));return {...fresh,source:fresh.source+' '+old.source,points:[...merged].sort(([a],[b])=>a.localeCompare(b)).map(([date,value])=>({date,value}))};});
 }
+export function treasuryDerivedSeries(series:Series[]):Series[]{
+ const find=(id:string)=>series.find(s=>s.id===id);
+ return [...series,
+  alignedTransform('T10YIE','Inflación implícita · 10 años','%',find('DGS10'),find('DFII10'),(nominal,real)=>nominal-real),
+  alignedTransform('T10Y2Y','Diferencial 10–2 años','pp',find('DGS10'),find('DGS2'),(long,short)=>long-short),
+ ].filter(s=>s.points.length);
+}
 const labels:Record<string,[string,string|null]>={SOFR:['SOFR · financiación garantizada USD','USD'],EFFR:['Fed Funds efectivo','USD'],SONIA:['SONIA · financiación GBP','GBP'],ESTR:['€STR · financiación EUR','EUR'],FED_TARGET_LOWER:['Fed · objetivo inferior','USD'],FED_TARGET_UPPER:['Fed · objetivo superior','USD'],ECB_DFR:['BCE · facilidad de depósito','EUR'],BOE_BANK_RATE:['Banco de Inglaterra · Bank Rate','GBP'],EFFR_SOFR:['Fed Funds efectivo − SOFR','USD'],SOFR_TARGET_LOWER:['SOFR − objetivo inferior de la Fed','USD'],EFFR_TARGET_MID:['Fed Funds efectivo − objetivo medio','USD']};
 export function normalizeEodhdRates(raw:unknown,kind:'reference'|'policy'|'funding',now=Date.now()):CreditSeries[]{
  const permitted=kind==='reference'?['SOFR','EFFR','SONIA','ESTR']:kind==='policy'?['FED_TARGET_LOWER','FED_TARGET_UPPER','ECB_DFR','BOE_BANK_RATE']:['EFFR_SOFR','SOFR_TARGET_LOWER','EFFR_TARGET_MID'];
@@ -77,7 +87,13 @@ export async function eodhdBondsData(request:Request=eodhdGet,now=Date.now()):Pr
   request('spreads/funding-stress',{'filter[code]':'EFFR_SOFR,SOFR_TARGET_LOWER,EFFR_TARGET_MID','filter[from]':yearFrom,'filter[to]':to},{ttlMs:6*HOUR,cost:1}),
   request('credit-risk/corporate/cmdi',{'filter[from]':yearFrom,'filter[to]':to,'page[limit]':100},{ttlMs:6*HOUR,cost:1}),
  ]);
- const symbols=EODHD_SOVEREIGN_MARKETS.flatMap(m=>{const listed=rows(directory).filter(s=>s.Exchange==='GBOND'&&s.Currency===m.currency&&s.Country===m.country&&s.Type==='BOND').map(s=>s.Code);return ['2Y','5Y','10Y',listed.includes(m.prefix+'30Y')?'30Y':'1Y'].filter(t=>listed.includes(m.prefix+t)).map(t=>m.prefix+t+'.GBOND');});
+ const symbols=EODHD_SOVEREIGN_MARKETS.flatMap(m=>{
+  const listed=rows(directory).filter(s=>s.Exchange==='GBOND'&&s.Currency===m.currency&&s.Country===m.country&&s.Type==='BOND').map(s=>s.Code);
+  // A directory outage must not discard the historical endpoints already
+  // verified for these four markets. Invalid/missing histories remain null.
+  const tenors=listed.length?['2Y','5Y','10Y',listed.includes(m.prefix+'30Y')?'30Y':'1Y'].filter(t=>listed.includes(m.prefix+t)):VERIFIED_TENORS[m.code];
+  return tenors.map(t=>m.prefix+t+'.GBOND');
+ });
  const histories=await Promise.all(symbols.map(symbol=>getEodhdBondSeries(symbol,from,to,request,now)));
  const data=buildEodhdBondsData(histories.filter((s):s is CreditSeries=>s!==null),normalizeEodhdRates(policy,'policy',now),normalizeEodhdRates(reference,'reference',now),normalizeEodhdRates(funding,'funding',now),normalizeEodhdCmdi(cmdi,now));
  return data.sovereigns.length||data.policyRates.length||data.referenceRates.length||data.fundingStress.length||data.corporateDistress.length?data:null;

@@ -1,6 +1,7 @@
 import {cached} from './panels.ts';
 import {instrumentInfo,type InstrumentInfo} from './asset-instrument.ts';
 import {regularSessionEnd} from './market-session.ts';
+import {marketJson} from './eodhd-market-fetch.ts';
 export type RiskBar={date:string;open:number;high:number;low:number;close:number;adjusted:number;volume:number|null};
 export type RiskPoint={date:string;vol20:number|null;vol60:number|null;drawdown:number;volumeRatio:number|null;atr:number|null;atrPercent:number|null;belowPeak:number};
 export type RiskData={currency:string;history:RiskPoint[];percentiles:Record<string,{value:number|null;samples:number}>;asOf:string|null;instrument?:InstrumentInfo;annualizationDays?:number};
@@ -37,8 +38,9 @@ export function chartRiskData(c:any,symbol:string,now=Date.now()):RiskData{
  }
  return {...riskHistory([...rows.values()].sort((a,b)=>a.date.localeCompare(b.date)),info.priceUnit||c.meta?.currency||'',annualizationDays),instrument:info};
 }
-export async function assetRisk(symbol:string):Promise<RiskData>{return cached('asset-risk-v2:'+symbol,300000,async()=>{
- try{const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d`,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error();const c=(await r.json())?.chart?.result?.[0];
- return chartRiskData(c,symbol);
+export async function loadAssetRisk(symbol:string,read:typeof marketJson=marketJson,now=Date.now()):Promise<RiskData>{
+ try{const raw=await read(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error'},{timeoutMs:8000,acceptPrimary:value=>chartRiskData(value?.chart?.result?.[0],symbol,now).history.length>0});
+ return chartRiskData(raw?.chart?.result?.[0],symbol,now);
  }catch{return riskHistory([],'');}
-});}
+}
+export async function assetRisk(symbol:string):Promise<RiskData>{return cached('asset-risk-v2:'+symbol,300000,()=>loadAssetRisk(symbol));}

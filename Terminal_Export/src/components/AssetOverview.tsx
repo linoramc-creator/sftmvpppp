@@ -1,12 +1,13 @@
 import {ArrowUpRight, Clock3} from 'lucide-react';
 import type {AssetSnapshot} from '../../../supabase/functions/analyze-ticker/asset-snapshot';
 import type {ExtendedQuote} from '../../../supabase/functions/analyze-ticker/extended-hours';
+import {chartPriceDigits} from '@/lib/chart-indicators';
 
 const finite = (value: number | null | undefined): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
-const priceText = (value: number | null | undefined) => finite(value)
-  ? value.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+const priceText = (value: number | null | undefined, digits = 2) => finite(value)
+  ? value.toLocaleString('es-ES', {minimumFractionDigits: digits, maximumFractionDigits: digits})
   : '—';
 
 const changeText = (value: number) =>
@@ -65,6 +66,7 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
   const time = assetQuoteTime(data?.quoteAt, data?.timezone);
   const unit=data?.instrument?.priceUnit||data?.currency;
   const kind=data?.instrument?.kind;
+  const precision=data?.instrument?.priceDecimals??chartPriceDigits(symbol,data?.price??1);
   return <section aria-label={`Resumen de ${symbol}`} aria-busy={busy}
     className="overflow-hidden rounded-xl border border-slate-700/50 bg-[#0b1017] font-body shadow-sm">
     <div className="flex flex-col justify-between gap-5 px-5 py-5 sm:flex-row sm:items-start sm:px-6">
@@ -72,7 +74,7 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
         <div className="mb-2 flex flex-wrap items-center gap-2.5 text-xs">
           <span className="rounded-md border border-slate-600/50 bg-slate-800/70 px-2 py-1 font-mono font-medium text-slate-200">{symbol}</span>
           {data?.exchange && <span className="text-slate-400">{data.exchange}</span>}
-          {kind&&kind!=='other'&&<span className="rounded px-1.5 py-0.5 text-[10px] text-slate-500">{({index:'Índice',etf:'ETF',future:'Futuro continuo',equity:'Acción'})[kind]}</span>}
+          {kind&&kind!=='other'&&<span className="rounded px-1.5 py-0.5 text-[10px] text-slate-500">{({index:'Índice',etf:'ETF',future:'Futuro continuo',equity:'Acción',forex:'Divisas',crypto:'Activo digital'})[kind]}</span>}
           {busy && <span role="status" className="text-slate-500">Actualizando…</span>}
         </div>
         <h1 className="font-body text-[23px] font-semibold leading-tight tracking-tight text-slate-100 sm:text-[26px]">
@@ -86,7 +88,7 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
       <div className="min-w-0 sm:text-right">
         <p className="mb-1 text-[11px] font-medium text-slate-400">{kind==='future'?'Cotización · última negociación':'Cotización · sesión regular'}</p>
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 sm:justify-end">
-          <span className="text-[34px] font-semibold leading-tight tracking-tight text-slate-50 tabular-nums">{priceText(data?.price)}</span>
+          <span className="text-[34px] font-semibold leading-tight tracking-tight text-slate-50 tabular-nums">{priceText(data?.price,precision)}</span>
           {unit && <span className="text-xs font-medium text-slate-400">{unit}</span>}
           {finite(data?.change) && <span className={`rounded-md px-2 py-1 text-sm font-medium tabular-nums ${data.change >= 0 ? 'bg-emerald-400/10 text-emerald-400' : 'bg-rose-400/10 text-rose-400'}`}>
             {changeText(data.change)}
