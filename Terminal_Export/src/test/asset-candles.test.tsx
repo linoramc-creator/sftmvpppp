@@ -23,6 +23,21 @@ describe('bounded candle navigation', () => {
 });
 
 describe('professional candlestick interactions', () => {
+  it('offers three-month intraday views only when real coverage is available', () => {
+    const longHistory = Array.from({ length: 95 }, (_, day) => [0, 4].map(hour => ({ time: start + day * 86400000 + hour * 3600000, open: 100 + day, close: 101 + day, low: 98 + day, high: 103 + day, volume: 1000 + day }))).flat();
+    const extended: AssetSnapshot = { ...data, candles: longHistory, series: { '1h': { candles: longHistory, timezone: 'America/New_York', session: 'Sesión horaria' } } };
+    const { container, rerender } = render(<AssetCandles data={extended}/>);
+    const initial = container.querySelectorAll('[data-candle-time]').length;
+    expect(screen.getByRole('button', { name: 'Período 1 MES' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Período 3 MESES' }));
+    expect(screen.getByRole('button', { name: 'Período 3 MESES' })).toHaveAttribute('aria-pressed', 'true');
+    expect(container.querySelectorAll('[data-candle-time]').length).toBeGreaterThan(initial);
+    fireEvent.click(screen.getByRole('button', { name: 'Velas 1H' }));
+    expect(screen.getByRole('button', { name: 'Período 3 MESES' })).toBeVisible();
+    rerender(<AssetCandles data={{ ...extended, series: { '1h': { ...extended.series!['1h']!, candles: longHistory.slice(-30) } } }}/>);
+    expect(screen.queryByRole('button', { name: 'Período 3 MESES' })).toBeNull();
+  });
+
   it('uses a single keyboard focus plot and clears thin crosshair on leave or blur', () => {
     const { container } = render(<AssetCandles data={data}/>);
     const plot = screen.getByRole('application');

@@ -7,6 +7,8 @@ import {extendedHours} from './extended-hours.ts';
 import {regularReportQuote} from './regular-quote.ts';
 import {assetContext} from './asset-context.ts';
 import { assetSnapshot } from './asset-snapshot.ts';
+import {assetCandles} from './asset-candles.ts';
+import {assetInsights} from './asset-insights.ts';
 import { sharedFeed } from './feed-cache.ts';
 import { sectorFundamentalsContext } from './sector-fundamentals.ts';
 import {resolveInstrument} from './instrument-resolver.ts';
@@ -14,6 +16,7 @@ import {createReportCompletion,observeReportCompletion,reportCompleted} from './
 import {relativeComparison,type RelativeDependencies} from './relative-comparison.ts';
 import {marketComparison} from './market-comparison.ts';
 import {marketPulse} from './market-pulse.ts';
+import {MARKET_REFERENCES} from './market-references.ts';
 import {bondsCreditPanel} from './bonds-credit.ts';
 import {bondsCreditNews,type BondsNewsSubject} from './bonds-credit-news.ts';
 import {eodhdSummary,eodhdQuarterly,eodhdTimeseries} from './eodhd-fundamentals.ts';
@@ -2349,17 +2352,8 @@ async function handleFundamentals(ticker: string): Promise<Response> {
 }
 
 async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<Response> {
-  // Major asset-class proxies — quotes from Finnhub, candles from Yahoo Finance
-  const INDICES: Array<{ symbol: string; label: string }> = [
-    { symbol: "^GSPC",  label: "S&P 500"      },
-    { symbol: "^NDX",  label: "NASDAQ 100"   },
-    { symbol: "^DJI",  label: "DOW JONES"    },
-    { symbol: "IWM",  label: "RUSSELL 2000 · IWM" },
-    { symbol: "^VIX", label: "VIX"      },
-    { symbol: "GLD",  label: "ORO"          },
-    { symbol: "TLT",  label: "BONOS 20Y+"   },
-  ];
-  const indexSymbols = INDICES.map(i => i.symbol);
+  const INDICES = MARKET_REFERENCES;
+  const indexSymbols: string[] = INDICES.map(i => i.symbol);
   const allSymbols = [...indexSymbols, ...extraSymbols.filter(s => !indexSymbols.includes(s))];
 
   // Candles come from the shared, cached fetchYahooChart() helper (3-month daily
@@ -4000,6 +3994,8 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if(body.panel === "regularQuote") return panelJson(await regularReportQuote(String(body.subject).trim().toUpperCase()));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
       if(body.panel === "assetSnapshot") return panelJson(await assetSnapshot(String(body.subject).trim().toUpperCase(),env,eYahooQuoteSummary));
+      if(body.panel === 'assetCandles') return panelJson(await assetCandles(String(body.subject).trim().toUpperCase(),env));
+      if(body.panel === 'assetInsights') return panelJson(await assetInsights(String(body.subject).trim().toUpperCase()));
       if(body.panel==='marketPulse')return panelJson(await marketPulse(String(body.subject).trim().toUpperCase(),env));
       if(body.panel==='bondsCredit')return panelJson(await bondsCreditPanel(env));
       if(body.panel==='bondsCreditNews')return panelJson(await bondsCreditNews(body.subject as BondsNewsSubject,env));

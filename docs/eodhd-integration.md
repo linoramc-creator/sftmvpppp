@@ -49,6 +49,38 @@ como flujos, órdenes ni recomendaciones de una institución concreta.
 
 ## Nuevos bloques
 
+### Fichas del feed y gráficos (21 de octubre de 2026)
+
+- Las referencias laterales usan un contrato compartido de símbolos: S&P 500
+  `^GSPC` y VIX `^VIX` en puntos, con IWM y GLD identificados como ETF. Esto
+  corrige el fallo que buscaba SPY/VIXY en respuestas de índices auténticos.
+- `assetCandles` carga exclusivamente precios y OHLC, sin noticias ni modelos.
+  Reutiliza caché y peticiones concurrentes; solicita tres meses horarios,
+  dos años diarios y cinco años semanales. El resumen ejecutivo y las fichas
+  del feed comparten el gráfico japonés: 4H y un mes por defecto, con tres
+  meses cuando la cobertura real lo permite. Nunca deriva 4H de barras diarias.
+- EODHD mantiene prioridad. Si falta toda una sesión confirmada en el horario,
+  se intenta el respaldo previo; si falla o es más antiguo se conserva el
+  histórico disponible con su fecha. Las barras de Massive de sesión extendida
+  solo respaldan series insuficientes y no se mezclan con otra fuente o ancla.
+- Se ordenan y validan OHLC y volúmenes; los índices/divisas no reciben volumen
+  ficticio. Se descartan marcadores planos de cotización añadidos dentro de
+  una barra o al cierre; no son otra vela. Las sesiones diarias finalizadas
+  dejan de aparecer parciales y se conserva el tramo corto de la sesión de 4H.
+- `assetInsights` añade datos estructurados sin generación: doce trimestres de
+  ventas, caja y deuda, métricas fechadas y exposición/posiciones de ETF. Las
+  cifras financieras se expresan en millones de su moneda de estados; las
+  distintas monedas no se unen en una serie.
+- Los estudios utilizan cierres ajustados coherentes para acciones/ETF y
+  precios para índices/divisas/futuros: calendario mensual, distancia al máximo
+  de la muestra y duración en sesiones, eficiencia de tendencia y Sortino con
+  objetivo cero. Se exigen muestras mínimas y no se presenta una regularidad
+  histórica como probabilidad de subida ni como entrada institucional.
+- El perfil breve de negocio se amplía en actividad, clientes y modelo de
+  ingresos. Es una tarea auxiliar pequeña y cacheada, independiente de los
+  informes finales Pro. La carga ligera del gráfico no espera ese texto ni las
+  noticias. Las fichas de índices/ETF conservan una vista separada de la sesión.
+
 ### Investigación y fiabilidad (21 de octubre de 2026)
 
 - Los informes finales de acciones, ETF, sectores y comparación usan

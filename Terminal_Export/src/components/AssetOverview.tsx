@@ -66,6 +66,7 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
   const time = assetQuoteTime(data?.quoteAt, data?.timezone);
   const unit=data?.instrument?.priceUnit||data?.currency;
   const kind=data?.instrument?.kind;
+  const paragraphs=data?.description?.split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean)??[];
   const precision=data?.instrument?.priceDecimals??chartPriceDigits(symbol,data?.price??1);
   return <section aria-label={`Resumen de ${symbol}`} aria-busy={busy}
     className="overflow-hidden rounded-xl border border-slate-700/50 bg-[#0b1017] font-body shadow-sm">
@@ -99,13 +100,13 @@ export default function AssetOverview({symbol, data, busy = false, onAnalyze}: {
         </p>}
       </div>
     </div>
-    {(data?.description || quotes.length > 0) && <div className={`grid items-start gap-5 border-t border-slate-700/40 px-5 py-4 sm:px-6 ${data?.description && quotes.length ? 'lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]' : ''}`}>
-      {data?.description && <div className="min-w-0">
-        <h2 className="mb-2 font-body text-[11px] font-semibold tracking-wide text-slate-400">{kind==='index'?'Exposición':kind==='future'?'Contrato de referencia':'Actividad'}</h2>
-        <p className="max-w-[70ch] text-[13px] leading-[1.75] text-slate-300">{data.description}</p>
-      </div>}
+    {(data?.description || quotes.length > 0) && <div className="space-y-5 border-t border-slate-700/40 px-5 py-4 sm:px-6">
       {quotes.length > 0 && <div aria-label="Negociación fuera de horario" className={`grid gap-2.5 ${quotes.length > 1 ? 'sm:grid-cols-2' : ''}`}>
         {quotes.map(quote => <SessionQuote key={quote.session} quote={quote} currency={data?.extendedHours?.currency || data?.currency || ''}/>)}
+      </div>}
+      {data?.description && <div className="min-w-0">
+        <h2 className="mb-2 font-body text-[11px] font-semibold tracking-wide text-slate-400">{kind==='index'?'Exposición':kind==='future'?'Contrato de referencia':'Actividad'}</h2>
+        <div className={`grid gap-5 ${paragraphs.length===3?'lg:grid-cols-3':''}`}>{paragraphs.map((paragraph,index)=><div key={index} className={paragraphs.length===3&&index>0?'lg:border-l lg:border-slate-800/80 lg:pl-5':''}>{paragraphs.length===3&&<h3 className="mb-2 text-[11px] font-medium text-blue-300">{['Productos y actividad','Clientes y mercados','Modelo de ingresos'][index]}</h3>}<p className="max-w-[90ch] text-[13px] leading-[1.8] text-slate-300">{paragraph}</p></div>)}</div>
       </div>}
     </div>}
   </section>;

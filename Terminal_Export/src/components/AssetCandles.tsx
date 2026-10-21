@@ -12,7 +12,8 @@ export default function AssetCandles({ data }: { data: AssetSnapshot }) {
     const end = source.candles.at(-1)?.time ?? Date.now();
     return source.candles.filter(c => c.time >= end - days * 86400000);
   }, [source.candles, days]);
-  const rangeOptions = interval === '1w' ? [365, 730, 1825] : interval === '1d' ? [90, 365, 730] : [7, 30];
+  const coverageDays = source.candles.length > 1 ? (source.candles.at(-1)!.time - source.candles[0].time) / 86400000 : 0;
+  const rangeOptions = interval === '1w' ? [365, 730, 1825] : interval === '1d' ? [90, 365, 730] : coverageDays >= 80 ? [7, 30, 90] : [7, 30];
   return <InteractivePriceChart symbol={data.symbol} title={`PRECIO · VELAS ${intervals[interval]}`} subtitle={<>{data.symbol} <span className="mx-1.5 text-slate-700">/</span> {data.instrument?.priceUnit || data.currency} <span className="mx-1.5 text-slate-700">/</span> {source.timezone}</>}
     candles={rows} history={source.candles} datasetKey={`${data.symbol}:${interval}:${days}`} timezone={source.timezone} session={source.session}
     allowVolume={data.instrument?.volumeUnit !== 'unavailable'} priceDecimals={data.instrument?.priceDecimals} intraday={interval === '1h' || interval === '4h'}

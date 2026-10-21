@@ -12,13 +12,14 @@ import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react"
 import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
-import { IndexSparkline } from "@/components/charts/IndexCharts";
+import IndexChartsPanel from '@/components/IndexChartsPanel';
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 import { OptionsSubSection } from "@/components/options/OptionsSubSection";
 import { RiskSubSection } from "@/components/charts/RiskCharts";
 import { EtfFundamentalsTable, EtfSectorSubSection, EtfSubSection } from "@/components/charts/ETFCharts";
 import { TechnicalSubSection } from "@/components/charts/TechnicalCharts";
 import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
+import AssetInsightsPanel from "@/components/AssetInsightsPanel";
 import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
 
@@ -928,49 +929,6 @@ const Index = () => {
   );
 };
 
-// ── Index Charts Panel (native Recharts sparklines) ───────────────────
-
-const PANEL_INDICES = [
-  { symbol: "SPY",  label: "S&P 500" },
-  { symbol: "VIXY", label: "VIX VOLATILIDAD" },
-  { symbol: "IWM",  label: "RUSSELL 2000" },
-  { symbol: "GLD",  label: "ORO" },
-];
-
-function IndexChartsPanel({ marketData }: { marketData: MarketData | null }) {
-  return (
-    <div className="lg:sticky lg:top-4">
-      <div className="flex items-center gap-2 mb-2 px-1">
-        <span style={{
-          width: 6, height: 6, background: '#3b82f6', borderRadius: '50%',
-          display: 'inline-block', boxShadow: '0 0 6px #3b82f6',
-        }} className="animate-pulse" />
-        <span style={{ fontSize: 10, letterSpacing: '0.15em', color: '#94a3b8', fontWeight: 600 }}>
-          ÍNDICES GLOBALES
-        </span>
-        <span style={{ marginLeft: 'auto', fontSize: 8, color: '#475569', letterSpacing: '0.1em' }}>
-          MERCADO
-        </span>
-      </div>
-      {PANEL_INDICES.map(({ symbol, label }) => {
-        const quote = marketData?.indices.find(i => i.symbol === symbol) ?? null;
-        const candle = marketData?.candles?.[symbol] ?? null;
-        return (
-          <IndexSparkline
-            key={symbol}
-            label={label}
-            symbol={symbol}
-            price={quote?.price ?? null}
-            change1d={quote?.change1d ?? null}
-            change1m={quote?.change1m ?? null}
-            candle={candle}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
 // ── Market Ticker Bar ─────────────────────────────────────────────────
 
 function MarketTickerBar({
@@ -1159,7 +1117,7 @@ function ReportView({
           {/* Active section content */}
           {active && (
             <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
-              {active === "Resumen Ejecutivo" && <InstrumentPriceChart ticker={ticker} />}
+              {active === "Resumen Ejecutivo" && <><InstrumentPriceChart ticker={ticker} /><div className="mb-5"><AssetInsightsPanel symbol={ticker}/></div></>}
               {active === "Finanzas" && (
                 <>
                   <QuarterlyHistorySection ticker={ticker} data={quarterlyData} debug={quarterlyDebug} currentMetrics={currentMetrics} isLoading={isLoading} />
@@ -1259,7 +1217,7 @@ function EtfReportView({
           {/* Active section content */}
           {active && (
             <div className="border border-border border-t-0 px-4 pt-3 pb-5 analysis-content">
-              {active === "Resumen Ejecutivo" && <InstrumentPriceChart ticker={ticker} />}
+              {active === "Resumen Ejecutivo" && <><InstrumentPriceChart ticker={ticker} /><div className="mb-5"><AssetInsightsPanel symbol={ticker}/></div></>}
               {active === "Valoración" && etfDeep?.found === true && <EtfFundamentalsTable data={etfDeep} />}
               {active === "ETF" && etfDeep?.found === true && <EtfSubSection data={etfDeep} />}
               {active === "Sector" && etfDeep?.found === true && <EtfSectorSubSection data={etfDeep} />}

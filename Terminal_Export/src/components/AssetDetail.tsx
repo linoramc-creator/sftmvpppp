@@ -1,6 +1,7 @@
 import AssetContext from './AssetContext';
-import AssetCandles from './AssetCandles';
+import {InstrumentPriceChart} from './charts/InstrumentPriceChart';
 import AssetOverview from './AssetOverview';
+import AssetInsightsPanel from './AssetInsightsPanel';
 import AssetSession from './AssetSession';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,RefreshCw} from 'lucide-react';
@@ -43,8 +44,9 @@ export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{s
     <AssetOverview symbol={symbol} data={data} busy={busy} onAnalyze={()=>onAnalyze(symbol,data?.instrument?.kind)}/>
     {data&&<AssetSession data={data}/>}
     {error&&<div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/5 px-5 py-4 text-sm text-rose-300">{error}<button type="button" disabled={busy} className="text-xs font-medium underline underline-offset-4" onClick={()=>setRevision(n=>n+1)}>Reintentar</button></div>}
-    {data?<AssetCandles key={symbol} data={data}/>:busy&&<section aria-label="Cargando gráfico" role="status" className="rounded-xl border border-slate-700/40 bg-[#0b1017] px-5 py-6"><div className="flex justify-between gap-6"><div className="h-3 w-32 rounded bg-slate-700/40 motion-safe:animate-pulse"/><div className="h-6 w-48 rounded bg-slate-700/25 motion-safe:animate-pulse"/></div><div className="mt-6 h-64 rounded-lg border border-slate-800/60 bg-slate-900/25 motion-safe:animate-pulse"/><p className="mt-4 text-xs text-slate-400">Cargando cotización, velas y noticias recientes…</p></section>}
+    <InstrumentPriceChart key={symbol+'chart'} ticker={symbol}/>
     <AssetContext key={symbol+'context'} symbol={symbol}/>
+    <AssetInsightsPanel key={symbol+'insights'} symbol={symbol}/>
     {data&&<><section className="overflow-hidden rounded-xl border border-slate-700/40 bg-[#0b1017] p-4 sm:p-5"><div className="mb-4 flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-sm font-semibold text-slate-200">Noticias del activo <span className="ml-2 text-xs font-normal text-slate-500">Últimas 24 horas</span></h2><span className="text-[11px] text-slate-500">{data.news.length} {data.news.length===1?'artículo':'artículos'}</span></div>{data.news.length?<NewsCards articles={data.news} compact/>:<p className="py-6 text-sm leading-relaxed text-slate-400">No hay noticias relevantes con hora de publicación verificable en las últimas 24 horas.</p>}</section><p className="px-1 text-[10px] leading-relaxed text-slate-500">Actualizado: {new Date(data.fetchedAt).toLocaleString('es-ES')} · Las cotizaciones pueden tener retraso.</p></>}
   </main>;
 }
