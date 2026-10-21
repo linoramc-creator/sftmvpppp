@@ -53,7 +53,8 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
     if(body.panel==='feedMarkets'&&(body.feedGroups===null||!normalizeFeedPreferences(body.feedGroups)))throw new BetaError(400,'Configuración de mercado inválida.');
-    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','bondsCreditNews','sectorActivity','news','institutional','business','assetSnapshot','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','bondsCreditNews','issuerResearch','sectorActivity','news','institutional','business','assetSnapshot','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='issuerResearch'){if(!symbol(body.subject))throw new BetaError(400,'Ticker inválido.');return {request_class:'expensive'};}
     if(body.panel==='bondsCreditNews'){
       if(!['US','FR','DE','GB','private'].includes(body.subject))throw new BetaError(400,'Mercado de noticias inválido.');
       return {request_class:'expensive'};
@@ -169,7 +170,7 @@ async function account(body: Body,user: User): Promise<Response> {
     default:throw new BetaError(400,'Operación inválida.');
   }
 }
-const cacheKey=(kind:string,subject:string)=>`v5:${kind}:${subject.trim().toUpperCase()}`;
+const cacheKey=(kind:string,subject:string)=>`v6:${kind}:${subject.trim().toUpperCase()}`;
 export async function readSharedReport(kind:string,subject:string):Promise<any|null>{
   try{const rows=await service(`beta_analysis_cache?cache_key=eq.${encodeURIComponent(cacheKey(kind,subject))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=payload&limit=1`);return rows[0]?.payload??null;}catch{return null;}
 }

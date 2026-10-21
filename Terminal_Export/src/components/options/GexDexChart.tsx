@@ -35,6 +35,7 @@ export function GexDexChart({ data }: { data: AggregationsResponse }) {
           {(Object.keys(META) as Metric[]).map((m) => (
             <button
               key={m}
+              aria-pressed={metric===m}
               onClick={() => setMetric(m)}
               className={`px-3 py-1 text-[10px] tracking-widest border transition-colors ${
                 metric === m
@@ -52,19 +53,19 @@ export function GexDexChart({ data }: { data: AggregationsResponse }) {
           </span>
         </div>
       </div>
-      <div className="text-[9px] text-muted-foreground/40 mb-1">{META[metric].help}</div>
+      <div className="text-[9px] text-muted-foreground/70 mb-1">{META[metric].help}</div>
 
-      <div style={{ width: "100%", height: 360, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2, padding: "8px 6px" }}>
+      <div style={{ width: "100%", height: 360, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12, padding: "12px 8px" }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
             <XAxis
               dataKey="strike"
               type="number"
               domain={["dataMin", "dataMax"]}
               stroke={OPT_COLORS.axis}
               tickLine={false}
-              tickFormatter={(v) => fmtPrice(v, 0)}
+              tickFormatter={(v) => fmtPrice(v, Math.abs(v)<10?2:1)}
               style={{ fontSize: "10px" }}
             />
             <YAxis
@@ -77,8 +78,8 @@ export function GexDexChart({ data }: { data: AggregationsResponse }) {
             <Tooltip
               contentStyle={ttStyle}
               formatter={(v: number) => [fmtCompactUsd(v), META[metric].label]}
-              labelFormatter={(k) => `Strike ${fmtPrice(k as number, 0)}`}
-              cursor={{ fill: "rgba(148,163,184,0.06)" }}
+              labelFormatter={(k) => `Strike ${fmtPrice(k as number, 2)}`}
+              cursor={false}
             />
             <ReferenceLine y={0} stroke={OPT_COLORS.gridStrong} />
             <ReferenceLine
@@ -95,7 +96,7 @@ export function GexDexChart({ data }: { data: AggregationsResponse }) {
                 label={{ value: `γ-flip ${fmtPrice(data.gammaFlip, 1)}`, position: "insideTopRight", fill: OPT_COLORS.flip, fontSize: 9 }}
               />
             )}
-            <Bar dataKey="value" isAnimationActive={false}>
+            <Bar maxBarSize={24} dataKey="value" isAnimationActive={false}>
               {rows.map((r, i) => (
                 <Cell key={i} fill={r.value >= 0 ? OPT_COLORS.call : OPT_COLORS.put} />
               ))}

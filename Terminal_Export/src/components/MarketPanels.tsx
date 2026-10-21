@@ -1,5 +1,6 @@
 import {usePanelActive} from './KeepPanel';
 import { WatchlistCard } from "./WatchlistCard";
+import IssuerResearchView from './IssuerResearchView';
 import {FeedGroupEditor} from './FeedGroupEditor';
 import {useProfile} from './AuthGate';
 import {useFeedPreferences} from '@/hooks/use-feed-preferences';
@@ -171,7 +172,7 @@ export function InstitutionalView({ ticker }: { ticker: string }) {
   if (!state.data) return <Status {...state} />;
   const data = state.data;
   const opinions = data.opinions ?? [];
-  return <div className="space-y-5 py-3">{state.error && <Status {...state} />}
+  return <div className="space-y-5 py-3">{state.error && <Status {...state} />}<IssuerResearchView ticker={ticker} mode="stock"/>
     <div className="grid sm:grid-cols-2 gap-4"><Box title="PRECIO ACTUAL"><p className="text-2xl">{fmt(data.currentPrice)} {data.currency}</p></Box>{data.consensusTarget !== null && <Box title="PRECIO OBJETIVO · CONSENSO"><p className="text-2xl">{fmt(data.consensusTarget)} {data.currency}</p></Box>}</div>
     <Box title="OPINIÓN DE BANCOS Y ENTIDADES DE ANÁLISIS">{opinions.length ? <div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead><tr>{['Institución', 'Recomendación', 'Revisión', 'Precio objetivo', 'Fecha del objetivo', 'Fecha de opinión'].map(h => <th key={h} className="p-3 whitespace-nowrap">{h}</th>)}</tr></thead><tbody>{opinions.map((o, i) => <tr key={o.institution + i} className="border-t border-border"><td className="p-3 font-semibold">{o.institution}</td><td className={'p-3 ' + (o.recommendation === 'Comprar' ? 'text-emerald-400' : o.recommendation === 'Vender' ? 'text-red-400' : 'text-amber-300')}><div>{o.recommendation}</div>{o.originalRating && <div className="text-xs text-muted-foreground">{o.originalRating}</div>}</td><td className="p-3">{o.action}</td><td className="p-3 whitespace-nowrap">{o.target === null ? 'No publicado' : fmt(o.target) + ' ' + o.currency}{o.previousTarget !== null && <div className="text-xs text-muted-foreground">Anterior: {fmt(o.previousTarget)}</div>}</td><td className="p-3 whitespace-nowrap">{o.targetDate ?? '—'}</td><td className="p-3 whitespace-nowrap">{o.date}</td></tr>)}</tbody></table></div> : <p className="text-sm">No hay recomendaciones o precios objetivo publicados disponibles para este {data.isEtf ? 'ETF' : 'activo'} en el último año.</p>}<p className="text-xs text-muted-foreground mt-3">Las recomendaciones expresan la opinión de cada entidad; no representan operaciones ejecutadas ni garantizan alcanzar un precio.</p></Box><Stamp at={data.fetchedAt} /></div>;
 }

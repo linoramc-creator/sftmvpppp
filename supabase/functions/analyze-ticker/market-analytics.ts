@@ -1,11 +1,12 @@
 import { cached } from './panels.ts';
+import {marketJson} from './eodhd-market-fetch.ts';
 type Row = Record<string, any>;
 export type PriceSeries = {symbol:string; currency:string; dates:string[]; closes:number[]; volumes:(number|null)[]; raw:number[]};
 const mean=(xs:number[])=>xs.reduce((s,x)=>s+x,0)/xs.length;
 export function stdev(xs:number[]):number|null { if(xs.length<2)return null;const m=mean(xs);return Math.sqrt(xs.reduce((s,x)=>s+(x-m)**2,0)/(xs.length-1)); }
 export function pearson(x:number[],y:number[]):number|null {if(x.length<3||x.length!==y.length)return null;const a=mean(x),b=mean(y);const dx=x.reduce((s,v)=>s+(v-a)**2,0),dy=y.reduce((s,v)=>s+(v-b)**2,0);return dx>0&&dy>0?Math.max(-1,Math.min(1,x.reduce((s,v,i)=>s+(v-a)*(y[i]-b),0)/Math.sqrt(dx*dy))):null;}
 export function risk(prices:number[]) {const returns=prices.slice(1).map((v,i)=>v/prices[i]-1);let peak=prices[0],maxDrawdown=0;const drawdown=prices.map(v=>{peak=Math.max(peak,v);const dd=(v/peak-1)*100;maxDrawdown=Math.min(maxDrawdown,dd);return dd;});const sd=stdev(returns);return {returns,drawdown,maxDrawdown:prices.length>1?maxDrawdown:null,volatility:returns.length>=20&&sd!==null?sd*Math.sqrt(252)*100:null,totalReturn:prices.length>1?(prices.at(-1)!/prices[0]-1)*100:null};}
-async function get(url:string):Promise<any>{try{const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});return r.ok?await r.json():null;}catch{return null;}}
+async function get(url:string):Promise<any>{return marketJson(url,{headers:{'User-Agent':'Mozilla/5.0'}},{timeoutMs:10000});}
 export async function prices(symbol:string,range:string):Promise<PriceSeries|null>{return cached(`analytics-v3:${symbol}:${range}`,300000,async()=>{
   const raw=await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d`);const chart=raw?.chart?.result?.[0];if(!chart)return null;
   const close=chart.indicators?.quote?.[0]?.close??[],adj=chart.indicators?.adjclose?.[0]?.adjclose;

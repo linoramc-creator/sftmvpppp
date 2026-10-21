@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart,
@@ -8,6 +8,7 @@ import {
 import { fetchRiskData, isRiskConfigured, RiskApiError } from "@/lib/risk-api";
 import type { RiskResponse } from "@/types/risk";
 import { OPT_COLORS, ttStyle } from "@/components/options/theme";
+import {chartDateLabel,visibleDatedRows} from '@/lib/financial-chart-data';
 
 const fmtDate = (s: string) => {
   const d = new Date(s + "T00:00:00Z");
@@ -21,8 +22,8 @@ const chartBox = {
   height: 280,
   backgroundColor: OPT_COLORS.bg,
   border: "1px solid #1e293b",
-  borderRadius: 2,
-  padding: "8px 6px",
+  borderRadius: 12,
+  padding: "12px 8px",
 } as const;
 
 // ── Shared scaffolding ─────────────────────────────────────────────────
@@ -37,7 +38,7 @@ function ChartBlock({
   return (
     <div>
       <div className="text-[10px] tracking-widest text-foreground font-semibold mb-1">{title}</div>
-      <div className="text-[9px] text-muted-foreground/40 mb-1.5">{subtitle}</div>
+      <div className="text-[9px] text-muted-foreground/70 mb-1.5">{subtitle}</div>
       {children}
     </div>
   );
@@ -63,33 +64,35 @@ function StatChip({ label, value, tone = "neutral" }: { label: string; value: st
 // ── 1. Drawdown histórico (underwater) ────────────────────────────────
 
 function DrawdownChart({ data }: { data: NonNullable<RiskResponse["drawdown"]> }) {
-  const rows = data.points.map((p) => ({ date: p.date, dd: p.drawdown * 100 }));
+  const[days,setDays]=useState<number|null>(null),gradient='drawdown-'+useId().replace(/:/g,'');
+  const rows = visibleDatedRows(data.points,days).map((p) => ({ date: p.date, dd: typeof p.drawdown==='number'&&Number.isFinite(p.drawdown)?p.drawdown*100:null }));
   return (
     <div>
       <div className="flex gap-4 mb-1.5 flex-wrap">
         <StatChip label="Drawdown actual" value={`${(data.current * 100).toFixed(1)}%`} tone={data.current < -0.05 ? "neg" : "neutral"} />
-        <StatChip label="Máx. drawdown" value={`${(data.maxDrawdown * 100).toFixed(1)}%`} tone="neg" />
+        <StatChip label="Máximo del histórico" value={`${(data.maxDrawdown * 100).toFixed(1)}%`} tone="neg" />
       </div>
+      <div role="group" aria-label="Período del drawdown" className="mb-3 flex flex-wrap gap-1">{[{label:'1 año',days:365},{label:'3 años',days:1095},{label:'5 años',days:1825},{label:'Todo',days:null}].map(option=><button key={option.label} aria-pressed={days===option.days} onClick={()=>setDays(option.days)} className={`rounded-md border px-2.5 py-1.5 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 ${days===option.days?'border-blue-400/30 bg-blue-400/10 text-blue-300':'border-slate-700/50 text-slate-400 hover:text-slate-200'}`}>{option.label}</button>)}</div>
       <div style={chartBox}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
             <defs>
-              <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={OPT_COLORS.put} stopOpacity={0.05} />
                 <stop offset="100%" stopColor={OPT_COLORS.put} stopOpacity={0.4} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
             <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={48} style={{ fontSize: "10px" }} />
             <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => `${v.toFixed(0)}%`} width={42} domain={["auto", 0]} style={{ fontSize: "10px" }} />
             <Tooltip
               contentStyle={ttStyle}
               formatter={(v: number) => [`${v.toFixed(1)}%`, "Drawdown"]}
-              labelFormatter={(s) => fmtDate(s as string)}
-              cursor={{ stroke: OPT_COLORS.gridStrong }}
+              labelFormatter={(s) => chartDateLabel(String(s),true)}
+              cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
             />
             <ReferenceLine y={0} stroke={OPT_COLORS.gridStrong} />
-            <Area type="monotone" dataKey="dd" stroke={OPT_COLORS.put} strokeWidth={1.5} fill="url(#ddGrad)" dot={false} isAnimationActive={false} />
+            <Area type="linear" dataKey="dd" stroke={OPT_COLORS.put} strokeWidth={1.5} fill={`url(#${gradient})`} dot={false} connectNulls={false} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -114,17 +117,17 @@ function RefugeChart({ data }: { data: NonNullable<RiskResponse["refuge"]> }) {
       <div style={chartBox}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
             <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={48} style={{ fontSize: "10px" }} />
             <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => v.toFixed(1)} width={38} domain={[-1, 1]} style={{ fontSize: "10px" }} />
             <Tooltip
               contentStyle={ttStyle}
               formatter={(v: number) => [v.toFixed(2), "Correlación 60d"]}
-              labelFormatter={(s) => fmtDate(s as string)}
-              cursor={{ stroke: OPT_COLORS.gridStrong }}
+              labelFormatter={(s) => chartDateLabel(String(s),true)}
+              cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
             />
             <ReferenceLine y={0} stroke={OPT_COLORS.gridStrong} strokeDasharray="4 3" />
-            <Line type="monotone" dataKey="corr" stroke={OPT_COLORS.term} strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="linear" dataKey="corr" stroke={OPT_COLORS.term} strokeWidth={2} dot={false} connectNulls={false} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -139,25 +142,26 @@ const VIX_THRESHOLD = 25;
 // Compact VIX level strip: where the 25 threshold actually sat over the last
 // two years — the "regime band" that contextualises the histogram below.
 function VixLevelStrip({ series }: { series: { date: string; vix: number }[] }) {
+  const gradient='vix-'+useId().replace(/:/g,'');
   const maxVix = Math.max(...series.map((p) => p.vix), VIX_THRESHOLD + 5);
   return (
     <div style={{ ...chartBox, height: 120, marginBottom: 8 }}>
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={series} margin={{ top: 6, right: 12, left: 0, bottom: 0 }}>
           <defs>
-            <linearGradient id="vixStripGrad" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={OPT_COLORS.term} stopOpacity={0.3} />
               <stop offset="100%" stopColor={OPT_COLORS.term} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+          <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
           <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={56} style={{ fontSize: "9px" }} />
           <YAxis stroke={OPT_COLORS.axis} tickLine={false} width={30} domain={[0, Math.ceil(maxVix / 10) * 10]} style={{ fontSize: "9px" }} />
           <Tooltip
             contentStyle={ttStyle}
             formatter={(v: number) => [v.toFixed(1), "VIX"]}
-            labelFormatter={(s) => fmtDate(s as string)}
-            cursor={{ stroke: OPT_COLORS.gridStrong }}
+            labelFormatter={(s) => chartDateLabel(String(s),true)}
+            cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
           />
           <ReferenceLine
             y={VIX_THRESHOLD}
@@ -165,7 +169,7 @@ function VixLevelStrip({ series }: { series: { date: string; vix: number }[] }) 
             strokeDasharray="5 3"
             label={{ value: `Umbral pánico ${VIX_THRESHOLD}`, position: "insideTopRight", fill: OPT_COLORS.flip, fontSize: 9 }}
           />
-          <Area type="monotone" dataKey="vix" stroke={OPT_COLORS.term} strokeWidth={1.5} fill="url(#vixStripGrad)" dot={false} isAnimationActive={false} />
+          <Area type="linear" dataKey="vix" stroke={OPT_COLORS.term} strokeWidth={1.5} fill={`url(#${gradient})`} dot={false} connectNulls={false} isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -200,7 +204,7 @@ function VixRegimeChart({ data }: { data: NonNullable<RiskResponse["vixRegime"]>
       <div style={{ ...chartBox, height: 300 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={bins} margin={{ top: 8, right: 12, left: 8, bottom: 18 }} barGap={0} barCategoryGap="10%">
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
             <XAxis
               dataKey="ret" type="number" domain={["dataMin", "dataMax"]}
               stroke={OPT_COLORS.axis} tickLine={false}
@@ -216,7 +220,7 @@ function VixRegimeChart({ data }: { data: NonNullable<RiskResponse["vixRegime"]>
               contentStyle={ttStyle}
               formatter={(v: number, name) => [`${v.toFixed(1)}% de las sesiones`, name === "calm" ? "Calma (VIX≤25)" : "Pánico (VIX>25)"]}
               labelFormatter={(k) => `Retorno diario ≈ ${Number(k) >= 0 ? "+" : ""}${k}%`}
-              cursor={{ fill: "rgba(148,163,184,0.06)" }}
+              cursor={false}
             />
             <ReferenceLine x={0} stroke={OPT_COLORS.gridStrong} strokeDasharray="4 3" />
             {data.calmMean != null && (
@@ -235,8 +239,8 @@ function VixRegimeChart({ data }: { data: NonNullable<RiskResponse["vixRegime"]>
                 label={{ value: "μ pánico", position: "top", fill: OPT_COLORS.put, fontSize: 9 }}
               />
             )}
-            <Bar dataKey="calm" fill={OPT_COLORS.call} fillOpacity={0.8} isAnimationActive={false} />
-            <Bar dataKey="panic" fill={OPT_COLORS.put} fillOpacity={0.8} isAnimationActive={false} />
+            <Bar maxBarSize={24} dataKey="calm" fill={OPT_COLORS.call} fillOpacity={0.8} isAnimationActive={false} />
+            <Bar maxBarSize={24} dataKey="panic" fill={OPT_COLORS.put} fillOpacity={0.8} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -261,6 +265,7 @@ function VixRegimeChart({ data }: { data: NonNullable<RiskResponse["vixRegime"]>
 // ── 4. Sensibilidad al petróleo (beta OLS vs Brent) ───────────────────
 
 function OilBetaChart({ data }: { data: NonNullable<RiskResponse["oilBeta"]> }) {
+  if(!data.points.length)return <EmptyBlock text="No hay observaciones alineadas suficientes para representar esta relación."/>;
   const xs = data.points.map((p) => p.x);
   const xMin = Math.min(...xs), xMax = Math.max(...xs);
   const lineStart = { x: xMin, y: data.alpha + data.beta * xMin };
@@ -276,7 +281,7 @@ function OilBetaChart({ data }: { data: NonNullable<RiskResponse["oilBeta"]> }) 
       <div style={chartBox}>
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" stroke={OPT_COLORS.grid} />
             <XAxis
               type="number" dataKey="x" name="Brent"
               stroke={OPT_COLORS.axis} tickLine={false}
@@ -300,8 +305,8 @@ function OilBetaChart({ data }: { data: NonNullable<RiskResponse["oilBeta"]> }) 
         </ResponsiveContainer>
       </div>
       {weak && (
-        <div className="text-[9px] text-muted-foreground/40 mt-1 px-1">
-          R² muy bajo: la relación con el petróleo no es estadísticamente relevante para este activo.
+        <div className="text-[9px] text-muted-foreground/70 mt-1 px-1">
+          R² inferior a 0,05: el petróleo explica una proporción reducida de los retornos observados en esta muestra.
         </div>
       )}
     </div>

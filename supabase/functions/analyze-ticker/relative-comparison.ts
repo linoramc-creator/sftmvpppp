@@ -3,6 +3,7 @@ import {institutions,pearson,stdev,type PriceSeries} from './market-analytics.ts
 import {evidenceJson} from './report-models.ts';
 import {readRelativeCache,writeRelativeCache} from './relative-cache.ts';
 import {regularSessionEnd} from './market-session.ts';
+import {marketJson} from './eodhd-market-fetch.ts';
 
 type Row=Record<string,any>;
 export type RelativeAsset={symbol:string;name:string;kind:'stock'|'etf'|'index'|'future'|'other';currency:string;asOf:string|null;price:number|null;return20:number|null;return63:number|null;volatility20:number|null;drawdown:number|null;avgTurnover20:number|null;relativeVolume:number|null;upVolumeShare20:number|null;aboveSma50:boolean|null;aboveSma200:boolean|null;valuation:{pe:number|null;pb:number|null};institutions:{status:'available'|'unavailable'|'not-applicable';period:string|null;previousPeriod:string|null;shares:number|null;sharesChangePct:number|null;investors:number|null;ownershipPct:number|null;reason:string};options:{status:'available'|'unavailable'|'not-applicable';expiry:string|null;asOf:string|null;contracts:number;callVolume:number|null;putVolume:number|null;putCallVolume:number|null;putCallOi:number|null;atmIv:number|null;volumeSample?:{callVolume:number|null;putVolume:number|null;callContracts:number;putContracts:number;totalCalls:number;totalPuts:number};reason:string};fundFlows:{status:'available'|'unavailable'|'not-applicable';value:number|null;period:string|null;reason:string}};
@@ -39,7 +40,7 @@ export function normalizeRelativeHistory(symbol:string,raw:any,now=Date.now()):H
  return {symbol,kind:assetKind,currency:c.meta?.currency??'',dates:values.map(r=>r.date),closes:values.map(r=>r.close),raw:values.map(r=>r.raw),volumes:values.map(r=>assetKind==='index'?null:r.volume)};
 }
 async function history(symbol:string):Promise<History|null>{return cached('relative-history-v1:'+symbol,300000,async()=>{
- try{const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error',signal:AbortSignal.timeout(9000)});return r.ok?normalizeRelativeHistory(symbol,await r.json()):null;}catch{return null;}
+ const raw=await marketJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error'},{timeoutMs:9000,acceptPrimary:value=>normalizeRelativeHistory(symbol,value)!==null});return normalizeRelativeHistory(symbol,raw);
 });}
 export {history as relativeHistory};
 const change=(p:number[],n:number)=>p.length>n?(p.at(-1)!/p[p.length-1-n]-1)*100:null;

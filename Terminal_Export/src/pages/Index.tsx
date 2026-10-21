@@ -134,7 +134,7 @@ function allND(values: string[]) { return values.every((v) => ND_VALUES.has(v));
 // gracefully skip missing points instead of plotting as 0.
 function parseMoney(s: string | undefined | null): number | null {
   if (!s || ND_VALUES.has(s)) return null;
-  const m = s.match(/^(-?)\$?(-?)([\d,]+(?:\.\d+)?)([BMK]?)$/);
+  const m = s.match(/^(-?)[$€£]?(-?)([\d,]+(?:\.\d+)?)([BMK]?)$/);
   if (!m) return null;
   const sign = (m[1] === "-" || m[2] === "-") ? -1 : 1;
   const num = parseFloat(m[3].replace(/,/g, ""));
@@ -160,9 +160,9 @@ function buildIncomeChartData(data: QuarterlyPeriod[]): IncomeData[] {
   return [...data]
     .reverse()
     .map((q) => {
-      const revenue = parseMoney(q.revenue);
-      const ebitda = parseMoney(q.ebitda);
-      const netIncome = parseMoney(q.netIncome);
+      const revenue = q.numeric?.revenue??parseMoney(q.revenue);
+      const ebitda = q.numeric?.ebitda??parseMoney(q.ebitda);
+      const netIncome = q.numeric?.netIncome??parseMoney(q.netIncome);
       if (revenue == null && ebitda == null && netIncome == null) return null;
       return { period: fmtPeriod(q.period), revenue, ebitda, netIncome };
     })
@@ -173,9 +173,9 @@ function buildCashFlowChartData(data: QuarterlyPeriod[]): CashFlowData[] {
   return [...data]
     .reverse()
     .map((q) => {
-      const operating = parseMoney(q.operatingCF);
-      const capex = parseMoney(q.capex);
-      const fcf = parseMoney(q.freeCashFlow);
+      const operating = q.numeric?.operatingCF??parseMoney(q.operatingCF);
+      const capex = q.numeric?.capex??parseMoney(q.capex);
+      const fcf = q.numeric?.freeCashFlow??parseMoney(q.freeCashFlow);
       if (operating == null && capex == null && fcf == null) return null;
       return { period: fmtPeriod(q.period), operating, capex, fcf };
     })
@@ -186,10 +186,10 @@ function buildBalanceChartData(data: QuarterlyPeriod[]): BalanceData[] {
   return [...data]
     .reverse()
     .map((q) => {
-      const totalAssets = parseMoney(q.totalAssets);
-      const cash = parseMoney(q.cash);
-      const totalDebt = parseMoney(q.totalDebt);
-      const equity = parseMoney(q.equity);
+      const totalAssets = q.numeric?.totalAssets??parseMoney(q.totalAssets);
+      const cash = q.numeric?.cash??parseMoney(q.cash);
+      const totalDebt = q.numeric?.totalDebt??parseMoney(q.totalDebt);
+      const equity = q.numeric?.equity??parseMoney(q.equity);
       if (totalAssets == null && cash == null && totalDebt == null && equity == null) return null;
       return { period: fmtPeriod(q.period), totalAssets, cash, totalDebt, equity };
     })
@@ -622,7 +622,7 @@ const Index = () => {
           <div className="col-start-2 row-start-1 hidden items-center gap-3 justify-self-end whitespace-nowrap text-[10px] text-muted-foreground/50 tabular-nums sm:flex xl:col-start-3">
             <span className="hidden text-white/50 tracking-widest 2xl:inline">MKT</span>
             <span className="hidden text-white/70 2xl:inline">·</span>
-            <span className="hidden text-white/70 tracking-widest 2xl:inline">LIVE</span>
+            <span className="hidden text-white/70 tracking-widest 2xl:inline">MERCADOS</span>
             <span className="hidden text-white/70 2xl:inline">·</span>
             <span><TerminalClock /></span>
           </div>
@@ -1006,7 +1006,7 @@ function MarketTickerBar({
             <div key={idx.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
               <span className="text-[9px] tracking-widest text-muted-foreground/45 uppercase">{idx.label}</span>
               <span className="text-[11px] tabular-nums text-foreground/80">
-                {idx.price != null ? `$${idx.price.toFixed(2)}` : "—"}
+                {idx.price != null ? `${idx.price.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})} ${idx.unit==='points'||idx.symbol.startsWith('^')?'pts':idx.currency??''}` : "—"}
               </span>
               {fmtChange(idx.change1d) && (
                 <span className={`text-[10px] tabular-nums ${cls(idx.change1d)}`}>{fmtChange(idx.change1d)}</span>
@@ -1044,7 +1044,7 @@ function MarketTickerBar({
             <div key={s.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
               <span className="text-[9px] tracking-widest text-muted-foreground/45">{s.symbol}</span>
               <span className="text-[11px] tabular-nums text-foreground/80">
-                {s.price != null ? `$${s.price.toFixed(2)}` : "—"}
+                {s.price != null ? `${s.price.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})} ${s.unit==='points'?'pts':s.currency??''}` : "—"}
               </span>
               {fmtChange(s.change1d) && (
                 <span className={`text-[10px] tabular-nums ${cls(s.change1d)}`}>{fmtChange(s.change1d)}</span>
@@ -1438,9 +1438,11 @@ function QuarterlyHistorySection({
     );
   }
 
-  const incomeData   = buildIncomeChartData(data);
-  const cashFlowData = buildCashFlowChartData(data);
-  const balanceData  = buildBalanceChartData(data);
+  const reportingCurrency=data.find(q=>q.currency)?.currency??'USD';
+  const comparableData=data.filter(q=>!q.currency||q.currency===reportingCurrency);
+  const incomeData   = buildIncomeChartData(comparableData);
+  const cashFlowData = buildCashFlowChartData(comparableData);
+  const balanceData  = buildBalanceChartData(comparableData);
   const marginsData  = buildMarginsChartData(data);
   const growthData   = buildGrowthChartData(data);
 
@@ -1458,17 +1460,17 @@ function QuarterlyHistorySection({
   const chartFor = (t: QTab): { rows: { data: any[]; render: () => JSX.Element } | null; emptyMsg: string } => {
     if (t === "income") {
       return incomeData.length > 0
-        ? { rows: { data: incomeData, render: () => <IncomeChart data={incomeData} /> }, emptyMsg: "" }
+        ? { rows: { data: incomeData, render: () => <IncomeChart data={incomeData} currency={reportingCurrency} /> }, emptyMsg: "" }
         : { rows: null, emptyMsg: "Sin datos de P&L disponibles." };
     }
     if (t === "cashflow") {
       return cashFlowData.length > 0
-        ? { rows: { data: cashFlowData, render: () => <CashFlowChart data={cashFlowData} /> }, emptyMsg: "" }
+        ? { rows: { data: cashFlowData, render: () => <CashFlowChart data={cashFlowData} currency={reportingCurrency} /> }, emptyMsg: "" }
         : { rows: null, emptyMsg: "Sin datos de Cash Flow disponibles." };
     }
     if (t === "balance") {
       return balanceData.length > 0
-        ? { rows: { data: balanceData, render: () => <BalanceChart data={balanceData} /> }, emptyMsg: "" }
+        ? { rows: { data: balanceData, render: () => <BalanceChart data={balanceData} currency={reportingCurrency} /> }, emptyMsg: "" }
         : { rows: null, emptyMsg: "Sin datos de Balance Sheet disponibles." };
     }
     if (t === "margins") {

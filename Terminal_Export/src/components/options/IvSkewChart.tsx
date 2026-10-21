@@ -18,20 +18,20 @@ export function IvSkewChart({ data }: { data: SkewResponse }) {
 
   return (
     <div>
-      <div className="text-[9px] text-muted-foreground/40 mb-1">
+      <div className="text-[9px] text-muted-foreground/70 mb-1">
         Volatilidad implícita por strike · {data.expiry} · sonrisa OTM en violeta
       </div>
-      <div style={{ width: "100%", height: 340, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2, padding: "10px 6px" }}>
+      <div style={{ width: "100%", height: 340, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12, padding: "12px 8px" }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 14, right: 12, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
             <XAxis
               dataKey="strike"
               type="number"
               domain={["dataMin", "dataMax"]}
               stroke={OPT_COLORS.axis}
               tickLine={false}
-              tickFormatter={(v) => fmtPrice(v, 0)}
+              tickFormatter={(v) => fmtPrice(v, Math.abs(v)<10?2:1)}
               style={{ fontSize: "10px" }}
             />
             <YAxis
@@ -44,8 +44,8 @@ export function IvSkewChart({ data }: { data: SkewResponse }) {
             <Tooltip
               contentStyle={ttStyle}
               formatter={(v: number, name) => [v == null ? "—" : `${v.toFixed(1)}%`, name]}
-              labelFormatter={(k) => `Strike ${fmtPrice(k as number, 0)}`}
-              cursor={{ stroke: OPT_COLORS.gridStrong }}
+              labelFormatter={(k) => `Strike ${fmtPrice(k as number, 2)}`}
+              cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
             />
             <ReferenceLine
               x={data.spot}
@@ -53,9 +53,9 @@ export function IvSkewChart({ data }: { data: SkewResponse }) {
               strokeDasharray="4 3"
               label={{ value: "Spot", position: "top", fill: OPT_COLORS.spot, fontSize: 9 }}
             />
-            <Line type="monotone" dataKey="smile" name="Smile OTM" stroke={OPT_COLORS.smile} strokeWidth={2.5} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="callIV" name="Call IV" stroke={OPT_COLORS.call} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} strokeOpacity={0.7} />
-            <Line type="monotone" dataKey="putIV" name="Put IV" stroke={OPT_COLORS.put} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} strokeOpacity={0.7} />
+            <Line type="linear" dataKey="smile" name="Smile OTM" stroke={OPT_COLORS.smile} strokeWidth={2.5} dot={false} connectNulls={false} isAnimationActive={false} />
+            <Line type="linear" dataKey="callIV" name="Call IV" stroke={OPT_COLORS.call} strokeWidth={1.5} dot={false} connectNulls={false} isAnimationActive={false} strokeOpacity={0.7} />
+            <Line type="linear" dataKey="putIV" name="Put IV" stroke={OPT_COLORS.put} strokeWidth={1.5} dot={false} connectNulls={false} isAnimationActive={false} strokeOpacity={0.7} />
           </LineChart>
         </ResponsiveContainer>
       </div>

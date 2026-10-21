@@ -13,7 +13,7 @@ test('normalizes bounded preferences without mutating default arrays or acceptin
 });
 test('market cache identifies the ordered public selection in a bounded key',async()=>{
  const defaults=defaultFeedPreferences(),first=await feedPreferencesKey(['AAPL'],defaults);
- assert.match(first,/^feed-markets-v8:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
+ assert.match(first,/^feed-markets-v9:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
  assert.notEqual(first,await feedPreferencesKey(['MSFT'],defaults));
  assert.notEqual(first,await feedPreferencesKey(['AAPL'],{...defaults,indices:[...defaults.indices].reverse()}));
 });

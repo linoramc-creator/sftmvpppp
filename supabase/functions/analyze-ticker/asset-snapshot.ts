@@ -5,6 +5,7 @@ import {photoUrl,articleCover} from './news-covers.ts';
 import {newsAccess} from './news-access.ts';
 import {summarizeNews} from './news-summary-ai.ts';
 import {instrumentInfo,sessionStats,indexDescription,type InstrumentInfo,type SessionStats} from './asset-instrument.ts';
+import {marketJson} from './eodhd-market-fetch.ts';
 export type Candle={time:number;open:number;high:number;low:number;close:number;volume:number|null;partial?:boolean};
 export type CandleInterval='1h'|'4h'|'1d'|'1w';
 export type CandleSeries={candles:Candle[];timezone:string;session:string};
@@ -25,7 +26,7 @@ export function selectFourHourCandles(extended:Candle[],regular:Candle[]):{candl
   const useExtended=extended.length>0&&(!regular.length||extended.at(-1)!.time>=regular.at(-1)!.time);
   return {candles:useExtended?extended:regular,extended:useExtended};
 }
-async function get(url:string,headers:Record<string,string>={}){try{const r=await fetch(url,{headers,redirect:'error',signal:AbortSignal.timeout(8000)});return r.ok?await r.json():null;}catch{return null;}}
+async function get(url:string,headers:Record<string,string>={}){return marketJson(url,{headers,redirect:'error'},{timeoutMs:8000});}
 export function validCandle(c:Candle){return [c.time,c.open,c.high,c.low,c.close].every(finite)&&c.time>0&&c.time<=Date.now()+60000&&c.low>0&&c.high>=Math.max(c.open,c.close)&&c.low<=Math.min(c.open,c.close)&&c.high>=c.low;}
 export function chartCandles(chart:any,duration:number):Candle[]{
   const q=chart?.indicators?.quote?.[0];if(!q)return [];

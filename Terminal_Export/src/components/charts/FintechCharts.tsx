@@ -3,9 +3,11 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
+import {ttStyle,chartCursor} from '@/components/options/theme';
+import {formatChartMoney} from '@/lib/financial-chart-data';
 
 const C = {
-  bg:          '#0d1520',
+  bg:          '#0b131f',
   revenue:     '#3b82f6',
   ebitda:      '#818cf8',
   netIncome:   '#94a3b8',
@@ -21,37 +23,10 @@ const C = {
   growth:      '#818cf8',
 };
 
-const fmtAxis = (v: number | null): string => {
-  if (v == null) return '';
-  const abs = Math.abs(v);
-  if (abs >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `$${(v / 1e6).toFixed(0)}M`;
-  if (abs >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
-  return `$${v.toFixed(0)}`;
-};
-
 const fmtPctAxis = (v: number | null): string =>
   v == null ? '' : `${v.toFixed(0)}%`;
 
-const fmtMoney = (v: number | null): string => {
-  if (v == null) return 'N/D';
-  const abs = Math.abs(v);
-  if (abs >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(v / 1e6).toFixed(0)}M`;
-  return `$${v.toFixed(2)}`;
-};
-
-const ttStyle = {
-  backgroundColor: '#0f172a',
-  borderColor: '#1e293b',
-  borderRadius: '4px',
-  color: '#cbd5e1',
-  fontFamily: 'monospace',
-  fontSize: '11px',
-};
-
-const moneyFmt = (v: number | null, name: string): [string, string] =>
-  [fmtMoney(v), name];
+const moneyFmt = (currency?:string)=>(v:number|null,name:string):[string,string]=>[formatChartMoney(v,currency),name];
 
 const pctFmt = (v: number | null, name: string): [string, string] =>
   [v == null ? 'N/D' : `${v.toFixed(1)}%`, name];
@@ -61,18 +36,18 @@ const Frame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     width: '100%',
     height: 320,
     backgroundColor: C.bg,
-    padding: '10px 6px',
+    padding: '12px 8px',
     border: '1px solid #1e293b',
-    borderRadius: 2,
+    borderRadius: 12,
   }}>
     <ResponsiveContainer width="100%" height="100%">{children as any}</ResponsiveContainer>
   </div>
 );
 
-const Grid = <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />;
-const XA   = <XAxis dataKey="period" stroke="#475569" tickLine={false} style={{ fontSize: '10px' }} />;
-const MoneyY = <YAxis stroke="#475569" tickLine={false} tickFormatter={fmtAxis} style={{ fontSize: '10px' }} width={62} />;
-const PctY   = <YAxis stroke="#475569" tickLine={false} tickFormatter={fmtPctAxis} style={{ fontSize: '10px' }} width={38} />;
+const Grid = <CartesianGrid strokeDasharray="2 5" vertical={false} stroke="#243142" />;
+const XA   = <XAxis dataKey="period" stroke="#8190a6" axisLine={false} tickLine={false} style={{ fontSize: '10px' }} />;
+const MoneyY = (currency?:string)=><YAxis stroke="#8190a6" axisLine={false} tickLine={false} tickFormatter={value=>formatChartMoney(value,currency,true)} style={{ fontSize: '10px' }} width={82} />;
+const PctY   = <YAxis stroke="#8190a6" axisLine={false} tickLine={false} tickFormatter={fmtPctAxis} style={{ fontSize: '10px' }} width={42} />;
 const Leg  = <Legend verticalAlign="top" height={26} iconType="circle" wrapperStyle={{ fontSize: '10px', letterSpacing: '0.04em' }} />;
 const Zero = <ReferenceLine y={0} stroke="#334155" strokeWidth={1} />;
 
@@ -82,14 +57,15 @@ const adot = { r: 5 };
 const L = (key: string, name: string, color: string, extra: object = {}) => (
   <Line
     key={key}
-    type="monotone"
+    type="linear"
     dataKey={key}
     name={name}
     stroke={color}
     strokeWidth={2}
     dot={dot(color)}
     activeDot={adot}
-    connectNulls
+    connectNulls={false}
+    isAnimationActive={false}
     {...extra}
   />
 );
@@ -101,15 +77,15 @@ export interface IncomeData {
   ebitda: number | null;
   netIncome: number | null;
 }
-export const IncomeChart = ({ data }: { data: IncomeData[] }) => (
+export const IncomeChart = ({ data,currency='USD' }: { data: IncomeData[];currency?:string }) => (
   <Frame>
     <LineChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
-      {Grid}{XA}{MoneyY}
-      <Tooltip contentStyle={ttStyle} formatter={moneyFmt} cursor={{ stroke: '#334155' }} />
+      {Grid}{XA}{MoneyY(currency)}
+      <Tooltip contentStyle={ttStyle} formatter={moneyFmt(currency)} cursor={chartCursor} />
       {Leg}
-      {L('revenue',   'Revenue',    C.revenue)}
+      {L('revenue',   'Ingresos',    C.revenue)}
       {L('ebitda',    'EBITDA',     C.ebitda)}
-      {L('netIncome', 'Net Income', C.netIncome)}
+      {L('netIncome', 'Resultado neto', C.netIncome)}
     </LineChart>
   </Frame>
 );
@@ -121,15 +97,15 @@ export interface CashFlowData {
   capex: number | null;
   fcf: number | null;
 }
-export const CashFlowChart = ({ data }: { data: CashFlowData[] }) => (
+export const CashFlowChart = ({ data,currency='USD' }: { data: CashFlowData[];currency?:string }) => (
   <Frame>
     <LineChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
-      {Grid}{XA}{MoneyY}{Zero}
-      <Tooltip contentStyle={ttStyle} formatter={moneyFmt} cursor={{ stroke: '#334155' }} />
+      {Grid}{XA}{MoneyY(currency)}{Zero}
+      <Tooltip contentStyle={ttStyle} formatter={moneyFmt(currency)} cursor={chartCursor} />
       {Leg}
-      {L('operating', 'Operating CF',   C.opCF)}
+      {L('operating', 'Flujo operativo',   C.opCF)}
       {L('capex',     'CapEx',          C.capex)}
-      {L('fcf',       'Free Cash Flow', C.fcf)}
+      {L('fcf',       'Flujo de caja libre', C.fcf)}
     </LineChart>
   </Frame>
 );
@@ -142,16 +118,16 @@ export interface BalanceData {
   totalDebt: number | null;
   equity: number | null;
 }
-export const BalanceChart = ({ data }: { data: BalanceData[] }) => (
+export const BalanceChart = ({ data,currency='USD' }: { data: BalanceData[];currency?:string }) => (
   <Frame>
     <LineChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
-      {Grid}{XA}{MoneyY}
-      <Tooltip contentStyle={ttStyle} formatter={moneyFmt} cursor={{ stroke: '#334155' }} />
+      {Grid}{XA}{MoneyY(currency)}
+      <Tooltip contentStyle={ttStyle} formatter={moneyFmt(currency)} cursor={chartCursor} />
       {Leg}
-      {L('totalAssets', 'Total Assets', C.totalAssets)}
-      {L('cash',        'Cash',         C.cash)}
-      {L('totalDebt',   'Total Debt',   C.totalDebt)}
-      {L('equity',      'Equity',       C.equity)}
+      {L('totalAssets', 'Activos totales', C.totalAssets)}
+      {L('cash',        'Efectivo',         C.cash)}
+      {L('totalDebt',   'Deuda total',   C.totalDebt)}
+      {L('equity',      'Patrimonio',       C.equity)}
     </LineChart>
   </Frame>
 );
@@ -166,10 +142,10 @@ export const MarginsChart = ({ data }: { data: MarginsData[] }) => (
   <Frame>
     <LineChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
       {Grid}{XA}{PctY}{Zero}
-      <Tooltip contentStyle={ttStyle} formatter={pctFmt} cursor={{ stroke: '#334155' }} />
+      <Tooltip contentStyle={ttStyle} formatter={pctFmt} cursor={chartCursor} />
       {Leg}
-      {L('grossMargin', 'Gross Margin', C.grossMargin)}
-      {L('netMargin',   'Net Margin',   C.netMargin)}
+      {L('grossMargin', 'Margen bruto', C.grossMargin)}
+      {L('netMargin',   'Margen neto',   C.netMargin)}
     </LineChart>
   </Frame>
 );
@@ -183,7 +159,7 @@ export const GrowthChart = ({ data }: { data: GrowthData[] }) => (
   <Frame>
     <LineChart data={data} margin={{ top: 14, right: 10, left: 0, bottom: 4 }}>
       {Grid}{XA}{PctY}{Zero}
-      <Tooltip contentStyle={ttStyle} formatter={pctFmt} cursor={{ stroke: '#334155' }} />
+      <Tooltip contentStyle={ttStyle} formatter={pctFmt} cursor={chartCursor} />
       {Leg}
       {L('revenueGrowth', 'Ingresos · variación interanual (%)', C.growth, { type: 'linear', connectNulls: false })}
     </LineChart>

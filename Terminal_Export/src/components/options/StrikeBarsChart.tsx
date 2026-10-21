@@ -1,92 +1,59 @@
-import { useMemo } from "react";
+import { useMemo,useState } from "react";
 import {
   Bar, BarChart, CartesianGrid, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import type { ChainResponse, OptionContract } from "@/types/options";
+import type { ChainResponse } from "@/types/options";
 import { OPT_COLORS, ttStyle, fmtCompactNum, fmtNum, fmtPrice } from "./theme";
-
-type StrikeMetric = "volume" | "openInterest";
-
-interface StrikeRow {
-  strike: number;
-  calls: number;
-  puts: number;
-}
+import {strikeMetricRows,type StrikeMetric} from '@/lib/option-chart-data';
 
 const LABELS: Record<StrikeMetric, { title: string; tooltip: [string, string] }> = {
   volume:       { title: "Volumen por strike",          tooltip: ["Volumen calls", "Volumen puts"] },
   openInterest: { title: "Interés abierto por strike",  tooltip: ["OI calls", "OI puts"] },
 };
 
-// Side-by-side bars per strike (calls green / puts red), Moomoo-style.
-// Strikes are windowed to ±25% around spot so the chart stays readable.
+// Side-by-side real contract counts. The local window never requeries the chain.
 export function StrikeBarsChart({ data, metric }: { data: ChainResponse; metric: StrikeMetric }) {
-  const { rows, atmStrike } = useMemo(() => {
-    const byStrike = new Map<number, StrikeRow>();
-    const pick = (c: OptionContract) => (metric === "volume" ? c.volume : c.openInterest) ?? 0;
-    const add = (contracts: OptionContract[], side: "calls" | "puts") => {
-      for (const c of contracts) {
-        if (c.strike == null) continue;
-        const m = c.strike / data.spot;
-        if (m < 0.75 || m > 1.25) continue;
-        const row = byStrike.get(c.strike) ?? { strike: c.strike, calls: 0, puts: 0 };
-        row[side] += pick(c);
-        byStrike.set(c.strike, row);
-      }
-    };
-    add(data.calls ?? [], "calls");
-    add(data.puts ?? [], "puts");
-
-    const all = [...byStrike.values()]
-      .filter((r) => r.calls > 0 || r.puts > 0)
-      .sort((a, b) => a.strike - b.strike);
-
-    let atm = all[0]?.strike ?? null;
-    let best = Infinity;
-    for (const r of all) {
-      const d = Math.abs(r.strike - data.spot);
-      if (d < best) { best = d; atm = r.strike; }
-    }
-    return { rows: all, atmStrike: atm };
-  }, [data, metric]);
+  const[width,setWidth]=useState(.25);
+  const rows=useMemo(()=>strikeMetricRows(data.calls??[],data.puts??[],data.spot,metric,width),[data,metric,width]);
 
   const { tooltip } = LABELS[metric];
+  const controls=<div className="mb-3 flex flex-wrap items-center justify-between gap-2"><span className="text-[10px] text-slate-400">{data.expiry} · Contratos</span><div role="group" aria-label="Distancia de strikes al precio" className="flex gap-1">{[.1,.25,.5].map(value=><button key={value} aria-pressed={width===value} onClick={()=>setWidth(value)} className={`rounded-md border px-2.5 py-1.5 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 ${width===value?'border-blue-400/30 bg-blue-400/10 text-blue-300':'border-slate-700/50 text-slate-400'}`}>±{value*100}%</button>)}</div></div>;
 
   if (rows.length === 0) {
-    return (
+    return (<div>{controls}
       <div className="py-12 text-center text-[11px] text-muted-foreground/50 border border-border bg-card">
         Sin datos de {metric === "volume" ? "volumen" : "interés abierto"} para este vencimiento.
         Prueba con otro vencimiento o con un ticker más líquido.
-      </div>
+      </div></div>
     );
   }
 
-  return (
-    <div style={{ width: "100%", height: 300, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2, padding: "8px 6px" }}>
+  return (<div>{controls}
+    <div style={{ width: "100%", height: 300, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12, padding: "12px 8px" }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 14, right: 12, left: 4, bottom: 4 }} barGap={0} barCategoryGap="20%">
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
-          <XAxis dataKey="strike" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => fmtPrice(v, 0)} minTickGap={24} style={{ fontSize: "10px" }} />
+          <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
+          <XAxis dataKey="strike" type="number" domain={['dataMin','dataMax']} stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => fmtPrice(v, Math.abs(v)<10?2:1)} minTickGap={24} style={{ fontSize: "10px" }} />
           <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => fmtCompactNum(v)} width={48} style={{ fontSize: "10px" }} />
           <Tooltip
             contentStyle={ttStyle}
             formatter={(v: number, name) => [fmtNum(v), name === "calls" ? tooltip[0] : tooltip[1]]}
-            labelFormatter={(k) => `Strike ${fmtPrice(k as number, 0)}`}
-            cursor={{ fill: "rgba(148,163,184,0.06)" }}
+            labelFormatter={(k) => `Strike ${fmtPrice(k as number, 2)}`}
+            cursor={false}
           />
-          {atmStrike != null && (
+          {data.spot>0 && (
             <ReferenceLine
-              x={atmStrike}
+              x={data.spot}
               stroke={OPT_COLORS.spot}
               strokeDasharray="4 3"
-              label={{ value: `Spot $${fmtPrice(data.spot, 0)}`, position: "top", fill: OPT_COLORS.spot, fontSize: 9 }}
+              label={{ value: `Spot $${fmtPrice(data.spot, 2)}`, position: "top", fill: OPT_COLORS.spot, fontSize: 9 }}
             />
           )}
-          <Bar dataKey="calls" fill={OPT_COLORS.call} isAnimationActive={false} />
-          <Bar dataKey="puts" fill={OPT_COLORS.put} isAnimationActive={false} />
+          <Bar maxBarSize={24} dataKey="calls" fill={OPT_COLORS.call} isAnimationActive={false} />
+          <Bar maxBarSize={24} dataKey="puts" fill={OPT_COLORS.put} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </div></div>
   );
 }

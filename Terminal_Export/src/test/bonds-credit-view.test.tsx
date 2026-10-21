@@ -2,6 +2,7 @@ import {render,screen,fireEvent,waitFor} from '@testing-library/react';
 import {it,expect,vi,beforeEach} from 'vitest';
 import BondsCreditView,{creditPeriodLabel,proxyBase100} from '../components/BondsCreditView';
 import type {BondsCreditPanel,CreditSeries,CreditProxy} from '../../../supabase/functions/analyze-ticker/bonds-credit';
+import {buildEodhdBondsData,normalizeEodhdBondSeries,normalizeEodhdCmdi,normalizeEodhdRates} from '../../../supabase/functions/analyze-ticker/eodhd-bonds';
 const api=vi.hoisted(()=>vi.fn());vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api}));
 vi.mock('../components/AuthGate',()=>({useProfile:()=>({id:'bonds-view-test'})}));
 beforeEach(()=>{api.mockImplementation((_url,init)=>{const body=JSON.parse(init.body);return Promise.resolve({ok:true,json:async()=>body.panel==='bondsCreditNews'?{subject:body.subject,fetchedAt:new Date().toISOString(),articles:[]}:fixture()});});});
@@ -54,4 +55,18 @@ it('prioritizes dated curve, spread and private-fund analytics without presentin
  fireEvent.click(screen.getByRole('button',{name:'Condiciones de crédito'}));
  expect(screen.getByRole('meter',{name:'Percentil histórico de Investment grade · diferencial OAS'})).toHaveAttribute('aria-valuenow','40');
  expect(screen.getByText(/1\.?200 observaciones/)).toBeVisible();
+});
+
+it('opens daily sovereign curves when available and keeps their frequency distinct from the monthly fallback',async()=>{
+ const value=fixture(),now=Date.parse('2026-10-21T15:00Z');
+ const histories=['FR','DE','UK','US'].flatMap((prefix,i)=>['2Y','5Y','10Y'].map((tenor,j)=>normalizeEodhdBondSeries(prefix+tenor+'.GBOND',[{date:'2026-10-19',close:3+i+j},{date:'2026-10-20',close:3.1+i+j}],now)!));
+ value.marketRates=buildEodhdBondsData(histories,[],normalizeEodhdRates({data:[{date:'2026-10-20',code:'SONIA',rate:3.7}]},'reference',now),normalizeEodhdRates({data:[{date:'2026-10-20',code:'EFFR_SOFR',value_bps:0}]},'funding',now),normalizeEodhdCmdi({data:[{as_of_date:'2026-09-25T00:00:00+00:00',market_cmdi:.2,ig_cmdi:.25,hy_cmdi:.11}]},now));
+ api.mockImplementation((_url,init)=>{const body=JSON.parse(init.body);return Promise.resolve({ok:true,json:async()=>body.panel==='bondsCreditNews'?{subject:body.subject,fetchedAt:new Date().toISOString(),articles:[]}:value});});
+ render(<BondsCreditView/>);fireEvent.click(screen.getByRole('button',{name:'Actualizar bonos y créditos'}));
+ await screen.findByLabelText('Mercado diario de bonos · Estados Unidos');
+ fireEvent.change(screen.getByRole('combobox',{name:'País de deuda soberana'}),{target:{value:'FR'}});
+ expect(screen.getByRole('heading',{name:'Curva soberana · Francia'})).toBeVisible();expect(screen.getByText('Referencia diaria · Bonos benchmark · EUR')).toBeVisible();expect(screen.queryByText('Referencia a 10 años · Media mensual · EUR')).toBeNull();
+ expect(screen.getByRole('heading',{name:'Soberanos · comparación diaria a 10 años'})).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Condiciones de crédito'}));
+ expect(screen.getByRole('heading',{name:'Estrés del mercado de bonos corporativos'})).toBeVisible();expect(screen.getByRole('heading',{name:'Tensiones de financiación en dólares'})).toBeVisible();expect(screen.getByText('3,70 %')).toBeVisible();
 });

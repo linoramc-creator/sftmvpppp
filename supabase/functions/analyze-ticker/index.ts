@@ -8,11 +8,17 @@ import {regularReportQuote} from './regular-quote.ts';
 import {assetContext} from './asset-context.ts';
 import { assetSnapshot } from './asset-snapshot.ts';
 import { sharedFeed } from './feed-cache.ts';
+import { sectorFundamentalsContext } from './sector-fundamentals.ts';
 import {relativeComparison,type RelativeDependencies} from './relative-comparison.ts';
 import {marketComparison} from './market-comparison.ts';
 import {marketPulse} from './market-pulse.ts';
 import {bondsCreditPanel} from './bonds-credit.ts';
 import {bondsCreditNews,type BondsNewsSubject} from './bonds-credit-news.ts';
+import {eodhdSummary,eodhdQuarterly,eodhdTimeseries} from './eodhd-fundamentals.ts';
+import {eodhdChart,eodhdQuote} from './eodhd-market.ts';
+import {mergeEodhdPriority} from './eodhd-client.ts';
+import {eodhdTreasury} from './eodhd-bonds.ts';
+import {issuerResearch} from './issuer-research.ts';
 import {sectorActivity} from './sector-activity.ts';
 import { massiveContext } from './massive-news.ts';
 import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
@@ -259,6 +265,9 @@ async function fetchYahooChart(
   const cached = yfCacheGet(cacheKey);
   if (cached !== undefined) return cached as { t: number[]; c: number[]; o: number[]; h: number[]; l: number[]; v?: number[] } | null;
   try {
+    const preferred=await eodhdChart(symbol,range,interval);
+    const chart=preferred?.chart?.result?.[0],q=chart?.indicators?.quote?.[0];
+    if(chart&&q){const rows=chart.timestamp.flatMap((t:number,i:number)=>jsonSafeNum(q.close[i])!==null?[{t,c:q.close[i],o:q.open[i],h:q.high[i],l:q.low[i],v:q.volume[i]}]:[]);if(rows.length>1){const out={t:rows.map((r:any)=>r.t),c:rows.map((r:any)=>r.c),o:rows.map((r:any)=>r.o),h:rows.map((r:any)=>r.h),l:rows.map((r:any)=>r.l),v:rows.map((r:any)=>r.v)};yfCacheSet(cacheKey,out);return out;}}
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
     const r = await fetch(url, { headers: { "User-Agent": YF_UA }, signal: AbortSignal.timeout(9_000) });
     if (!r.ok) { yfCacheSet(cacheKey, null); return null; }
@@ -303,6 +312,7 @@ async function yfFundamentalsTimeseries(symbol: string): Promise<any[] | null> {
   const cacheKey = `yf-fund-${symbol}`;
   const cached = yfCacheGet(cacheKey);
   if (cached !== undefined) return cached as any[] | null;
+  const primary=await eodhdTimeseries(symbol);if(primary.length){yfCacheSet(cacheKey,primary);return primary;}
 
   const auth = await yfGetAuth();
   const types = [
@@ -338,6 +348,7 @@ async function yfFundamentalsTimeseries(symbol: string): Promise<any[] | null> {
 // Convert Yahoo's timeseries into the same row shape every other source emits,
 // so it slots straight into mergeQuarterlyData() as the highest-priority source.
 async function fetchYahooQuarterlyFinancials(ticker: string): Promise<any[]> {
+  const primary=await eodhdQuarterly(ticker);if(primary.length)return primary;
   const result = await yfFundamentalsTimeseries(ticker);
   if (!result) { console.log(`Yahoo ${ticker}: no fundamentals`); return []; }
 
@@ -444,6 +455,8 @@ async function finnhubGet(path: string, key: string) {
 }
 
 async function fetchFinnhubData(ticker: string, key: string) {
+  const [summary,preferredQuote]=await Promise.all([eodhdSummary(ticker),eodhdQuote(ticker)]);
+  if(summary){const p=summary.price??{},f=summary.financialData??{},s=summary.summaryDetail??{},k=summary.defaultKeyStatistics??{},a=summary.assetProfile??{},r=summary.recommendationTrend?.trend?.[0];return {profile:{name:summary.quoteType?.longName??ticker,ticker,country:a.country,currency:p.currency,exchange:p.exchangeName,finnhubIndustry:a.industry??a.sector,marketCapitalization:p.marketCap==null?null:p.marketCap/1e6,shareOutstanding:k.sharesOutstanding==null?null:k.sharesOutstanding/1e6},quote:preferredQuote?{c:preferredQuote.close,dp:preferredQuote.change_p,t:preferredQuote.timestamp}:null,metrics:{peTTM:s.trailingPE,pbAnnual:k.priceToBook,evToEbitda:k.enterpriseToEbitda,enterpriseValue:k.enterpriseValue,roeTTM:f.returnOnEquity==null?null:f.returnOnEquity*100,netProfitMarginTTM:f.profitMargins==null?null:f.profitMargins*100,revenueGrowthTTMYoy:f.revenueGrowth==null?null:f.revenueGrowth*100,beta:k.beta},recommendations:r?{...r,period:summary.eodhd?.updatedAt}:null,allRecommendations:r?[r]:[],news:[],peers:[],structuredSummary:summary};}
   const t = encodeURIComponent(ticker);
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
@@ -475,6 +488,8 @@ async function fetchPeerData(peers: string[], key: string) {
   const results = await Promise.all(
     peers.slice(0, 5).map(async (peer) => {
       const t = encodeURIComponent(peer);
+      const preferred=await eodhdSummary(peer),preferredQuote=preferred?await eodhdQuote(peer):null;
+      if(preferred&&preferredQuote){const p=preferred.price??{},f=preferred.financialData??{},s=preferred.summaryDetail??{},k=preferred.defaultKeyStatistics??{};return {ticker:peer,name:preferred.quoteType?.longName??peer,price:`${preferredQuote.close.toFixed(2)} ${p.currency??''}`,marketCap:p.marketCap?`${(p.marketCap/1e9).toFixed(2)}B ${p.currency??''}`:'N/D',pe:s.trailingPE??'N/D',pb:k.priceToBook??'N/D',evEbitda:k.enterpriseToEbitda??'N/D',roe:f.returnOnEquity==null?'N/D':`${(f.returnOnEquity*100).toFixed(1)}%`,netMargin:f.profitMargins==null?'N/D':`${(f.profitMargins*100).toFixed(1)}%`,revenueGrowth:f.revenueGrowth==null?'N/D':`${(f.revenueGrowth*100).toFixed(1)}%`,weekReturn52:'N/D',beta:k.beta??'N/D'};}
       const [quote, profile, metrics] = await Promise.all([
         finnhubGet(`/quote?symbol=${t}`, key),
         finnhubGet(`/stock/profile2?symbol=${t}`, key),
@@ -1090,6 +1105,7 @@ function mergeQuarterlyData(yahoo: any[], finnhub: any[], fmp: any[], twelveData
         merged.set(key, { ...q });
       } else {
         const existing = merged.get(key)!;
+        if(existing.currency&&existing.currency!==q.currency)continue;
         for (const f of fields) {
           if ((existing[f] === "N/D" || existing[f] == null) && q[f] !== "N/D" && q[f] != null) {
             existing[f] = q[f];
@@ -1366,7 +1382,7 @@ function buildTickerDataContext(
     null;
 
   const lines = [
-    "=== DATOS EN TIEMPO REAL (FINNHUB) ===",
+    "=== DATOS DE MERCADO Y FUNDAMENTALES ===",
     "",
     `Empresa: ${p?.name ?? "N/D"} | Ticker: ${p?.ticker ?? "N/D"}`,
     `Sector: ${p?.finnhubIndustry ?? "N/D"} | País: ${p?.country ?? "N/D"}`,
@@ -1936,7 +1952,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
 
       try {
         // Step 1: Finnhub profile (sequential — companyName/sector/peers needed for Tavily queries)
-        const finnhubData = env.FINNHUB_KEY ? await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY) : null;
+        const finnhubData = await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY);
         const companyName = finnhubData?.profile?.name ?? cleanTicker;
         const sector      = finnhubData?.profile?.finnhubIndustry ?? "";
         let peers: string[] = finnhubData?.peers ?? [];
@@ -1945,6 +1961,8 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
           peers=[...new Set([...peers,...discovered])].filter(p=>p!==cleanTicker).slice(0,5);
         }
 
+        const primaryQuarterly=etfMode?[]:await eodhdQuarterly(cleanTicker);
+        const complete=primaryQuarterly.length>=8&&primaryQuarterly.slice(0,4).every(q=>['revenue','netIncome','operatingCF','cash','equity','totalAssets'].every(k=>q.numeric[k]!==null));
         const curatedNews=newsPanel(cleanTicker,false,env,{summary:eYahooQuoteSummary});
 
         // Step 2: All remaining data in parallel
@@ -1968,13 +1986,13 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
           massiveNewsContext,
         ] = await Promise.all([
           etfMode ? Promise.resolve([]) : fetchYahooQuarterlyFinancials(cleanTicker),
-          !etfMode && env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
-          !etfMode && env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
-          !etfMode && env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
+          !complete&&!etfMode && env.FINNHUB_KEY ? fetchQuarterlyFinancials(cleanTicker, env.FINNHUB_KEY) : Promise.resolve([]),
+          !complete&&!etfMode && env.FMP_KEY     ? fetchFmpQuarterlyFinancials(cleanTicker, env.FMP_KEY)  : Promise.resolve([]),
+          !complete&&!etfMode && env.TWELVE_KEY  ? fetchTwelveDataQuarterlyFinancials(cleanTicker, env.TWELVE_KEY) : Promise.resolve([]),
           !etfMode ? fetchPeerData(peers, env.FINNHUB_KEY) : Promise.resolve([]),
           fetchFredData(env.FRED_KEY),
-          etfMode ? Promise.resolve("") : fetchFmpData(cleanTicker, env.FMP_KEY),
-          fetchTwelveData(cleanTicker, env.TWELVE_KEY),
+          complete||etfMode ? Promise.resolve("") : fetchFmpData(cleanTicker, env.FMP_KEY),
+          complete ? Promise.resolve("") : fetchTwelveData(cleanTicker, env.TWELVE_KEY),
           fetchTechnicalIndicators(cleanTicker, env.TWELVE_KEY),
           env.TAVILY_KEY
             ? fetchTavilySearch(`${companyName} ${cleanTicker} geopolitical regulatory tariffs sanctions ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 3, 60, undefined, 180)
@@ -2044,7 +2062,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
           finnhubData, peerData, quarterlyHistory, geoContext, sectorNews, tickerNews,
           earningsSearch, competitiveSearch, risksCatalystsSearch,
           fredContext, fmpContext, twelveDataContext, technicalContext,
-        ) + massiveNewsContext;
+        ) + (finnhubData?.structuredSummary?`\n=== DATOS ESTRUCTURADOS, MONEDAS Y ESTIMACIONES ===\n${JSON.stringify(finnhubData.structuredSummary)}\nLas posiciones institucionales no son recomendaciones ni flujos de dinero. Los objetivos solo son comparables en la misma moneda. Las estimaciones futuras no son resultados realizados.\n`:'') + massiveNewsContext;
 
         console.log("Ticker data loaded:", {
           ticker: cleanTicker,
@@ -2140,6 +2158,7 @@ async function handleSectorAnalysis(sector: string, env: EnvKeys): Promise<Respo
           regulatoryContext,
           fredContext,
           massiveNewsContext,
+          primarySectorContext,
         ] = await Promise.all([
           newsPanel(cleanSector,true,env).then(p=>reportNewsContext(p.articles)),
           env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector outlook trends growth forecast ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 5, undefined, undefined, 180) : Promise.resolve({ answer: "", results: [] }),
@@ -2149,12 +2168,13 @@ async function handleSectorAnalysis(sector: string, env: EnvKeys): Promise<Respo
           env.TAVILY_KEY ? fetchTavilySearch(`${cleanSector} sector regulation policy geopolitical risk ${new Date().getUTCFullYear()}`, env.TAVILY_KEY, 3, 90, undefined, 150) : Promise.resolve({ answer: "", results: [] }),
           fetchFredData(env.FRED_KEY),
           massiveContext(env.MASSIVE_API_KEY,cleanSector,true),
+          sectorFundamentalsContext(cleanSector),
         ]);
 
         const dataContext = buildSectorDataContext(
           cleanSector, sectorNews, sectorTrends, topCompanies,
           sectorETFs, macroNews, regulatoryContext, fredContext,
-        ) + massiveNewsContext;
+        ) + primarySectorContext + massiveNewsContext;
 
         console.log("Sector data loaded:", {
           sector: cleanSector,
@@ -2239,6 +2259,7 @@ async function handleFundamentals(ticker: string): Promise<Response> {
     yfFundamentalsTimeseries(sym),
     fetchYahooChart(sym, "3mo", "1d"),
   ]);
+  const financialSummary=await eodhdSummary(sym);
 
   // Ticker doesn't exist / Yahoo has nothing → explicit not-found, stable shape.
   if (!tsResult && !price) {
@@ -2303,17 +2324,10 @@ async function handleFundamentals(ticker: string): Promise<Response> {
     found: periodsIso.length > 0 || !!price,
     periods: periodsIso.map(qLabel),
     periodsIso,
+    currency:financialSummary?.eodhd?.financialCurrency??null,
     series: {
-      revenue:      forwardFill(revenue),
-      ebitda:       forwardFill(ebitda),
-      netIncome:    forwardFill(netIncome),
-      operatingCF:  forwardFill(opCF),
-      capex:        forwardFill(capex),
-      fcf:          forwardFill(fcf),
-      totalAssets:  forwardFill(totalAssets),
-      cash:         forwardFill(cash),
-      totalDebt:    forwardFill(totalDebt),
-      equity:       forwardFill(equity),
+      revenue, ebitda, netIncome, operatingCF:opCF, capex, fcf,
+      totalAssets,cash,totalDebt,equity,
       grossMargin:  grossMargin.map(jsonSafeNum),
       netMargin:    netMargin.map(jsonSafeNum),
       revenueGrowth: revenueGrowth.map(jsonSafeNum),
@@ -2330,11 +2344,11 @@ async function handleFundamentals(ticker: string): Promise<Response> {
 async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<Response> {
   // Major asset-class proxies — quotes from Finnhub, candles from Yahoo Finance
   const INDICES: Array<{ symbol: string; label: string }> = [
-    { symbol: "SPY",  label: "S&P 500"      },
-    { symbol: "QQQ",  label: "NASDAQ 100"   },
-    { symbol: "DIA",  label: "DOW JONES"    },
-    { symbol: "IWM",  label: "RUSSELL 2000" },
-    { symbol: "VIXY", label: "VIX VOL"      },
+    { symbol: "^GSPC",  label: "S&P 500"      },
+    { symbol: "^NDX",  label: "NASDAQ 100"   },
+    { symbol: "^DJI",  label: "DOW JONES"    },
+    { symbol: "IWM",  label: "RUSSELL 2000 · IWM" },
+    { symbol: "^VIX", label: "VIX"      },
     { symbol: "GLD",  label: "ORO"          },
     { symbol: "TLT",  label: "BONOS 20Y+"   },
   ];
@@ -2343,22 +2357,22 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
 
   // Candles come from the shared, cached fetchYahooChart() helper (3-month daily
   // closes, forward-filled). The 10-min TTL cache shields us from IP rate-limits.
+  const preferredRates=await eodhdTreasury(1);
   const [quotesResult, candlesResult, fred10y, fred2y] = await Promise.allSettled([
     Promise.all(allSymbols.map(s =>
-      finnhubGet(`/quote?symbol=${s}`, env.FINNHUB_KEY)
-        .then(d => d ? { symbol: s, c: d.c as number, dp: d.dp as number } : { symbol: s, c: null, dp: null })
+      (async()=>{const p=await eodhdQuote(s);if(p?.currency)return {symbol:s,c:p.close as number,dp:p.change_p as number,currency:p.currency as string,asOf:p.timestamp as number};const d=await finnhubGet(`/quote?symbol=${encodeURIComponent(s)}`,env.FINNHUB_KEY);if(d?.c>0&&!s.includes('.'))return {symbol:s,c:d.c as number,dp:d.dp as number,currency:'USD',asOf:d.t as number};const q=await eYahooQuoteSummary(s,'price');return {symbol:s,c:eNum(q?.price?.regularMarketPrice),dp:eNum(q?.price?.regularMarketChangePercent),currency:q?.price?.currency as string,asOf:eNum(q?.price?.regularMarketTime)};})()
     )),
     Promise.all(indexSymbols.map(async s => ({ symbol: s, data: await fetchYahooChart(s, "3mo", "1d") }))),
-    env.FRED_KEY
+    preferredRates.find(s=>s.id==='DGS10')?.points.length?Promise.resolve({observations:preferredRates.find(s=>s.id==='DGS10')!.points.slice(-5).reverse()}):env.FRED_KEY
       ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
-    env.FRED_KEY
+    preferredRates.find(s=>s.id==='DGS2')?.points.length?Promise.resolve({observations:preferredRates.find(s=>s.id==='DGS2')!.points.slice(-5).reverse()}):env.FRED_KEY
       ? fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS2&api_key=${env.FRED_KEY}&limit=5&sort_order=desc&file_type=json`).then(r => r.json()).catch(() => null)
       : Promise.resolve(null),
   ]);
 
   const quoteList = quotesResult.status === "fulfilled" ? quotesResult.value : [];
-  const quoteMap: Record<string, { c: number | null; dp: number | null }> = {};
+  const quoteMap: Record<string, { c: number | null; dp: number | null; currency?: string; asOf?: number | null }> = {};
   for (const q of quoteList) quoteMap[q.symbol] = q;
 
   const calc1m = (candle: { t: number[]; c: number[] } | null): number | null => {
@@ -2396,6 +2410,9 @@ async function handleMarketData(env: EnvKeys, extraSymbols: string[]): Promise<R
 
   const makeQ = (symbol: string, label: string, change1m: number | null = null) => ({
     symbol, label,
+    currency:quoteMap[symbol]?.currency??null,
+    unit:symbol.startsWith('^')?'points':'currency',
+    asOf:quoteMap[symbol]?.asOf??null,
     price:    quoteMap[symbol]?.c ?? null,
     change1d: quoteMap[symbol]?.dp != null ? +quoteMap[symbol].dp!.toFixed(2) : null,
     change1m,
@@ -2940,6 +2957,16 @@ function eNum(v: unknown): number | null {
 }
 
 async function eYahooQuoteSummary(ticker: string, requestedModules?: string): Promise<Record<string, any> | null> {
+  const primary=await eodhdSummary(ticker),quote=primary?await eodhdQuote(ticker):null;
+  if(primary&&quote){primary.price={...primary.price,regularMarketPrice:quote.close,regularMarketTime:quote.timestamp,regularMarketChangePercent:quote.change_p};if(primary.financialData)primary.financialData.currentPrice=quote.close;}
+  const wanted=(requestedModules??'quoteType,fundProfile,topHoldings,summaryDetail,defaultKeyStatistics,price').split(',');
+  const isEtf=primary?.quoteType?.quoteType==='ETF';
+  const required:Record<string,string[]>=isEtf?{fundProfile:['categoryName'],summaryDetail:['totalAssets'],topHoldings:['holdings']}:{assetProfile:['longBusinessSummary','sector'],financialData:['totalRevenue','financialCurrency'],defaultKeyStatistics:['sharesOutstanding'],summaryDetail:['marketCap']};
+  const missing=wanted.filter(name=>!(name==='fundProfile'&&!isEtf)&&!(name==='topHoldings'&&!isEtf)).some(name=>!primary?.[name]||name==='price'&&!quote||(required[name]??[]).some(field=>primary?.[name]?.[field]==null||Array.isArray(primary?.[name]?.[field])&&!primary[name][field].length));
+  if(primary&&!missing)return primary;
+  return mergeEodhdPriority(primary,await eYahooQuoteSummaryFallback(ticker,requestedModules));
+}
+async function eYahooQuoteSummaryFallback(ticker: string, requestedModules?: string): Promise<Record<string, any> | null> {
   const auth = await yfGetAuth();
   const sym = encodeURIComponent(ticker.toUpperCase());
   const modules = requestedModules ?? "quoteType,fundProfile,topHoldings,summaryDetail,defaultKeyStatistics,price";
@@ -3021,6 +3048,7 @@ async function eFmpSectors(ticker: string, fmpKey: string): Promise<{ key: strin
 
 // Country of a single holding via Yahoo assetProfile (cached).
 async function eYahooHoldingCountry(symbol: string): Promise<string | null> {
+  const preferred=await eodhdSummary(symbol);if(preferred?.assetProfile?.country)return preferred.assetProfile.country;
   const cacheKey = `etf-holding-country-${symbol}`;
   const cached = yfCacheGet(cacheKey);
   if (cached !== undefined) return cached as string | null;
@@ -3045,13 +3073,13 @@ async function eYahooHoldingCountry(symbol: string): Promise<string | null> {
 // domiciles (Yahoo assetProfile), renormalised over the resolved weight.
 // Clearly labelled as approximate by the caller via countriesSource.
 async function eCountriesFromHoldings(
-  holdings: { symbol: string; name: string; pct: number }[],
+  holdings: { symbol: string; name: string; pct: number; country?: string }[],
 ): Promise<{ country: string; pct: number }[] | null> {
   const usable = holdings.filter((h) => h.symbol && h.pct > 0).slice(0, 10);
   if (usable.length < 3) return null;
   const resolved = await Promise.all(usable.map(async (h) => ({
     pct: h.pct,
-    country: await eYahooHoldingCountry(h.symbol),
+    country: h.country || await eYahooHoldingCountry(h.symbol),
   })));
   const byCountry = new Map<string, number>();
   let known = 0;
@@ -3299,6 +3327,8 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
   // subset of these for funds — every field is nullable and the frontend
   // renders "—" for the rest (ROE, margins, D/E... don't apply to ETFs).
   const fundamentals = {
+    currency:typeof pr.currency==='string'?pr.currency:undefined,
+    assetsCurrency:summary.eodhd?.provider==='eodhd'?'USD':typeof pr.currency==='string'?pr.currency:undefined,
     price:         eNum(pr.regularMarketPrice) ?? eNum(sd.previousClose),
     marketCap:     eNum(pr.marketCap),
     totalAssets:   eNum(sd.totalAssets),
@@ -3349,6 +3379,7 @@ async function handleEtf(tickerRaw: string, env: EnvKeys): Promise<Response> {
     .map((h) => ({
       symbol: String(h.symbol ?? ""),
       name: String(h.holdingName ?? ""),
+      country:typeof h.country==='string'?h.country:undefined,
       pct: +(((eNum(h.holdingPercent) ?? 0) * 100).toFixed(2)),
     }))
     .filter((h) => h.symbol || h.name)
@@ -3956,6 +3987,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
 
     if (typeof body.panel === "string") {
       const deps = { summary: eYahooQuoteSummary };
+      if(body.panel==='issuerResearch')return panelJson(await issuerResearch(String(body.subject).trim().toUpperCase()));
       if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));
       if(body.panel === "regularQuote") return panelJson(await regularReportQuote(String(body.subject).trim().toUpperCase()));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
@@ -3974,14 +4006,14 @@ Deno.serve((req) => secureRequest(req, async (body) => {
             if(!expiries.length)return null;const raw=await oYahooOptions(symbol,expiries[0]);return {...raw,expiry:oIsoFromEpoch(expiries[0])};
           }catch{return null;}
         }),
-        news:async()=>{const feed=await sharedFeed('feed-news-v7',()=>marketFeedPanel(env,'news'));return [...feed.geopolitics,...feed.headlines];},
+        news:async()=>{const feed=await sharedFeed('feed-news-v8',()=>marketFeedPanel(env,'news'));return [...feed.geopolitics,...feed.headlines];},
         };
         const symbols=body.symbols.map((s:string)=>s.trim().toUpperCase());
         return panelJson(body.panel==='marketComparison'?await marketComparison(symbols,body.range??'6m',body.includeAnalysis===true,env,relativeDeps):await relativeComparison(symbols as [string,string],body.includeAi===true,env,relativeDeps));
       }
       if (body.panel === "feedMarkets") {const symbols=feedSymbols(body.subject)!,groups=normalizeFeedPreferences(body.feedGroups)!;return panelJson(await sharedFeed(await feedPreferencesKey(symbols,groups),()=>feedMarketsPanel(env,symbols,groups),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));}
-      if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v7",()=>marketFeedPanel(env,"news")));
-      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v10",()=>marketFeedPanel(env)));
+      if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v8",()=>marketFeedPanel(env,"news")));
+      if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v11",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));
       if (body.panel === "comparison") return panelJson(await comparison(body.symbols.map((s:string)=>s.trim().toUpperCase()),env.FMP_KEY));
       if (body.panel === "correlation") return panelJson(await correlations(body.symbols.map((s:string)=>s.trim().toUpperCase()),typeof body.range==="string"?body.range:"3m"));

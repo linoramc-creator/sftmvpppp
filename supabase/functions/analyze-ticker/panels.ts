@@ -12,6 +12,8 @@ import { tavilyJson,tavilyLimited } from './tavily-client.ts';
 import { groundedNews } from './grounded-news.ts';
 import { treasury, earnings, type TreasuryPoint, type EarningsEvent } from './feed-extras.ts';
 import { summarizeNews } from './news-summary-ai.ts';
+import {eodhdNews} from './eodhd-news.ts';
+import {marketJson} from './eodhd-market-fetch.ts';
 export type { OpinionsPanel } from "./editorial.ts";
 // On-demand panels with bounded per-isolate cache and request coalescing.
 type Row = Record<string, any>;
@@ -109,12 +111,17 @@ async function search(query: string, key: string, news = false, domains: string[
   });
 }
 export async function newsPanel(subject: string, sector: boolean, env: Env, deps?: Dependencies): Promise<NewsPanel> {
-  return cached(`news:v4:${sector}:${subject}`, 600000, async () => {
+  return cached(`news:v5:${sector}:${subject}`, 600000, async () => {
     const aliases: Record<string, string> = { semiconductores: 'semiconductors semiconductor chips Nvidia Micron AMD Broadcom Intel TSMC ASML memory DRAM NAND', 'inteligencia artificial': 'artificial intelligence AI', 'energía': 'energy oil gas', salud: 'healthcare pharmaceutical biotech', defensa: 'defense aerospace', consumo: 'consumer retail', 'tecnología': 'technology software', bancos: 'banks banking', 'inmobiliario': 'real estate REIT' };
     const topic = sector ? `${subject} ${aliases[subject.toLowerCase()] ?? ''}` : subject;
-    const [raw, profile, finnhubNews, fmpNews, massive, rss] = await Promise.all([
-      get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(topic)}&newsCount=15&quotesCount=${sector ? 0 : 1}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+    const [primaryNews,profile]=await Promise.all([
+      eodhdNews(subject,sector),
       !sector && deps ? cached(`news-name:${subject}`, 24 * HOUR, () => deps.summary(subject, 'quoteType,assetProfile,fundProfile,topHoldings')) : null,
+    ]);
+    const primaryCompany=sector?topic:profile?.quoteType?.longName??profile?.quoteType?.shortName??subject;
+    const completePrimary=curateNews(primaryNews,`${subject} ${primaryCompany}`,Date.now(),24,sector||profile?.quoteType?.quoteType==='ETF',14).length>=6;
+    const [raw, finnhubNews, fmpNews, massive, rss] = completePrimary?[null,null,null,[],[]]:await Promise.all([
+      get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(topic)}&newsCount=15&quotesCount=${sector ? 0 : 1}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       !sector && env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(subject)}&from=${new Date(Date.now()-90*86400000).toISOString().slice(0,10)}&to=${new Date().toISOString().slice(0,10)}&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
       !sector && env.FMP_KEY ? get(`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(subject)}&limit=50&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
       massiveNews(env.MASSIVE_API_KEY,sector?'':subject),
@@ -122,7 +129,7 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     ]);
     const data = raw as Row;
     const company = sector ? topic : profile?.quoteType?.longName ?? profile?.quoteType?.shortName ?? data?.quotes?.[0]?.longname ?? data?.quotes?.[0]?.shortname ?? subject;
-    const rows: Article[] = (data?.news ?? []).map((r: Row) => ({ title: r.title, url: r.link, source: r.publisher, date: day(r.providerPublishTime) ?? '', publishedAt:typeof r.providerPublishTime==='number'?new Date(r.providerPublishTime*1000).toISOString():undefined }));
+    const rows: Article[] = [...primaryNews,...(data?.news ?? []).map((r: Row) => ({ title: r.title, url: r.link, source: r.publisher, date: day(r.providerPublishTime) ?? '', publishedAt:typeof r.providerPublishTime==='number'?new Date(r.providerPublishTime*1000).toISOString():undefined }))];
     for(const r of Array.isArray(finnhubNews)?finnhubNews:[])if(r.url&&r.headline)rows.push({title:r.headline,url:r.url,source:r.source??'',date:day(r.datetime)??'',publishedAt:typeof r.datetime==='number'?new Date(r.datetime*1000).toISOString():undefined,excerpt:r.summary??''});
     for(const r of Array.isArray(fmpNews)?fmpNews:[])if(r.url&&r.title)rows.push({title:r.title,url:r.url,source:r.publisher??'',date:day(r.publishedDate)??'',publishedAt:Number.isFinite(Date.parse(r.publishedDate))?new Date(r.publishedDate).toISOString():undefined,excerpt:r.text??''});
     rows.push(...(sector?sectorMassiveNews(massive,subject):massive),...rss);
@@ -138,17 +145,21 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     const sectorName = sector ? subject : broadUsMarket ? 'Bolsa de EE. UU.' : nasdaqFund?'Tecnología y Nasdaq 100':profile?.assetProfile?.sector || category || (thematic ? company : '');
     const sectorContexts: Record<string, string> = { Technology: 'technology software semiconductor chips AI Nvidia Microsoft Apple cloud', 'Bolsa de EE. UU.': 'S&P 500 Nasdaq equities stocks market Fed inflation', Healthcare: 'healthcare pharmaceutical biotech FDA drugs', Financials: 'banks banking insurance financial', 'Financial Services': 'banks banking insurance financial', Energy: 'energy oil gas OPEC', 'Consumer Cyclical': 'consumer retail automotive sales', 'Consumer Defensive': 'consumer staples retail food', Industrials: 'industrial manufacturing aerospace transport electricity power hydrogen fuel cells infrastructure', 'Real Estate': 'real estate REIT property housing', Utilities: 'utilities electricity power', 'Basic Materials': 'materials metals mining chemicals', 'Communication Services': 'telecom streaming advertising media' };
     async function selection(name:string,initial:Article[],theme:boolean,query=name,required?:RegExp){
-      // Refresh direct CNBC/Yahoo discovery even when an older provider already
-      // supplies six stories. Never fill a recent-news quota with six-month news.
+      const additionalPrimary=theme&&!initial.length?await eodhdNews(query,true):[];
+      const primaryKeys=new Set([...primaryNews,...additionalPrimary].map(a=>newsKey(a.url)));
+      let candidates=[...additionalPrimary,...initial];
+      const trustworthy=(a:Article)=>{try{const host=new URL(a.url).hostname;return allowedDomains.some(d=>host===d||host.endsWith('.'+d));}catch{return false;}};
+      const choose=(days:number)=>{const eligible=candidates.filter(a=>trustworthy(a)&&(!required||required.test(a.title))),prioritized=curateNews(eligible.filter(a=>primaryKeys.has(newsKey(a.url))),name,Date.now(),24,theme,days),fallback=curateNews(eligible.filter(a=>!primaryKeys.has(newsKey(a.url))),name,Date.now(),24,theme,days);return balanceAccess(curateNews([...prioritized,...fallback],name,Date.now(),48,theme,days).sort((a,b)=>Number(primaryKeys.has(newsKey(b.url)))-Number(primaryKeys.has(newsKey(a.url)))||newsOrder(a,b)),6);};
+      let selected=choose(14);if(selected.length>=6)return selected;
+      // Additional searches fill verified gaps only; a complete primary result
+      // does not trigger parallel provider and paid-search work.
       const [primary,broad]=await Promise.all([
         search(query+' latest earnings business market news',env.TAVILY_KEY,true,PRIMARY_NEWS_DOMAINS,7,14),
         search(query+' latest important news results regulation contracts',env.TAVILY_KEY,true,allowedDomains,7,16),
       ]);
-      let candidates=[...initial,...primary,...broad];
+      candidates.push(...primary,...broad);
       if(tavilyLimited()&&!primary.length&&!broad.length)candidates.push(...await groundedNews(query,allowedDomains,env.GEMINI_API_KEY??''));
-      const trustworthy=(a:Article)=>{try{const host=new URL(a.url).hostname;return allowedDomains.some(d=>host===d||host.endsWith('.'+d));}catch{return false;}};
-      const choose=(days:number)=>balanceAccess(curateNews(candidates.filter(a=>trustworthy(a)&&(!required||required.test(a.title))),name,Date.now(),24,theme,days),6);
-      let selected=choose(14);
+      selected=choose(14);
       if(selected.length<5){candidates.push(...await search(query+' earnings results contracts regulation',env.TAVILY_KEY,true,allowedDomains,30,14));selected=choose(30);}
       return selected;
     }
@@ -201,34 +212,40 @@ export async function feedMarketsPanel(env:Env,symbols:string[]=[],preferences:F
   });
 }
 export async function marketFeedPanel(env: Env, part: "all"|"news" = "all"): Promise<MarketFeed> {
-  const cacheKey = `feed:v2:${part}:${new Date().toISOString().slice(0, 13)}`;
+  const cacheKey = `feed:v3:${part}:${new Date().toISOString().slice(0, 13)}`;
   return cached(cacheKey, 5 * 60000, async () => {
-    const [market, yahoo, finnhub, fmp, web, geopolitical, massive, openWeb, spanishGeo, rss] = await Promise.all([
-      part==="all"?feedMarketsPanel(env):null,
-      get('https://query1.finance.yahoo.com/v1/finance/search?q=global%20markets%20oil%20gold%20currencies&newsCount=25&quotesCount=0', { headers: { 'User-Agent': 'Mozilla/5.0' } }),
-      env.FINNHUB_KEY ? get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`) : null,
-      env.FMP_KEY ? get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`) : null,
-      search('global markets stocks bonds oil gold currencies central banks latest', env.TAVILY_KEY, true, NEWS_DOMAINS, 2, 18),
-
-      search('latest geopolitical decisions sanctions tariffs sovereign bond yields equities oil supply commercial shipping disruption',env.TAVILY_KEY,true,NEWS_DOMAINS,1,20),
+    const marketRequest=part==='all'?feedMarketsPanel(env):Promise.resolve(null);
+    const primary=await eodhdNews(),primaryKeys=new Set(primary.map(a=>newsKey(a.url)));
+    const priority=(a:Article,b:Article)=>Number(primaryKeys.has(newsKey(b.url)))-Number(primaryKeys.has(newsKey(a.url)))||newsOrder(a,b);
+    const headlines:Article[]=[...primary],geoCandidates:Article[]=[];
+    const chooseHeadlines=()=>balanceAccess(curateFeed(headlines.filter(a=>!isGeopoliticalTopic(a)),80).sort(priority),9);
+    const chooseGeopolitics=()=>balanceAccess(curateFeed(geopoliticalNews([...geoCandidates,...headlines]),64).sort(priority),8);
+    const needGeneral=chooseHeadlines().length<9,needGeo=chooseGeopolitics().length<6;
+    const [yahoo,finnhub,fmp,web,geopolitical,massive,openWeb,spanishGeo,rss]=needGeneral||needGeo?await Promise.all([
+      needGeneral?get('https://query1.finance.yahoo.com/v1/finance/search?q=global%20markets%20oil%20gold%20currencies&newsCount=25&quotesCount=0',{headers:{'User-Agent':'Mozilla/5.0'}}):null,
+      needGeneral&&env.FINNHUB_KEY?get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`):null,
+      needGeneral&&env.FMP_KEY?get(`https://financialmodelingprep.com/api/v3/stock_news?limit=40&apikey=${encodeURIComponent(env.FMP_KEY)}`):null,
+      needGeneral?search('global markets stocks bonds oil gold currencies central banks latest',env.TAVILY_KEY,true,NEWS_DOMAINS,2,18):Promise.resolve([]),
+      needGeo?search('latest geopolitical decisions sanctions tariffs sovereign bond yields equities oil supply commercial shipping disruption',env.TAVILY_KEY,true,NEWS_DOMAINS,1,20):Promise.resolve([]),
       massiveNews(env.MASSIVE_API_KEY),
-      search('markets economy geopolitics oil interest rates latest news',env.TAVILY_KEY,true,PRIMARY_NEWS_DOMAINS,2,20),
-      search('última hora geopolítica aranceles sanciones bonos soberanos bolsas petróleo interrupción suministro comercio',env.TAVILY_KEY,true,SPANISH_NEWS_DOMAINS,2,14),
+      needGeneral?search('markets economy geopolitics oil interest rates latest news',env.TAVILY_KEY,true,PRIMARY_NEWS_DOMAINS,2,20):Promise.resolve([]),
+      needGeo?search('última hora geopolítica aranceles sanciones bonos soberanos bolsas petróleo interrupción suministro comercio',env.TAVILY_KEY,true,SPANISH_NEWS_DOMAINS,2,14):Promise.resolve([]),
       cached('publisher-rss-v2',300000,publisherNews),
-    ]);
-    const headlines: Article[] = [];
+    ]):[null,null,null,[],[],[],[],[],[]];
     for (const row of ((yahoo as Row)?.news ?? [])) headlines.push({ title: String(row.title ?? ''), url: String(row.link ?? ''), source: String(row.publisher ?? ''), date: day(row.providerPublishTime) ?? '', publishedAt:typeof row.providerPublishTime==='number'?new Date(row.providerPublishTime*1000).toISOString():undefined, excerpt: '', image: validFeedImage(row.thumbnail?.resolutions?.filter((r:Row)=>r.width>=400&&r.height>=220&&r.width/r.height>=1.25&&r.width/r.height<=2.6).sort((a:Row,b:Row)=>b.width-a.width)[0]?.url) });
     for (const row of (Array.isArray(finnhub) ? finnhub : [])) headlines.push({ title: String(row.headline ?? ''), url: String(row.url ?? ''), source: String(row.source ?? ''), date: day(row.datetime) ?? '', publishedAt:typeof row.datetime==='number'?new Date(row.datetime*1000).toISOString():undefined, excerpt: String(row.summary ?? ''), image: validFeedImage(row.image) });
     for (const row of (Array.isArray(fmp) ? fmp : [])) headlines.push({ title: String(row.title ?? ''), url: String(row.url ?? ''), source: String(row.site ?? row.publisher ?? ''), date: day(row.publishedDate) ?? '', publishedAt:typeof row.publishedDate==='string'&&Number.isFinite(Date.parse(row.publishedDate))?new Date(row.publishedDate).toISOString():undefined, excerpt: String(row.text ?? ''), image: validFeedImage(row.image) });
     headlines.push(...web,...massive,...openWeb,...rss);
-    const geopolitics=curateFeed(geopoliticalNews([...geopolitical,...spanishGeo,...headlines]),8).sort(newsOrder);
+    geoCandidates.push(...geopolitical,...spanishGeo);
+    const geopolitics=chooseGeopolitics();
     // Partition BEFORE either limit. Political stories beyond the eight selected
     // must not spill into the main feed, including tracking URL variants.
-    const selected=curateFeed(headlines.filter(a=>!isGeopoliticalTopic(a)));
+    const selected=chooseHeadlines();
     const enrich=async (article:Article):Promise<Article>=>({...article,image:validFeedImage(article.image)??await cached('cover:'+article.url,6*HOUR,()=>articleCover(article.url))});
     const [covers,geoCovers,summaries]=await Promise.all([Promise.all(selected.map(enrich)),Promise.all(geopolitics.map(enrich)),summarizeNews([...selected,...geopolitics],env.GEMINI_API_KEY)]);
     covers.forEach((article,index)=>article.keyPoints=summaries[index].keyPoints);
     geoCovers.forEach((article,index)=>article.keyPoints=summaries[selected.length+index].keyPoints);
+    const market=await marketRequest;
     return { fetchedAt: new Date().toISOString(), groups:market?.groups??[], headlines:covers, geopolitics:geoCovers, treasury:market?.treasury??[], earnings:market?.earnings??[] };
   });
 }
@@ -237,17 +254,19 @@ const FRED_SERIES = [
   ['DFII10', 'Tipo real a 10 años'], ['T10YIE', 'Inflación implícita a 10 años'], ['T10Y2Y', 'Diferencial 10–2 años'], ['BAMLC0A0CM', 'Crédito investment grade (OAS)'], ['BAMLH0A0HYM2', 'Crédito high yield (OAS)'], ['DFF', 'Fed Funds efectivo'],
 ];
 const BOND_ETFS = [['BND', 'Mercado de bonos EE. UU.'], ['AGG', 'Bonos agregados EE. UU.'], ['SHY', 'Treasury 1–3 años'], ['IEF', 'Treasury 7–10 años'], ['TLT', 'Treasury más de 20 años'], ['TIP', 'Protección frente a inflación'], ['LQD', 'Corporativo investment grade'], ['HYG', 'Corporativo high yield']];
-export async function bondsPanel(env: Env, deps?: Dependencies): Promise<BondsPanel> {
+export async function bondsPanel(env: Env, deps?: Dependencies,preferred:Series[]=[]): Promise<BondsPanel> {
   // UTC date in the cache key guarantees a fresh request on each new day.
-  return cached(`bonds:${new Date().toISOString().slice(0, 10)}`, HOUR, async () => {
+  const primaryIds=preferred.filter(s=>s.points.length).map(s=>s.id).sort().join(',');
+  return cached(`bonds:${new Date().toISOString().slice(0, 10)}${primaryIds?':primary:'+primaryIds:''}`, HOUR, async () => {
     const start = new Date(Date.now() - 3660 * 86400000).toISOString().slice(0, 10);
     const seriesRequest = Promise.all(FRED_SERIES.map(async ([id, label]): Promise<Series> => {
+      const primary=preferred.find(s=>s.id===id&&s.points.length);if(primary)return primary;
       const raw = env.FRED_KEY ? await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${encodeURIComponent(env.FRED_KEY)}&file_type=json&observation_start=${start}`) : null;
       const points: Point[] = ((raw as Row)?.observations ?? []).filter((r: Row) => r.value !== '.' && r.value !== '' && Number.isFinite(Number(r.value))).map((r: Row) => ({ date: r.date, value: Number(r.value) }));
       return { id, label, unit: ['T10Y2Y', 'BAMLC0A0CM', 'BAMLH0A0HYM2'].includes(id) ? 'pp' : '%', source: `https://fred.stlouisfed.org/series/${id}`, points };
     }));
     const etfsRequest = Promise.all(BOND_ETFS.map(async ([symbol, label]): Promise<BondFund> => {
-      const raw = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const raw = await marketJson(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } },{timeoutMs:12000});
       const chart = (raw as Row)?.chart?.result?.[0];
       const close = chart?.indicators?.quote?.[0]?.close ?? [];
       const points: Point[] = (chart?.timestamp ?? []).map((t: number, i: number) => ({ date: day(t)!, value: num(close[i]) })).filter((p: Point) => p.value !== null && p.date);

@@ -6,6 +6,7 @@ export type YieldCurveSnapshot={key:'current'|'monthAgo'|'yearAgo';label:string;
 export type CreditSpreadStat={id:string;label:string;value:number|null;date:string|null;change21Bp:number|null;change63Bp:number|null;percentile:number|null;windowStart:string|null;observations:number};
 export type BondsCreditAnalytics={curveSnapshots:YieldCurveSnapshot[];curveSlopes:CreditSeries[];inflation:CreditSeries[];creditSpreads:CreditSeries[];spreadStats:CreditSpreadStat[];sovereignSpreadHistory:CreditSeries[];privateLeverage:CreditSeries;privateDryPowderRatio:CreditSeries};
 export const CURVE_TENORS=[['DGS1MO','1 mes',1/12],['DGS3MO','3 meses',.25],['DGS6MO','6 meses',.5],['DGS1','1 año',1],['DGS2','2 años',2],['DGS5','5 años',5],['DGS10','10 años',10],['DGS20','20 años',20],['DGS30','30 años',30]] as const;
+export type CurveTenor=readonly [string,string,number];
 const DAY=86400000;
 const finite=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n);
 
@@ -16,8 +17,8 @@ export function alignedTransform(id:string,label:string,unit:string,left:Series|
 }
 const shifted=(date:string,months:number)=>{const [y,m,d]=date.split('-').map(Number);const target=new Date(Date.UTC(y,m-1+months,1));const last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();target.setUTCDate(Math.min(d,last));return target.toISOString().slice(0,10);};
 
-export function yieldCurveSnapshots(series:Series[]):YieldCurveSnapshot[]{
- const available=CURVE_TENORS.flatMap(([id,label,maturityYears])=>{const s=series.find(s=>s.id===id);return s?.points.length?[{id,label,maturityYears,byDate:new Map(s.points.filter(p=>finite(p.value)).map(p=>[p.date,p.value]))}]:[];});
+export function yieldCurveSnapshots(series:Series[],tenors:readonly CurveTenor[]=CURVE_TENORS):YieldCurveSnapshot[]{
+ const available=tenors.flatMap(([id,label,maturityYears])=>{const s=series.find(s=>s.id===id);return s?.points.length?[{id,label,maturityYears,byDate:new Map(s.points.filter(p=>finite(p.value)).map(p=>[p.date,p.value]))}]:[];});
  if(available.length<3)return [];
  const common=[...available[0].byDate.keys()].filter(date=>available.every(s=>s.byDate.has(date))).sort();
  const current=common.at(-1);if(!current)return [];

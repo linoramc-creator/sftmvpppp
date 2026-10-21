@@ -1,4 +1,5 @@
 import { NewsCards } from "../FeedCards";
+import IssuerResearchView from '../IssuerResearchView';
 import { useMemo } from "react";
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
@@ -6,9 +7,10 @@ import {
 } from "recharts";
 import type { EtfResponse, EtfFundamentals, EtfGeoRisk, EtfNewsItem } from "@/types/etf";
 import { OPT_COLORS, ttStyle } from "@/components/options/theme";
+import {percentageBarWidth,formatChartMoney} from '@/lib/financial-chart-data';
 
 const DONUT_COLORS = [
-  "#22c55e", "#38bdf8", "#818cf8", "#fbbf24", "#f472b6",
+  "#60a5fa", "#38bdf8", "#818cf8", "#fbbf24", "#f472b6",
   "#34d399", "#f87171", "#a78bfa", "#fb923c", "#94a3b8", "#64748b",
 ];
 
@@ -16,7 +18,7 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
   return (
     <div className="mb-1.5">
       <div className="text-[10px] tracking-widest text-foreground font-semibold">{title}</div>
-      {subtitle && <div className="text-[9px] text-muted-foreground/40 mt-0.5">{subtitle}</div>}
+      {subtitle && <div className="text-[9px] text-muted-foreground/70 mt-0.5">{subtitle}</div>}
     </div>
   );
 }
@@ -31,7 +33,7 @@ function EmptyNote({ text }: { text: string }) {
 
 // Inline percentage bar used in tables (regional / allocation breakdowns).
 function PctBar({ pct, color, max = 100 }: { pct: number; color: string; max?: number }) {
-  const width = Math.max(1, Math.min(100, (pct / max) * 100));
+  const width = percentageBarWidth(pct,max);
   return (
     <div className="flex items-center gap-2 min-w-[120px]">
       <div className="flex-1 h-1.5 bg-secondary/60 overflow-hidden">
@@ -49,17 +51,8 @@ function PctBar({ pct, color, max = 100 }: { pct: number; color: string; max?: n
 // this fund is hidden too (the row is dropped, not rendered as a dash). Stocks
 // use a different table (QuarterlyHistorySection) — this one is ETF-only.
 
-const fmtUsd = (v: number | null) =>
-  v == null ? null : `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const fmtBig = (v: number | null) => {
-  if (v == null) return null;
-  const abs = Math.abs(v);
-  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
-  return `$${v.toLocaleString("en-US")}`;
-};
+const fmtUsd = (v:number|null,currency?:string)=>v==null?null:formatChartMoney(v,currency);
+const fmtBig = (v:number|null,currency?:string)=>v==null?null:formatChartMoney(v,currency,true);
 
 const fmtRatio = (v: number | null) => (v == null ? null : v.toFixed(2));
 
@@ -78,16 +71,16 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
   const f: EtfFundamentals | undefined = data.fundamentals;
   // ETF metrics only; null values are dropped so the table never shows "—".
   const allRows: { label: string; value: string | null }[] = [
-    { label: "Precio Actual",        value: fmtUsd(f?.price ?? null) },
-    { label: "NAV",                  value: fmtUsd(f?.navPrice ?? null) },
-    { label: "AUM (Activos Gestionados)", value: fmtBig(f?.totalAssets ?? null) },
+    { label: "Precio Actual",        value: fmtUsd(f?.price ?? null,f?.currency) },
+    { label: "NAV",                  value: fmtUsd(f?.navPrice ?? null,f?.currency) },
+    { label: "AUM (Activos Gestionados)", value: fmtBig(f?.totalAssets ?? null,f?.assetsCurrency??f?.currency) },
     { label: "Ratio de Gastos",      value: fmtFracPct(f?.expenseRatio ?? null) },
     { label: "P/E TTM",              value: fmtRatio(f?.peTtm ?? null) },
     { label: "P/B",                  value: fmtRatio(f?.pb ?? null) },
     { label: "Dividend Yield",       value: fmtFracPct(f?.dividendYield ?? null) },
     { label: "Beta",                 value: fmtRatio(f?.beta ?? null) },
-    { label: "52W High",             value: fmtUsd(f?.high52 ?? null) },
-    { label: "52W Low",              value: fmtUsd(f?.low52 ?? null) },
+    { label: "52W High",             value: fmtUsd(f?.high52 ?? null,f?.currency) },
+    { label: "52W Low",              value: fmtUsd(f?.low52 ?? null,f?.currency) },
     { label: "52W Return",           value: fmtFracPct(f?.return52w ?? null) },
     { label: "Retorno YTD",          value: fmtFracPct(f?.ytdReturn ?? null) },
     { label: "Volumen Promedio 10D", value: fmtVol(f?.avgVolume10d ?? null) },
@@ -99,20 +92,21 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
   }
 
   return (
+    <div className="space-y-5"><IssuerResearchView ticker={data.ticker} mode="etf"/>
     <div className="mb-4 border border-border overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 bg-secondary/50 border-b border-border">
         <div className="flex items-center gap-3">
           <span className="w-1.5 h-1.5 bg-section-heading shrink-0" />
           <span className="text-[11px] tracking-[0.2em] text-foreground font-bold">FUNDAMENTALES ETF</span>
-          <span className="text-[10px] text-muted-foreground/40 tracking-widest">SNAPSHOT</span>
+          <span className="text-[10px] text-muted-foreground/70 tracking-widest">SNAPSHOT</span>
         </div>
-        <span className="text-[10px] tracking-widest text-muted-foreground/30"></span>
+        <span className="text-[10px] tracking-widest text-muted-foreground/60"></span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full" style={{ minWidth: 320 }}>
           <thead>
             <tr className="border-b border-border bg-secondary/20">
-              <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/40 font-medium" style={{ minWidth: 200 }}>
+              <th className="px-4 py-3 text-left text-[11px] tracking-widest text-muted-foreground/70 font-medium" style={{ minWidth: 200 }}>
                 MÉTRICA
               </th>
               <th className="px-3 py-3 text-right text-[11px] tracking-widest text-section-heading font-semibold whitespace-nowrap" style={{ minWidth: 140 }}>
@@ -134,7 +128,7 @@ export function EtfFundamentalsTable({ data }: { data: EtfResponse }) {
           </tbody>
         </table>
       </div>
-    </div>
+    </div></div>
   );
 }
 
@@ -155,7 +149,7 @@ function SectorBreakdown({ data }: { data: EtfResponse }) {
 
   return (
     <div className="grid md:grid-cols-2 gap-4 items-start">
-      <div style={{ width: "100%", height: 260, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2 }}>
+      <div style={{ width: "100%", height: 260, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12 }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
@@ -209,7 +203,7 @@ function CountryBreakdown({ data }: { data: EtfResponse }) {
         </div>
       </div>
       {data.countriesSource === "yahoo-approx" && (
-        <div className="text-[9px] text-muted-foreground/40 mt-1 px-1">
+        <div className="text-[9px] text-muted-foreground/70 mt-1 px-1">
           Distribución regional aproximada; no equivale a la cartera completa.
         </div>
       )}
@@ -239,7 +233,7 @@ function HoldingsTable({ data }: { data: EtfResponse }) {
         <tbody className="divide-y divide-border/30">
           {holdings.map((h, i) => (
             <tr key={`${h.symbol}-${i}`} className="hover:bg-section-heading/[0.03] transition-colors">
-              <td className="px-3 py-1.5 text-muted-foreground/40">{i + 1}</td>
+              <td className="px-3 py-1.5 text-muted-foreground/70">{i + 1}</td>
               <td className="px-3 py-1.5 text-primary font-semibold">{h.symbol || "—"}</td>
               <td className="px-3 py-1.5 text-foreground/75" style={{ fontFamily: "var(--font-sans)" }}>{h.name || "—"}</td>
               <td className="px-3 py-1.5">
@@ -273,10 +267,10 @@ function GeoRiskChart({ risks }: { risks: EtfGeoRisk[] }) {
 
   return (
     <div>
-      <div style={{ width: "100%", height: Math.max(160, rows.length * 36 + 40), backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2, padding: "8px 6px" }}>
+      <div style={{ width: "100%", height: Math.max(160, rows.length * 36 + 40), backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12, padding: "12px 8px" }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" horizontal={false} stroke={OPT_COLORS.grid} />
             <XAxis type="number" stroke={OPT_COLORS.axis} tickLine={false} style={{ fontSize: "10px" }} />
             <YAxis
               type="category" dataKey="name" width={170}
@@ -291,9 +285,9 @@ function GeoRiskChart({ risks }: { risks: EtfGeoRisk[] }) {
                   "Riesgo ponderado",
                 ];
               }}
-              cursor={{ fill: "rgba(148,163,184,0.06)" }}
+              cursor={false}
             />
-            <Bar dataKey="contribution" isAnimationActive={false}>
+            <Bar maxBarSize={24} dataKey="contribution" isAnimationActive={false}>
               {rows.map((r, i) => (
                 <Cell key={i} fill={r.score >= 70 ? OPT_COLORS.put : r.score >= 45 ? OPT_COLORS.flip : OPT_COLORS.call} />
               ))}
@@ -376,9 +370,9 @@ export function EtfSectorSubSection({ data }: { data: EtfResponse }) {
                   <tr key={p.symbol} className="hover:bg-section-heading/[0.03] transition-colors">
                     <td className="px-3 py-1.5 text-primary font-semibold">{p.symbol}</td>
                     <td className="px-3 py-1.5 text-foreground/75 max-w-[220px] truncate" style={{ fontFamily: "var(--font-sans)" }}>{p.name ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/80">{fmtUsd(p.price) ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/80">{fmtUsd(p.price,p.currency) ?? "—"}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-foreground/65">{fmtFracPct(p.expenseRatio) ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/65">{fmtBig(p.totalAssets) ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground/65">{fmtBig(p.totalAssets,p.currency) ?? "—"}</td>
                     <td className={`px-3 py-1.5 text-right tabular-nums ${p.ytdReturn == null ? "text-muted-foreground/20" : p.ytdReturn >= 0 ? "text-primary" : "text-destructive"}`}>
                       {fmtFracPctSigned(p.ytdReturn)}
                     </td>

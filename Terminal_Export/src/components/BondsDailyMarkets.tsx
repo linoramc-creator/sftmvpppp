@@ -1,0 +1,21 @@
+import type {ReactNode} from 'react';
+import type {DailySovereignMarket,EodhdBondsData} from '../../../supabase/functions/analyze-ticker/eodhd-bonds';
+import type {Series} from '../../../supabase/functions/analyze-ticker/panels';
+import {CreditChart,CurveComparison} from './BondsCreditCharts';
+import {creditPeriodLabel} from '@/lib/bonds-credit-view';
+
+const value=(n:number|null|undefined,suffix='%',signed=false)=>n==null?'—':`${signed&&n>0?'+':''}${n.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})} ${suffix}`;
+function Card({label,number,date}:{label:string;number:string;date:string|null|undefined}){return <div className="rounded-xl border border-slate-700/35 bg-[#0c131d] p-4"><p className="text-[10px] leading-relaxed text-slate-400">{label}</p><p className="mt-3 text-xl font-semibold tabular-nums text-slate-100">{number}</p><p className="mt-2 text-[10px] text-slate-500">{creditPeriodLabel(date??undefined)}</p></div>;}
+function ChartBox({title,detail,children}:{title:string;detail:string;children:ReactNode}){return <section className="min-w-0 rounded-2xl border border-slate-700/40 bg-[#0c131d] p-4 sm:p-5"><div className="mb-5 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold text-slate-200">{title}</h2><span className="text-[10px] text-slate-500">{detail}</span></div>{children}</section>;}
+export default function BondsDailyMarkets({market,data,clip}:{market:DailySovereignMarket;data:EodhdBondsData;clip:(series:Series[])=>Series[]}){
+ const last=market.reference10y.points.at(-1),spread=data.spreads.find(s=>s.code===market.code);
+ const history=market.tenors.map(t=>({...t.series,label:`${market.name} · ${t.series.label}`}));
+ return <div className="space-y-4" aria-label={`Mercado diario de bonos · ${market.name}`}>
+  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Card label={`${market.name} · 10 años`} number={value(last?.value)} date={last?.date}/><Card label="Variación de referencia · 1 día" number={value(market.dayChangeBp,'pb',true)} date={last?.date}/><Card label="Variación · 1 mes" number={value(market.monthChangeBp,'pb',true)} date={last?.date}/><Card label="Variación · 12 meses" number={value(market.yearChangeBp,'pb',true)} date={last?.date}/></div>
+  <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)]"><ChartBox title={`Curva soberana · ${market.name}`} detail={`Benchmark · Diaria · ${market.currency}`}><CurveComparison snapshots={market.curveSnapshots}/></ChartBox><ChartBox title="Vencimientos de referencia" detail="Rendimiento anual · %"><div className="grid grid-cols-2 gap-3">{market.tenors.map(t=><Card key={t.series.id} label={t.series.label} number={value(t.series.points.at(-1)?.value)} date={t.series.points.at(-1)?.date}/>)}</div></ChartBox></div>
+  {!!market.slopes.length&&<div className="grid gap-3 sm:grid-cols-3">{market.slopes.map(s=><Card key={s.id} label={`Pendiente · ${s.label}`} number={value(s.points.at(-1)?.value,'pb',true)} date={s.points.at(-1)?.date}/>)}<Card label="10 años · diferencial frente a Alemania" number={value(spread?.value,'pb',true)} date={spread?.date}/></div>}
+  <div className="grid gap-4 lg:grid-cols-2"><ChartBox title={`Vencimientos · ${market.name}`} detail="Referencias benchmark · Diaria · %"><CreditChart series={clip(history)} label={`Evolución diaria de vencimientos · ${market.name}`}/></ChartBox><ChartBox title="Soberanos · comparación diaria a 10 años" detail="Benchmark · Misma frecuencia"><CreditChart series={clip(data.sovereigns.map(m=>({...m.reference10y,label:m.name})))} label="Comparación diaria de rendimientos soberanos"/></ChartBox></div>
+  <ChartBox title="Diferencial diario frente a Alemania" detail="10 años · Puntos básicos"><CreditChart series={clip(data.spreads.filter(s=>s.code!=='DE').map(s=>({id:s.code+'_DE_DAILY',label:(data.sovereigns.find(m=>m.code===s.code)?.name??s.code)+' − Alemania',unit:'pb',source:'',points:s.points})))} unit="pb" zero label="Diferenciales diarios de bonos soberanos"/></ChartBox>
+  <p className="px-1 text-[10px] leading-relaxed text-slate-500">Referencias de bonos benchmark; no son tipos par ni medias mensuales. Cada curva utiliza una fecha común. Los diferenciales de USD y GBP frente a EUR también reflejan divisa y política monetaria; no equivalen a primas de impago.</p>
+ </div>;
+}

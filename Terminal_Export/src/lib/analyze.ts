@@ -5,6 +5,9 @@ const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-t
 export interface MarketQuote {
   symbol: string;
   label: string;
+  currency?: string | null;
+  unit?: 'points' | 'currency';
+  asOf?: number | null;
   price: number | null;
   change1d: number | null;
   change1m: number | null;
@@ -42,6 +45,9 @@ export async function fetchMarketData(symbols: string[]): Promise<MarketData | n
 
 export interface QuarterlyPeriod {
   period: string;
+  currency?:string|null;
+  filingDate?:string|null;
+  numeric?:Record<string,number|null>;
   // P&L
   revenue: string;
   revenueGrowth: string;

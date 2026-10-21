@@ -8,6 +8,8 @@ import {BRIEF_MODEL,BRIEF_FALLBACK_MODEL,BRIEF_OUTPUT_TOKENS} from './preference
 import {collectAsia,type AsiaOpening} from './asia.ts';
 import {collectMorningFutures,type MorningFuture} from './futures.ts';
 import {newsKeyPoints,validatedNewsKeyPoints} from '../analyze-ticker/news-summary.ts';
+import {marketJson} from '../analyze-ticker/eodhd-market-fetch.ts';
+import {eodhdNews} from '../analyze-ticker/eodhd-news.ts';
 export type BriefEnv={MASSIVE_API_KEY?:string;FRED_KEY:string;FINNHUB_KEY:string;TAVILY_KEY:string;GEMINI_API_KEY:string};
 export type BriefPoint={date:string;value:number};
 export type BriefAsset={symbol:string;name:string;group:string;currency:string;date:string|null;close:number|null;change:number|null;week:number|null;month:number|null;vol5:number|null;vol20:number|null;volumeRatio:number|null;drawdown:number|null;trend:'Alcista'|'Bajista'|'Mixta'|'Sin histórico suficiente';points:BriefPoint[];volatility:BriefPoint[];news:Article[];note:string;latest:{price:number;at:string}|null;adjustedPoints?:BriefPoint[];context?:WatchContext};
@@ -23,7 +25,7 @@ export function zonedTime(date:string,time:string,zone='Europe/Madrid'):number{
  return exact.length?Math.max(...exact):candidates.filter(t=>local(t)>target).sort((a,b)=>local(a)-local(b))[0]??candidates[0];
 }
 export function briefWindow(now=Date.now(),preview=false,time='07:00',date=zoneDate(now)){const previousDay=new Date(Date.parse(date+'T12:00Z')-86400000).toISOString().slice(0,10);return {date,previousDay,start:zonedTime(previousDay,'00:00'),cutoff:preview?now:Math.min(now,zonedTime(date,time))};}
-async function get(url:string,init:RequestInit={},timeout=10000){try{const r=await fetch(url,{...init,redirect:'error',signal:AbortSignal.timeout(timeout)});return r.ok?await r.json():null;}catch{return null;}}
+async function get(url:string,init:RequestInit={},timeout=10000){return marketJson(url,{...init,redirect:'error'},{timeoutMs:timeout});}
 export async function mapLimit<T,R>(items:T[],limit:number,fn:(item:T)=>Promise<R>):Promise<R[]>{const result:R[]=new Array(items.length);let cursor=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(cursor<items.length){const i=cursor++;result[i]=await fn(items[i]);}}));return result;}
 const finite=(value:any):value is number=>typeof value==='number'&&Number.isFinite(value);
 const change=(a:number|undefined,b:number|undefined)=>finite(a)&&finite(b)&&b>0?(a/b-1)*100:null;
@@ -92,10 +94,11 @@ export async function buildBrief(symbols:string[],env:BriefEnv,preview=false,now
  const watched=[...new Set(symbols)].slice(0,6),all=[...MARKETS,...watched.filter(s=>!MARKETS.some(m=>m[0]===s)).map(s=>[s,s,'Watchlist'] as [string,string,string])];
  const dailyCharts=new Map<string,Promise<any>>();
  const daily=(symbol:string)=>{if(!dailyCharts.has(symbol))dailyCharts.set(symbol,get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=6mo&interval=1d&includePrePost=false`,{headers:{'User-Agent':'Mozilla/5.0'}}));return dailyCharts.get(symbol)!;};
+ const primaryNews=await eodhdNews(),baseComplete=datedNews(marketNews(primaryNews),window.start,cutoff,12).length>=12,politicsComplete=datedNews(geopoliticalNews(primaryNews,cutoff,cutoff-window.start),window.start,cutoff,6).length>=6;
  const [assets,bonds,baseNews,web,politics,watchNews,general,asia,futures]=await Promise.all([
   mapLimit(all,6,async([symbol,name,group])=>normalizeAsset(symbol,name,group,await daily(symbol),cutoff)),
-  treasury(env.FRED_KEY),massiveNews(env.MASSIVE_API_KEY),searchNews(env,`most important global stock bond commodity currency markets news ${window.previousDay} ${window.date}`),searchNews(env,`major political leaders statements sanctions tariffs wars ceasefire oil energy markets ${window.previousDay} ${window.date}`),
-  mapLimit(watched,3,async symbol=>({symbol,rows:await massiveNews(env.MASSIVE_API_KEY,symbol)})),env.FINNHUB_KEY?get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`):null,collectAsia(cutoff,daily),collectMorningFutures(cutoff,daily)
+  treasury(env.FRED_KEY),baseComplete?primaryNews:massiveNews(env.MASSIVE_API_KEY).then(rows=>[...primaryNews,...rows]),baseComplete?Promise.resolve([]):searchNews(env,`most important global stock bond commodity currency markets news ${window.previousDay} ${window.date}`),politicsComplete?Promise.resolve(primaryNews):searchNews(env,`major political leaders statements sanctions tariffs wars ceasefire oil energy markets ${window.previousDay} ${window.date}`).then(rows=>[...primaryNews,...rows]),
+  mapLimit(watched,3,async symbol=>{const primary=await eodhdNews(symbol);return {symbol,rows:primary.length>=3?primary:[...primary,...await massiveNews(env.MASSIVE_API_KEY,symbol)]};}),!baseComplete&&env.FINNHUB_KEY?get(`https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(env.FINNHUB_KEY)}`):null,collectAsia(cutoff,daily),collectMorningFutures(cutoff,daily)
  ]);
  const generalRows=(Array.isArray(general)?general:[]).flatMap((r:any)=>finite(r.datetime)?[{title:String(r.headline??''),url:String(r.url??''),source:String(r.source??''),publishedAt:new Date(r.datetime*1000).toISOString(),date:zoneDate(r.datetime*1000,'UTC'),excerpt:String(r.summary??'').slice(0,650),image:photoUrl(r.image)}]:[]);
  const news=datedNews(marketNews([...web,...generalRows,...baseNews]),window.start,cutoff,12),geo=datedNews(geopoliticalNews([...politics,...web,...generalRows],cutoff,cutoff-window.start),window.start,cutoff,6);

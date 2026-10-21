@@ -1,10 +1,8 @@
 // Shared Recharts styling + formatters for the Options section.
-// Mirrors the palette used by FintechCharts.tsx but adds the universal
-// calls=green / puts=red options convention (aligned with the terminal's
-// green-primary theme).
+// Preserve calls/positive and puts/negative colors across options and reports.
 
 export const OPT_COLORS = {
-  bg: "#0d1520",
+  bg: "#0b131f",
   call: "#22c55e",   // green-500  (bullish / calls)
   put: "#f87171",    // red-400    (bearish / puts)
   spot: "#e2e8f0",   // slate-100  (reference line: current price)
@@ -14,23 +12,29 @@ export const OPT_COLORS = {
   term: "#38bdf8",   // sky-400    (term structure ATM IV)
   hv: "#94a3b8",     // slate-400  (realized vol)
   iv: "#22c55e",     // green      (implied vol reference)
-  axis: "#475569",
-  grid: "#1e293b",
-  gridStrong: "#334155",
+  axis: "#8190a6",
+  grid: "#243142",
+  gridStrong: "#52647d",
 } as const;
 
 export const ttStyle = {
-  backgroundColor: "#0f172a",
-  borderColor: "#1e293b",
-  borderRadius: "4px",
-  color: "#cbd5e1",
-  fontFamily: "monospace",
+  backgroundColor: "#101b29",
+  border: "1px solid #334155",
+  borderRadius: "10px",
+  color: "#e2e8f0",
+  fontFamily: "var(--font-sans), system-ui, sans-serif",
   fontSize: "11px",
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: "1.6",
+  padding: "10px 12px",
+  boxShadow: "0 8px 28px #0006",
 } as const;
+
+export const chartCursor={stroke:'#7dd3fc',strokeOpacity:.45,strokeWidth:.8,strokeDasharray:'3 4'} as const;
 
 // ── Formatters ──────────────────────────────────────────────────────────
 export function fmtCompactUsd(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   const a = Math.abs(v);
   const sign = v < 0 ? "-" : "";
   if (a >= 1e9) return `${sign}$${(a / 1e9).toFixed(2)}B`;
@@ -40,7 +44,7 @@ export function fmtCompactUsd(v: number | null | undefined): string {
 }
 
 export function fmtCompactNum(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   const a = Math.abs(v);
   const sign = v < 0 ? "-" : "";
   if (a >= 1e9) return `${sign}${(a / 1e9).toFixed(2)}B`;
@@ -51,28 +55,28 @@ export function fmtCompactNum(v: number | null | undefined): string {
 
 // IV / HV come as fractions (0.32 → "32.0%")
 export function fmtPctFrac(v: number | null | undefined, dp = 1): string {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   return `${(v * 100).toFixed(dp)}%`;
 }
 
 // Already-percent values (e.g. expected move pct stored as fraction too → use fmtPctFrac)
 export function fmtPlainPct(v: number | null | undefined, dp = 2): string {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   return `${v >= 0 ? "" : ""}${v.toFixed(dp)}%`;
 }
 
 export function fmtNum(v: number | null | undefined, dp = 0): string {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   return v.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
 export function fmtGreek(v: number | null | undefined, dp = 4): string {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   return v.toFixed(dp);
 }
 
 export function fmtPrice(v: number | null | undefined, dp = 2): string {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   return v.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 

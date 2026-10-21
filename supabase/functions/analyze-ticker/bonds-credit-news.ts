@@ -5,6 +5,7 @@ import {tavilyJson,tavilyLimited} from './tavily-client.ts';
 import {articleCover,photoUrl,publisherUrl} from './news-covers.ts';
 import {balanceAccess} from './news-access.ts';
 import {newsKeyPoints} from './news-summary.ts';
+import {eodhdNews} from './eodhd-news.ts';
 
 export const BONDS_NEWS_SUBJECTS=['US','FR','DE','GB','private'] as const;
 export type BondsNewsSubject=typeof BONDS_NEWS_SUBJECTS[number];
@@ -75,7 +76,7 @@ export function bondsNewsRelevance(article:Article,subject:BondsNewsSubject):num
  try{const host=new URL(article.url).hostname;if(['cnbc.com','finance.yahoo.com','eleconomista.es'].some(domain=>host===domain||host.endsWith('.'+domain)))score+=1;}catch{return 0;}
  return score;
 }
-export function curateBondsCreditNews(rows:Article[],subject:BondsNewsSubject,now=Date.now()):Article[]{
+export function curateBondsCreditNews(rows:Article[],subject:BondsNewsSubject,now=Date.now(),limit=6):Article[]{
  const oldest=now-(subject==='private'?14:7)*DAY;
  const candidates=rows.map(article=>({article,score:bondsNewsRelevance(article,subject),at:articleTime(article)})).filter(row=>row.score>0&&Number.isFinite(row.at)&&row.at>=oldest&&row.at<=now+60000).sort((a,b)=>b.score-a.score||b.at-a.at);
  const urls=new Set<string>(),titles:Set<string>[]=[],events=new Set<string>(),unique:Article[]=[];
@@ -88,7 +89,7 @@ export function curateBondsCreditNews(rows:Article[],subject:BondsNewsSubject,no
   if(event&&events.has(event))continue;if(event)events.add(event);
   urls.add(key);titles.push(words);unique.push({...article,title:decodeNewsText(article.title).slice(0,500),excerpt:decodeNewsText(article.excerpt??'').slice(0,900),image:photoUrl(article.image)});
  }
- return balanceAccess(unique,6).map(article=>({...article,keyPoints:newsKeyPoints({...article,excerpt:(article.excerpt??'').replace(/\bU\.S\./g,'United States').replace(/\bU\.K\./g,'United Kingdom')})}));
+ return balanceAccess(unique,limit).map(article=>({...article,keyPoints:newsKeyPoints({...article,excerpt:(article.excerpt??'').replace(/\bU\.S\./g,'United States').replace(/\bU\.K\./g,'United Kingdom')})}));
 }
 function resultArticle(row:any):Article|null{
  if(typeof row?.title!=='string'||typeof row?.url!=='string'||!publisherUrl(row.url))return null;
@@ -150,17 +151,21 @@ async function yahooBondNews(subject:BondsNewsSubject):Promise<Article[]>{
 }
 export async function bondsCreditNews(subject:BondsNewsSubject,env:Env):Promise<BondsCreditNews>{
  if(!BONDS_NEWS_SUBJECTS.includes(subject))throw new Error('Invalid bond-news subject');
- return remember('panel:'+subject,TTL,async()=>{
-  const [rss,massive,yahoo,credit,specialist]=await Promise.all([
+ return remember('panel-eodhd-v1:'+subject,TTL,async()=>{
+  const primary=await eodhdNews();
+  if(curateBondsCreditNews(primary,subject).length<6)primary.push(...await eodhdNews(({US:'US Treasury',FR:'France government bonds',DE:'Germany government bonds',GB:'UK government bonds',private:'private credit'} as const)[subject],true));
+  const primaryKeys=new Set(primary.map(a=>newsKey(a.url))),candidates=[...primary];
+  const choose=()=>balanceAccess(curateBondsCreditNews(candidates,subject,Date.now(),60).sort((a,b)=>Number(primaryKeys.has(newsKey(b.url)))-Number(primaryKeys.has(newsKey(a.url)))),6);
+  let selected=choose();
+  if(selected.length<6){const [rss,massive,yahoo,credit,specialist]=await Promise.all([
    remember('publisher-rss',10*60000,publisherNews),massiveNews(env.MASSIVE_API_KEY),yahooBondNews(subject),subject==='private'?massiveNews(env.MASSIVE_API_KEY,'BIZD'):subject==='US'?massiveNews(env.MASSIVE_API_KEY,'TLT'):Promise.resolve([]),
    specialistNews(subject==='private'),
-  ]);
-  let selected=curateBondsCreditNews([...rss,...massive,...yahoo,...credit,...specialist],subject);
-  if(selected.length<6)selected=curateBondsCreditNews([...selected,...await freeDiscovery(subject)],subject);
+  ]);candidates.push(...rss,...massive,...yahoo,...credit,...specialist);selected=choose();}
+  if(selected.length<6){candidates.push(...await freeDiscovery(subject));selected=choose();}
   if(selected.length<6&&env.TAVILY_KEY&&!tavilyLimited()){
    const raw=await tavilyJson({query:QUERIES[subject],topic:'news',days:subject==='private'?14:7,search_depth:'basic',max_results:12,include_answer:false,include_raw_content:false,include_images:false,include_domains:DOMAINS},env.TAVILY_KEY,9000);
    const discoveries=(Array.isArray(raw?.results)?raw.results:[]).flatMap((row:any)=>resultArticle(row)??[]);
-   selected=curateBondsCreditNews([...selected,...discoveries],subject);
+   candidates.push(...discoveries);selected=choose();
   }
   // Only the selected publishers are opened, at most six previews in parallel.
   // Missing images stay absent instead of being replaced with a brand/logo.

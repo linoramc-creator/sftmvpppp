@@ -44,6 +44,8 @@ export interface EtfNewsItem {
 // Yahoo quoteSummary modules (summaryDetail / defaultKeyStatistics / price);
 // any metric Yahoo doesn't publish for a fund arrives as null → rendered "—".
 export interface EtfFundamentals {
+  currency?:string;
+  assetsCurrency?:string;
   price: number | null;
   marketCap: number | null;
   totalAssets: number | null;   // AUM
@@ -66,6 +68,7 @@ export interface EtfFundamentals {
 // Peer figures come from FMP/Yahoo; benefits/risks are fixed-threshold rules
 // applied to those figures in backend code — never produced by an LLM.
 export interface EtfPeerRow {
+  currency?:string;
   symbol: string;
   name: string | null;
   price: number | null;

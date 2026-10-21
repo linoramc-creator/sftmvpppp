@@ -1,4 +1,4 @@
-import React from "react";
+import React,{useId} from "react";
 import {
   Area, AreaChart, CartesianGrid, Line, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -6,6 +6,7 @@ import {
 import type { IVHVResponse } from "@/types/options";
 import { OPT_COLORS, ttStyle, fmtPctFrac } from "./theme";
 import { Legend } from "./IvSkewChart";
+import {chartDateLabel} from '@/lib/financial-chart-data';
 
 const fmtDate = (s: string) => {
   const d = new Date(s + "T00:00:00Z");
@@ -13,8 +14,8 @@ const fmtDate = (s: string) => {
 };
 
 export function IvHvChart({ data }: { data: IVHVResponse }) {
+  const gradient='hv-'+useId().replace(/:/g,'');
   const rows = (data.series ?? [])
-    .filter((p) => p.hv != null)
     .map((p) => ({ date: p.date, hv: p.hv != null ? p.hv * 100 : null }));
 
   const iv30 = data.currentIV30 != null ? data.currentIV30 * 100 : null;
@@ -23,7 +24,7 @@ export function IvHvChart({ data }: { data: IVHVResponse }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <div className="text-[9px] text-muted-foreground/40">
+        <div className="text-[9px] text-muted-foreground/70">
           Volatilidad realizada (HV, ventana {data.window}d) vs. IV30 implícita actual
         </div>
         <div className="flex gap-3 text-[10px] font-mono">
@@ -37,23 +38,23 @@ export function IvHvChart({ data }: { data: IVHVResponse }) {
         </div>
       </div>
 
-      <div style={{ width: "100%", height: 340, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2, padding: "10px 6px" }}>
+      <div style={{ width: "100%", height: 340, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12, padding: "12px 8px" }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={rows} margin={{ top: 14, right: 12, left: 0, bottom: 4 }}>
             <defs>
-              <linearGradient id="hvGrad" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={OPT_COLORS.hv} stopOpacity={0.25} />
                 <stop offset="100%" stopColor={OPT_COLORS.hv} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
             <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={40} style={{ fontSize: "10px" }} />
             <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v) => `${v.toFixed(0)}%`} width={42} style={{ fontSize: "10px" }} />
             <Tooltip
               contentStyle={ttStyle}
               formatter={(v: number) => [`${v.toFixed(1)}%`, "HV"]}
-              labelFormatter={(s) => fmtDate(s as string)}
-              cursor={{ stroke: OPT_COLORS.gridStrong }}
+              labelFormatter={(s) => chartDateLabel(String(s),true)}
+              cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
             />
             {iv30 != null && (
               <ReferenceLine
@@ -63,15 +64,15 @@ export function IvHvChart({ data }: { data: IVHVResponse }) {
                 label={{ value: `IV30 ${iv30.toFixed(0)}%`, position: "insideTopLeft", fill: OPT_COLORS.iv, fontSize: 9 }}
               />
             )}
-            <Area type="monotone" dataKey="hv" stroke={OPT_COLORS.hv} strokeWidth={2} fill="url(#hvGrad)" dot={false} connectNulls isAnimationActive={false} />
+            <Area type="linear" dataKey="hv" stroke={OPT_COLORS.hv} strokeWidth={2} fill={`url(#${gradient})`} dot={false} connectNulls={false} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
       <Legend items={[["HV realizada", OPT_COLORS.hv], ["IV30 implícita", OPT_COLORS.iv]]} />
 
       {data.ivRank == null && (
-        <div className="text-[9px] text-muted-foreground/30 mt-2 text-center">
-          IV Rank / IV Percentile requieren histórico de IV (snapshots diarios) — pendiente. Ver README del servicio.
+        <div className="text-[9px] text-muted-foreground/60 mt-2 text-center">
+          Percentiles de IV no disponibles para este histórico.
         </div>
       )}
     </div>

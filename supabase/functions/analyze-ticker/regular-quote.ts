@@ -1,4 +1,5 @@
 import {regularSessionEnd} from './market-session.ts';
+import {marketJson} from './eodhd-market-fetch.ts';
 
 export type RegularReportQuote = {
   symbol: string;
@@ -79,9 +80,7 @@ export async function regularReportQuote(symbol: string): Promise<RegularReportQ
     if (!request) {
       request = (async () => {
         try {
-          const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d&includePrePost=false`, {headers: {'User-Agent': 'Mozilla/5.0'}, redirect: 'error', signal: AbortSignal.timeout(8000)});
-          if (!response.ok) return null;
-          const value = await response.json();
+          const value = await marketJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d&includePrePost=false`, {headers: {'User-Agent': 'Mozilla/5.0'}, redirect: 'error'}, {timeoutMs:8000,acceptPrimary:raw=>normalizeRegularQuote(symbol,raw).kind!=='unavailable'});
           if (!value?.chart?.result?.[0]) return null;
           const selected = normalizeRegularQuote(symbol, value), fetched = Date.now();
           const boundaries = [selected.sessionStart, selected.sessionEnd].map(t => t ? Date.parse(t) : 0).filter(t => t > fetched);

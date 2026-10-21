@@ -7,6 +7,7 @@ import {
 } from "recharts";
 import type { TechnicalsResponse } from "@/types/technicals";
 import { OPT_COLORS, ttStyle, fmtPrice } from "@/components/options/theme";
+import {chartDateLabel,visibleDatedRows} from '@/lib/financial-chart-data';
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
 const TECH_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/analyze-ticker` : "";
@@ -41,7 +42,7 @@ const fmtDate = (s: string) => {
 const box = (height: number) => ({
   width: "100%", height,
   backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b",
-  borderRadius: 2, padding: "8px 6px",
+  borderRadius: 12, padding: "12px 8px",
 }) as const;
 
 function Chip({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "pos" | "neg" | "neutral" }) {
@@ -60,22 +61,22 @@ function PriceSmaChart({ data }: { data: TechnicalsResponse }) {
   return (
     <div style={box(280)}>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+        <LineChart accessibilityLayer syncId={`technical-${data.ticker}`} data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
           <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={48} style={{ fontSize: "10px" }} />
-          <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => fmtPrice(v, 0)} width={48} domain={["auto", "auto"]} style={{ fontSize: "10px" }} />
+          <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => fmtPrice(v,Math.abs(v)<10?3:1)} width={60} domain={["auto", "auto"]} style={{ fontSize: "10px" }} />
           <Tooltip
             contentStyle={ttStyle}
             formatter={(v: number, name) => [
-              `$${fmtPrice(v)}`,
+              fmtPrice(v,Math.abs(v)<10?4:2),
               name === "close" ? "Cierre" : name === "sma50" ? "SMA 50" : "SMA 200",
             ]}
-            labelFormatter={(s) => fmtDate(s as string)}
-            cursor={{ stroke: OPT_COLORS.gridStrong }}
+            labelFormatter={(s) => chartDateLabel(String(s),true)}
+            cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
           />
-          <Line type="monotone" dataKey="close" stroke={OPT_COLORS.spot} strokeWidth={1.8} dot={false} connectNulls isAnimationActive={false} />
-          <Line type="monotone" dataKey="sma50" stroke={OPT_COLORS.term} strokeWidth={1.4} dot={false} connectNulls isAnimationActive={false} />
-          <Line type="monotone" dataKey="sma200" stroke={OPT_COLORS.flip} strokeWidth={1.4} dot={false} connectNulls isAnimationActive={false} />
+          <Line type="linear" dataKey="close" stroke={OPT_COLORS.spot} strokeWidth={1.8} dot={false} connectNulls={false} isAnimationActive={false} />
+          <Line type="linear" dataKey="sma50" stroke={OPT_COLORS.term} strokeWidth={1.4} dot={false} connectNulls={false} isAnimationActive={false} />
+          <Line type="linear" dataKey="sma200" stroke={OPT_COLORS.flip} strokeWidth={1.4} dot={false} connectNulls={false} isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -88,19 +89,19 @@ function RsiChart({ data }: { data: TechnicalsResponse }) {
   return (
     <div style={box(180)}>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data.series} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+        <LineChart accessibilityLayer syncId={`technical-${data.ticker}`} data={data.series} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
           <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={48} style={{ fontSize: "10px" }} />
           <YAxis stroke={OPT_COLORS.axis} tickLine={false} domain={[0, 100]} ticks={[0, 30, 50, 70, 100]} width={34} style={{ fontSize: "10px" }} />
           <Tooltip
             contentStyle={ttStyle}
             formatter={(v: number) => [v.toFixed(1), "RSI 14"]}
-            labelFormatter={(s) => fmtDate(s as string)}
-            cursor={{ stroke: OPT_COLORS.gridStrong }}
+            labelFormatter={(s) => chartDateLabel(String(s),true)}
+            cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
           />
           <ReferenceLine y={70} stroke={OPT_COLORS.put} strokeDasharray="4 3" label={{ value: "70", position: "insideRight", fill: OPT_COLORS.put, fontSize: 9 }} />
           <ReferenceLine y={30} stroke={OPT_COLORS.call} strokeDasharray="4 3" label={{ value: "30", position: "insideRight", fill: OPT_COLORS.call, fontSize: 9 }} />
-          <Line type="monotone" dataKey="rsi" stroke={OPT_COLORS.smile} strokeWidth={1.6} dot={false} connectNulls isAnimationActive={false} />
+          <Line type="linear" dataKey="rsi" stroke={OPT_COLORS.smile} strokeWidth={1.6} dot={false} connectNulls={false} isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -114,8 +115,8 @@ function MacdChart({ data }: { data: TechnicalsResponse }) {
   return (
     <div style={box(180)}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+        <ComposedChart accessibilityLayer syncId={`technical-${data.ticker}`} data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
           <XAxis dataKey="date" stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={fmtDate} minTickGap={48} style={{ fontSize: "10px" }} />
           <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v: number) => v.toFixed(1)} width={42} style={{ fontSize: "10px" }} />
           <Tooltip
@@ -124,17 +125,17 @@ function MacdChart({ data }: { data: TechnicalsResponse }) {
               v.toFixed(3),
               name === "macd" ? "MACD" : name === "macdSignal" ? "Señal" : "Histograma",
             ]}
-            labelFormatter={(s) => fmtDate(s as string)}
-            cursor={{ stroke: OPT_COLORS.gridStrong }}
+            labelFormatter={(s) => chartDateLabel(String(s),true)}
+            cursor={false}
           />
           <ReferenceLine y={0} stroke={OPT_COLORS.gridStrong} />
-          <Bar dataKey="macdHist" isAnimationActive={false}>
+          <Bar maxBarSize={24} dataKey="macdHist" isAnimationActive={false}>
             {rows.map((r, i) => (
               <Cell key={i} fill={(r.macdHist ?? 0) >= 0 ? OPT_COLORS.call : OPT_COLORS.put} fillOpacity={0.55} />
             ))}
           </Bar>
-          <Line type="monotone" dataKey="macd" stroke={OPT_COLORS.term} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} />
-          <Line type="monotone" dataKey="macdSignal" stroke={OPT_COLORS.flip} strokeWidth={1.2} dot={false} connectNulls isAnimationActive={false} />
+          <Line type="linear" dataKey="macd" stroke={OPT_COLORS.term} strokeWidth={1.5} dot={false} connectNulls={false} isAnimationActive={false} />
+          <Line type="linear" dataKey="macdSignal" stroke={OPT_COLORS.flip} strokeWidth={1.2} dot={false} connectNulls={false} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
@@ -160,6 +161,7 @@ export function TechnicalSubSection({ ticker }: { ticker: string }) {
   const [data, setData]       = useState<TechnicalsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState("");
+  const [days,setDays]=useState<number|null>(null);
 
   useEffect(() => {
     if (!ticker || !TECH_URL) { setLoading(false); return; }
@@ -198,12 +200,14 @@ export function TechnicalSubSection({ ticker }: { ticker: string }) {
   }
 
   const { current } = data;
+  const visible={...data,series:visibleDatedRows(data.series,days)};
   const rsiTone = current.rsi == null ? "neutral" : current.rsi >= 70 ? "neg" : current.rsi <= 30 ? "pos" : "neutral";
   const trendUp = current.close != null && current.sma200 != null && current.close > current.sma200;
   const macdUp = current.macd != null && current.macdSignal != null && current.macd > current.macdSignal;
 
   return (
     <div className="mb-5 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div role="group" aria-label="Período de indicadores técnicos" className="flex gap-1 rounded-lg border border-slate-700/45 bg-slate-950/30 p-1">{[{label:'1 mes',days:30},{label:'3 meses',days:90},{label:'6 meses',days:180},{label:'Todo',days:null}].map(option=><button key={option.label} aria-pressed={days===option.days} onClick={()=>setDays(option.days)} className={`rounded-md px-2.5 py-1.5 text-[10px] outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 ${days===option.days?'bg-slate-700/60 text-slate-100':'text-slate-400 hover:text-slate-200'}`}>{option.label}</button>)}</div><span className="text-[10px] text-slate-500">Última sesión: {data.series.at(-1)?chartDateLabel(data.series.at(-1)!.date,true):'—'}</span></div>
       <div className="flex gap-4 flex-wrap">
         <Chip label="Precio vs SMA200" value={current.sma200 != null ? (trendUp ? "ALCISTA" : "BAJISTA") : "—"} tone={current.sma200 == null ? "neutral" : trendUp ? "pos" : "neg"} />
         <Chip label="RSI 14" value={current.rsi != null ? current.rsi.toFixed(1) : "—"} tone={rsiTone} />
@@ -211,19 +215,19 @@ export function TechnicalSubSection({ ticker }: { ticker: string }) {
       </div>
 
       <div>
-        <div className="text-[9px] text-muted-foreground/40 mb-1">Precio (1 año) con medias móviles de 50 y 200 sesiones</div>
-        <PriceSmaChart data={data} />
+        <div className="text-[10px] text-muted-foreground/70 mb-2">Precio y medias móviles de 50 y 200 sesiones</div>
+        <PriceSmaChart data={visible} />
         <MiniLegend items={[["Cierre", OPT_COLORS.spot], ["SMA 50", OPT_COLORS.term], ["SMA 200", OPT_COLORS.flip]]} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div>
-          <div className="text-[9px] text-muted-foreground/40 mb-1">RSI 14 · &gt;70 sobrecompra, &lt;30 sobreventa</div>
-          <RsiChart data={data} />
+          <div className="text-[9px] text-muted-foreground/70 mb-1">RSI 14 · &gt;70 sobrecompra, &lt;30 sobreventa</div>
+          <RsiChart data={visible} />
         </div>
         <div>
-          <div className="text-[9px] text-muted-foreground/40 mb-1">MACD (12, 26, 9) · histograma = MACD − señal</div>
-          <MacdChart data={data} />
+          <div className="text-[9px] text-muted-foreground/70 mb-1">MACD (12, 26, 9) · histograma = MACD − señal</div>
+          <MacdChart data={visible} />
           <MiniLegend items={[["MACD", OPT_COLORS.term], ["Señal", OPT_COLORS.flip]]} />
         </div>
       </div>

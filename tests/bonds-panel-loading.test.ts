@@ -33,3 +33,20 @@ test('empty bonds-credit series retry after two minutes while successful and unr
   assert.equal(calls,2);assert.equal(unrelatedCalls,1);
  }finally{Date.now=original;}
 });
+
+test('preferred Treasury observations bypass FRED without reusing the fallback-provider cache',async()=>{
+ const original=globalThis.fetch,requested:string[]=[];
+ globalThis.fetch=async input=>{
+  const url=new URL(String(input));
+  if(url.hostname==='api.stlouisfed.org'){requested.push(url.searchParams.get('series_id')!);return Response.json({observations:[{date:'2026-10-20',value:'9'}]});}
+  return new Response('',{status:503});
+ };
+ const primary={id:'DGS10',label:'10 años',unit:'%',source:'https://eodhd.com/financial-apis/us-treasury-ust-interest-rates-api-beta',points:[{date:'2026-10-20',value:4.2}]};
+ try{
+  const panel=await bondsPanel({FRED_KEY:'test-only',FMP_KEY:'',TAVILY_KEY:'',FINNHUB_KEY:''},undefined,[primary]);
+  assert.ok(!requested.includes('DGS10'),'a complete preferred series must not generate a FRED request');
+  assert.equal(requested.length,13);assert.ok(requested.includes('DGS2'),'uncovered series still use the fallback');
+  assert.deepEqual(panel.series.find(s=>s.id==='DGS10'),primary);
+  assert.equal(panel.series.find(s=>s.id==='DGS2')?.points.at(-1)?.value,9,'the earlier fallback-only cached panel must not mask preferred data');
+ }finally{globalThis.fetch=original;}
+});

@@ -20,25 +20,25 @@ function OiProfile({ data }: { data: AggregationsResponse }) {
   );
 
   return (
-    <div style={{ width: "100%", height: 320, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2, padding: "8px 6px" }}>
+    <div style={{ width: "100%", height: 320, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12, padding: "12px 8px" }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 8, right: 12, left: 4, bottom: 4 }} stackOffset="sign">
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
-          <XAxis dataKey="strike" type="number" domain={["dataMin", "dataMax"]} stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v) => fmtPrice(v, 0)} style={{ fontSize: "10px" }} />
+          <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
+          <XAxis dataKey="strike" type="number" domain={["dataMin", "dataMax"]} stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v) => fmtPrice(v, Math.abs(v)<10?2:1)} style={{ fontSize: "10px" }} />
           <YAxis stroke={OPT_COLORS.axis} tickLine={false} tickFormatter={(v) => fmtCompactNum(Math.abs(v))} width={48} style={{ fontSize: "10px" }} />
           <Tooltip
             contentStyle={ttStyle}
             formatter={(v: number, name) => [fmtNum(Math.abs(v)), name === "callOI" ? "Call OI" : "Put OI"]}
-            labelFormatter={(k) => `Strike ${fmtPrice(k as number, 0)}`}
-            cursor={{ fill: "rgba(148,163,184,0.06)" }}
+            labelFormatter={(k) => `Strike ${fmtPrice(k as number, 2)}`}
+            cursor={false}
           />
           <ReferenceLine y={0} stroke={OPT_COLORS.gridStrong} />
           <ReferenceLine x={data.spot} stroke={OPT_COLORS.spot} strokeDasharray="4 3" label={{ value: "Spot", position: "top", fill: OPT_COLORS.spot, fontSize: 9 }} />
           {data.maxPain != null && (
             <ReferenceLine x={data.maxPain} stroke={OPT_COLORS.maxPain} strokeDasharray="2 2" label={{ value: "Max pain", position: "bottom", fill: OPT_COLORS.maxPain, fontSize: 9 }} />
           )}
-          <Bar dataKey="callOI" stackId="oi" fill={OPT_COLORS.call} isAnimationActive={false} />
-          <Bar dataKey="putOI" stackId="oi" fill={OPT_COLORS.put} isAnimationActive={false} />
+          <Bar maxBarSize={24} dataKey="callOI" stackId="oi" fill={OPT_COLORS.call} isAnimationActive={false} />
+          <Bar maxBarSize={24} dataKey="putOI" stackId="oi" fill={OPT_COLORS.put} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -82,15 +82,15 @@ export function FlowCharts({ data }: { data: AggregationsResponse }) {
       </div>
 
       <div>
-        <div className="text-[9px] text-muted-foreground/40 mb-1">
-          Perfil de interés abierto · calls (verde, arriba) vs puts (rojo, abajo) — muros = soportes/resistencias
+        <div className="text-[9px] text-muted-foreground/70 mb-1">
+          Perfil de interés abierto · calls arriba y puts abajo · Concentraciones por strike
         </div>
         <OiProfile data={data} />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <WallList title="Resistencias (Call OI)" walls={data.callWalls} color={OPT_COLORS.call} />
-        <WallList title="Soportes (Put OI)" walls={data.putWalls} color={OPT_COLORS.put} />
+        <WallList title="Concentraciones de Call OI" walls={data.callWalls} color={OPT_COLORS.call} />
+        <WallList title="Concentraciones de Put OI" walls={data.putWalls} color={OPT_COLORS.put} />
       </div>
     </div>
   );
@@ -102,7 +102,7 @@ function WallList({ title, walls, color }: { title: string; walls?: { strike: nu
     <div className="border border-border bg-card">
       <div className="px-3 py-2 text-[9px] tracking-widest uppercase border-b border-border/50" style={{ color }}>{title}</div>
       <div className="divide-y divide-border/30">
-        {list.length === 0 && <div className="px-3 py-2 text-[10px] text-muted-foreground/40">—</div>}
+        {list.length === 0 && <div className="px-3 py-2 text-[10px] text-muted-foreground/70">—</div>}
         {list.map((w) => (
           <div key={w.strike} className="flex items-center justify-between px-3 py-1.5 text-[11px] font-mono">
             <span className="text-foreground/80">${fmtPrice(w.strike, 0)}</span>

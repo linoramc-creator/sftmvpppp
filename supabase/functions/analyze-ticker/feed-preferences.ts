@@ -35,5 +35,5 @@ export function feedPreferenceLabel(key:FeedGroupKey,symbol:string):string{retur
 export function feedPreferencesIdentity(preferences:FeedPreferences):string{return FEED_GROUP_KEYS.map(key=>`${key}=${preferences[key].join(',')}`).join(';');}
 export async function feedPreferencesKey(symbols:string[],preferences:FeedPreferences):Promise<string>{
  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`${symbols.join(',')}|${feedPreferencesIdentity(preferences)}`));
- return 'feed-markets-v8:'+Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+ return 'feed-markets-v9:'+Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }

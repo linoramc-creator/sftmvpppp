@@ -46,14 +46,14 @@ export function VolatilitySmileChart({ data, maxExpiries = 4 }: { data: SurfaceR
 
   return (
     <div>
-      <div style={{ width: "100%", height: 300, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 2, padding: "8px 6px" }}>
+      <div style={{ width: "100%", height: 300, backgroundColor: OPT_COLORS.bg, border: "1px solid #1e293b", borderRadius: 12, padding: "12px 8px" }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 14, right: 12, left: 4, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={OPT_COLORS.grid} />
+            <CartesianGrid strokeDasharray="2 5" vertical={false} stroke={OPT_COLORS.grid} />
             <XAxis
               dataKey="strike" type="number" domain={["dataMin", "dataMax"]}
               stroke={OPT_COLORS.axis} tickLine={false}
-              tickFormatter={(v: number) => fmtPrice(v, 0)} style={{ fontSize: "10px" }}
+              tickFormatter={(v: number) => fmtPrice(v, Math.abs(v)<10?2:1)} style={{ fontSize: "10px" }}
             />
             <YAxis
               stroke={OPT_COLORS.axis} tickLine={false}
@@ -63,25 +63,25 @@ export function VolatilitySmileChart({ data, maxExpiries = 4 }: { data: SurfaceR
             <Tooltip
               contentStyle={ttStyle}
               formatter={(v: number, name) => [`${v.toFixed(1)}%`, fmtExpiry(String(name))]}
-              labelFormatter={(k) => `Strike ${fmtPrice(k as number, 0)}`}
-              cursor={{ stroke: OPT_COLORS.gridStrong }}
+              labelFormatter={(k) => `Strike ${fmtPrice(k as number, 2)}`}
+              cursor={{stroke:"#7dd3fc",strokeOpacity:.45,strokeWidth:.8,strokeDasharray:"3 4"}}
             />
             <ReferenceLine
               x={data.spot}
               stroke={OPT_COLORS.spot}
               strokeDasharray="4 3"
-              label={{ value: `Spot $${fmtPrice(data.spot, 0)}`, position: "top", fill: OPT_COLORS.spot, fontSize: 9 }}
+              label={{ value: `Spot $${fmtPrice(data.spot, 2)}`, position: "top", fill: OPT_COLORS.spot, fontSize: 9 }}
             />
             {series.map((expiry, i) => (
               <Line
                 key={expiry}
-                type="monotone"
+                type="linear"
                 dataKey={expiry}
                 name={expiry}
                 stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
                 strokeWidth={2}
                 dot={false}
-                connectNulls
+                connectNulls={false}
                 isAnimationActive={false}
               />
             ))}

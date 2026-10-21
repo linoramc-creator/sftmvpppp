@@ -1,4 +1,5 @@
 import {cached} from './panels.ts';
+import {marketJson} from './eodhd-market-fetch.ts';
 export type ExtendedQuote={session:'pre'|'post';price:number;date:string;at:string|null;change:number|null};
 export type ExtendedHours={symbol:string;currency:string;quotes:ExtendedQuote[];fetchedAt:string};
 const num=(v:any):number|null=>typeof(v?.raw??v)==='number'&&Number.isFinite(v?.raw??v)?v?.raw??v:null;
@@ -20,7 +21,7 @@ export function normalizeExtended(symbol:string,price:any,daily:any,now=Date.now
  }
  return {symbol,currency:typeof price?.currency==='string'?price.currency:daily?.symbol===symbol?'USD':'',quotes,fetchedAt:new Date(now).toISOString()};
 }
-async function get(url:string,headers:Record<string,string>={}){try{const r=await fetch(url,{headers,redirect:'error',signal:AbortSignal.timeout(7000)});return r.ok?await r.json():null;}catch{return null;}}
+async function get(url:string,headers:Record<string,string>={}){return marketJson(url,{headers,redirect:'error'},{timeoutMs:7000});}
 export async function extendedHours(symbol:string,key:string|undefined,summary:(s:string,m:string)=>Promise<any>,regularTime?:number,previousSession?:string):Promise<ExtendedHours>{return cached('extended-hours-v2:'+symbol,120000,async()=>{
  const [profile,chart]=await Promise.all([summary(symbol,'price'),regularTime?null:get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`,{'User-Agent':'Mozilla/5.0'})]);
  const native=normalizeExtended(symbol,profile?.price,null);if(native.quotes.length===2)return native;
