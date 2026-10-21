@@ -53,7 +53,11 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
     if(body.panel==='feedMarkets'&&(body.feedGroups===null||!normalizeFeedPreferences(body.feedGroups)))throw new BetaError(400,'Configuración de mercado inválida.');
-    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','sectorActivity','news','institutional','business','assetSnapshot','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','bondsCreditNews','sectorActivity','news','institutional','business','assetSnapshot','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='bondsCreditNews'){
+      if(!['US','FR','DE','GB','private'].includes(body.subject))throw new BetaError(400,'Mercado de noticias inválido.');
+      return {request_class:'expensive'};
+    }
     if(body.panel==='sectorActivity'){
       if(typeof body.subject!=='string'||!/^[\p{L}\p{N} &.,()/-]{2,80}$/u.test(body.subject.trim()))throw new BetaError(400,'Sector inválido.');
       if(!Array.isArray(body.peers)||body.peers.length<1||body.peers.length>10||body.peers.some((p:unknown)=>!p||typeof p!=='object'||Array.isArray(p)||!symbol((p as Body).symbol)||typeof (p as Body).name!=='string'||(p as Body).name.trim().length<1||(p as Body).name.length>120)||new Set(body.peers.map((p:Body)=>p.symbol.trim().toUpperCase())).size!==body.peers.length)throw new BetaError(400,'Empresas del sector inválidas.');

@@ -40,7 +40,7 @@ export async function cached<T>(key: string, ttl: number, fn: () => Promise<T>):
   if (pending.has(key)) return pending.get(key) as Promise<T>;
   const promise = fn().then(value => {
     if (cache.size >= 150) cache.delete(cache.keys().next().value!);
-    const incomplete = value === null || (key.startsWith('business:') && (!(value as any)?.products?.length || !(value as any)?.geography?.length)) || (key.startsWith('news:') && !(value as any)?.articles?.length) || (key.startsWith('feed:') && !(value as any)?.headlines?.length);
+    const incomplete = value === null || (key.startsWith('business:') && (!(value as any)?.products?.length || !(value as any)?.geography?.length)) || (key.startsWith('news:') && !(value as any)?.articles?.length) || (key.startsWith('feed:') && !(value as any)?.headlines?.length) || (key.startsWith('bonds-credit-series:') && !(value as any)?.points?.length);
     cache.set(key, { expires: Date.now() + (incomplete ? Math.min(ttl, 120000) : ttl), value });
     return value;
   }).finally(() => pending.delete(key));
@@ -241,12 +241,12 @@ export async function bondsPanel(env: Env, deps?: Dependencies): Promise<BondsPa
   // UTC date in the cache key guarantees a fresh request on each new day.
   return cached(`bonds:${new Date().toISOString().slice(0, 10)}`, HOUR, async () => {
     const start = new Date(Date.now() - 3660 * 86400000).toISOString().slice(0, 10);
-    const series = await Promise.all(FRED_SERIES.map(async ([id, label]): Promise<Series> => {
-      const raw = env.FRED_KEY ? await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${encodeURIComponent(env.FRED_KEY)}&file_type=json&observation_start=${id.startsWith("DGS") ? start : new Date(Date.now() - 370 * 86400000).toISOString().slice(0, 10)}`) : null;
+    const seriesRequest = Promise.all(FRED_SERIES.map(async ([id, label]): Promise<Series> => {
+      const raw = env.FRED_KEY ? await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${encodeURIComponent(env.FRED_KEY)}&file_type=json&observation_start=${start}`) : null;
       const points: Point[] = ((raw as Row)?.observations ?? []).filter((r: Row) => r.value !== '.' && r.value !== '' && Number.isFinite(Number(r.value))).map((r: Row) => ({ date: r.date, value: Number(r.value) }));
       return { id, label, unit: ['T10Y2Y', 'BAMLC0A0CM', 'BAMLH0A0HYM2'].includes(id) ? 'pp' : '%', source: `https://fred.stlouisfed.org/series/${id}`, points };
     }));
-    const etfs = await Promise.all(BOND_ETFS.map(async ([symbol, label]): Promise<BondFund> => {
+    const etfsRequest = Promise.all(BOND_ETFS.map(async ([symbol, label]): Promise<BondFund> => {
       const raw = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       const chart = (raw as Row)?.chart?.result?.[0];
       const close = chart?.indicators?.quote?.[0]?.close ?? [];
@@ -257,6 +257,7 @@ export async function bondsPanel(env: Env, deps?: Dependencies): Promise<BondsPa
       const previous = points.filter(p => quoteDay && p.date < quoteDay).at(-1)?.value ?? null;
       return { symbol, label, price, change: price !== null && previous && previous > 0 ? (price / previous - 1) * 100 : null, date: day(meta.regularMarketTime), currency: meta.currency ?? 'USD', points, distributionYield: null, expenseRatio: null, assets: null };
     }));
+    const [series,etfs]=await Promise.all([seriesRequest,etfsRequest]);
     return { fetchedAt: new Date().toISOString(), series, etfs };
   });
 }

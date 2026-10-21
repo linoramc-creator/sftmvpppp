@@ -1,11 +1,12 @@
 import {bondsPanel,cached,type BondsPanel,type Point,type Series} from './panels.ts';
 import type {PriceSeries} from './market-analytics.ts';
 import {relativeHistory} from './relative-comparison.ts';
+import {buildBondsCreditAnalytics,CURVE_TENORS,type BondsCreditAnalytics} from './bonds-credit-analytics.ts';
 export type CreditFrequency='daily'|'weekly'|'monthly'|'quarterly';
 export type CreditSeries=Series&{frequency:CreditFrequency;currency:string|null;scope:'sovereign'|'private-funds'|'banking'|'financial-conditions'|'derived'};
 export type SovereignMarket={code:'US'|'FR'|'DE'|'GB';name:string;currency:string;series:CreditSeries;monthChangeBp:number|null;yearChangeBp:number|null};
 export type CreditProxy={symbol:string;label:string;currency:string;price:number|null;date:string|null;returnsDate:string|null;return21:number|null;return63:number|null;points:Point[]};
-export type BondsCreditPanel={fetchedAt:string;base:BondsPanel;sovereigns:SovereignMarket[];sovereignCommonDate:string|null;sovereignSpreads:{code:string;value:number|null}[];credit:CreditSeries[];privateValuation:CreditSeries;privateLiabilities:CreditSeries;privateGrowth:CreditSeries;proxies:CreditProxy[]};
+export type BondsCreditPanel={fetchedAt:string;base:BondsPanel;sovereigns:SovereignMarket[];sovereignCommonDate:string|null;sovereignSpreads:{code:string;value:number|null}[];credit:CreditSeries[];privateValuation:CreditSeries;privateLiabilities:CreditSeries;privateGrowth:CreditSeries;proxies:CreditProxy[];analytics?:BondsCreditAnalytics};
 export type BondsCreditEnv={FRED_KEY:string;MASSIVE_API_KEY?:string;FMP_KEY?:string;FINNHUB_KEY?:string};
 type Config={id:string;label:string;unit:string;frequency:CreditFrequency;currency:string|null;scope:CreditSeries['scope'];scale?:number;start?:string};
 export const SOVEREIGN_MARKETS=[{code:'US',name:'Estados Unidos',currency:'USD',id:'IRLTLT01USM156N'},{code:'FR',name:'Francia',currency:'EUR',id:'IRLTLT01FRM156N'},{code:'DE',name:'Alemania',currency:'EUR',id:'IRLTLT01DEM156N'},{code:'GB',name:'Reino Unido',currency:'GBP',id:'IRLTLT01GBM156N'}] as const;
@@ -14,12 +15,17 @@ export const CREDIT_CONFIG:Config[]=[
  {id:'BOGZ1FL443067205Q',label:'Préstamos privados · coste',unit:'miles de millones USD',currency:'USD',frequency:'quarterly',scope:'private-funds',scale:.001,start:'2012-10-01'},
  {id:'BOGZ1LM443067215Q',label:'Préstamos privados · valor razonable',unit:'miles de millones USD',currency:'USD',frequency:'quarterly',scope:'private-funds',scale:.001,start:'2012-10-01'},
  {id:'BOGZ1FL444190005Q',label:'Pasivos de fondos de deuda privada',unit:'miles de millones USD',currency:'USD',frequency:'quarterly',scope:'private-funds',scale:.001,start:'2012-10-01'},
+ {id:'BOGZ1FL442000093Q',label:'Capital comprometido no exigido · dry powder',unit:'miles de millones USD',currency:'USD',frequency:'quarterly',scope:'private-funds',scale:.001,start:'2012-10-01'},
  {id:'DRTSCILM',label:'Endurecimiento · empresas grandes y medianas',unit:'% neto',currency:null,frequency:'quarterly',scope:'banking'},
  {id:'DRTSCIS',label:'Endurecimiento · pequeñas empresas',unit:'% neto',currency:null,frequency:'quarterly',scope:'banking'},
  {id:'DRSDCILM',label:'Demanda de préstamos · grandes y medianas',unit:'% neto',currency:null,frequency:'quarterly',scope:'banking'},
  {id:'DRBLACBS',label:'Morosidad de préstamos empresariales bancarios',unit:'%',currency:null,frequency:'quarterly',scope:'banking'},
  {id:'BUSLOANS',label:'Crédito comercial e industrial bancario',unit:'miles de millones USD',currency:'USD',frequency:'monthly',scope:'banking'},
  {id:'NFCI',label:'Condiciones financieras',unit:'índice',currency:null,frequency:'weekly',scope:'financial-conditions'},
+];
+const ADDITIONAL_MARKET_CONFIG:Config[]=[
+ {id:'DGS20',label:'20 años',unit:'%',currency:'USD',frequency:'daily',scope:'sovereign'},
+ {id:'T5YIFR',label:'Inflación implícita · 5 años dentro de 5 años',unit:'%',currency:null,frequency:'daily',scope:'sovereign'},
 ];
 const finite=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
 const day=(time=Date.now())=>new Date(time).toISOString().slice(0,10);
@@ -33,7 +39,7 @@ async function observations(id:string,key:string,start:string){
  if(key)try{const response=await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${encodeURIComponent(key)}&file_type=json&observation_start=${start}`,{redirect:'error',signal:AbortSignal.timeout(10000)});if(response.ok){const raw=await response.json();if(Array.isArray(raw.observations))return raw.observations;}}catch{/* The official public export is an independent fallback. */}
  try{const response=await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${start}`,{redirect:'error',signal:AbortSignal.timeout(10000)});return response.ok?parseCsv(await response.text(),id):[];}catch{return [];}
 }
-async function loadSeries(config:Config,key:string):Promise<CreditSeries>{return cached('bonds-credit-series-v1:'+config.id,3600000,async()=>({id:config.id,label:config.label,unit:config.unit,source:`https://fred.stlouisfed.org/series/${config.id}`,frequency:config.frequency,currency:config.currency,scope:config.scope,points:normalizeCreditPoints(await observations(config.id,key,config.start??day(Date.now()-3660*86400000)),config.scale??1)}));}
+async function loadSeries(config:Config,key:string):Promise<CreditSeries>{return cached('bonds-credit-series:'+config.id,3600000,async()=>({id:config.id,label:config.label,unit:config.unit,source:`https://fred.stlouisfed.org/series/${config.id}`,frequency:config.frequency,currency:config.currency,scope:config.scope,points:normalizeCreditPoints(await observations(config.id,key,config.start??day(Date.now()-3660*86400000)),config.scale??1)}));}
 const shiftMonth=(date:string,months:number)=>{const d=new Date(date+'T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+months);return d.toISOString().slice(0,10);};
 export function periodChange(points:Point[],months:number):number|null{const last=points.at(-1);if(!last)return null;const old=points.find(p=>p.date===shiftMonth(last.date,-months));return old?(last.value-old.value)*100:null;}
 function derived(id:string,label:string,unit:string,a:CreditSeries|undefined,b:CreditSeries|undefined,fn:(a:number,b:number)=>number|null):CreditSeries{
@@ -48,7 +54,7 @@ export function buildBondsCredit(base:BondsPanel,series:CreditSeries[],proxies:C
  const privateLiabilities=derived('PRIVATE_LIABILITIES_ASSETS','Pasivos / activos','%',liabilities,funds,(a,b)=>b>0?a/b*100:null);
  const costByDate=new Map(cost?.points.map(p=>[p.date,p.value])??[]);
  const privateGrowth:CreditSeries={id:'PRIVATE_LOANS_YOY',label:'Crecimiento interanual de préstamos privados',unit:'%',source:'',frequency:'quarterly',currency:null,scope:'derived',points:(cost?.points??[]).flatMap(p=>{const before=costByDate.get(shiftMonth(p.date,-12));return before!==undefined&&before>0?[{date:p.date,value:(p.value/before-1)*100}]:[];})};
- return {fetchedAt:new Date(now).toISOString(),base,sovereigns,sovereignCommonDate:common,sovereignSpreads:sovereigns.map(m=>{const value=common?m.series.points.find(p=>p.date===common)?.value:undefined;return {code:m.code,value:value!==undefined&&germany!==undefined?(value-germany)*100:null};}),credit:series.filter(s=>s.scope!=='sovereign'),privateValuation,privateLiabilities,privateGrowth,proxies};
+ return {fetchedAt:new Date(now).toISOString(),base,sovereigns,sovereignCommonDate:common,sovereignSpreads:sovereigns.map(m=>{const value=common?m.series.points.find(p=>p.date===common)?.value:undefined;return {code:m.code,value:value!==undefined&&germany!==undefined?(value-germany)*100:null};}),credit:series.filter(s=>s.scope!=='sovereign'),privateValuation,privateLiabilities,privateGrowth,proxies,analytics:buildBondsCreditAnalytics(base,series)};
 }
 export function proxyFromPrices(symbol:string,label:string,p:PriceSeries|null):CreditProxy{
  const last=p?.closes.at(-1),ret=(n:number)=>last!==undefined&&p&&p.closes.length>n&&p.closes.at(-n-1)!>0?(last/p.closes.at(-n-1)!-1)*100:null;
@@ -64,8 +70,27 @@ async function listedProxies(key?:string):Promise<CreditProxy[]>{return cached('
  if(key)try{const r=await fetch(`https://api.massive.com/v2/aggs/ticker/BIZD/range/1/day/${day(Date.now()-10*86400000)}/${day()}?adjusted=true&sort=desc&limit=20`,{headers:{Authorization:`Bearer ${key}`},redirect:'error',signal:AbortSignal.timeout(8000)});if(r.ok){const rows=(await r.json())?.results;if(Array.isArray(rows))result[0]=closedProxyPrice(result[0],rows);}}catch{/* Preserve the verified completed-session quote. */}
  return result;
  });}
-export async function bondsCreditPanel(env:BondsCreditEnv):Promise<BondsCreditPanel>{return cached('bonds-credit-v1',900000,async()=>{
+/** Only used when the native Treasury series is absent. The provider's dates and
+ * annual-percent units are preserved, and null fields never become zero yields. */
+export function massiveTreasurySeries(raw:unknown,now=Date.now()):Series[]{
+ const rows=Array.isArray(raw)?raw:(raw as {results?:unknown})?.results;
+ const field:Record<string,string>={DGS1MO:'yield_1_month',DGS3MO:'yield_3_month',DGS6MO:'yield_6_month',DGS1:'yield_1_year',DGS2:'yield_2_year',DGS5:'yield_5_year',DGS10:'yield_10_year',DGS20:'yield_20_year',DGS30:'yield_30_year'};
+ return CURVE_TENORS.map(([id,label])=>({id,label,unit:'%',source:'https://api.massive.com/fed/v1/treasury-yields',points:normalizeCreditPoints(Array.isArray(rows)?rows.map(row=>({date:row?.date,value:row?.[field[id]]})):[],1,now)}));
+}
+async function recoverBase(base:BondsPanel,massiveKey?:string):Promise<BondsPanel>{
+ let series=base.series.map(s=>({...s,points:normalizeCreditPoints(s.points)}));
+ if(massiveKey&&CURVE_TENORS.some(([id])=>id!=='DGS20'&&!series.find(s=>s.id===id)?.points.length)){
+  const backup=await cached('bonds-credit-massive-treasury-v1',3600000,async()=>{try{const r=await fetch(`https://api.massive.com/fed/v1/treasury-yields?date.gte=${day(Date.now()-3660*86400000)}&sort=date.asc&limit=5000`,{headers:{Authorization:`Bearer ${massiveKey}`},redirect:'error',signal:AbortSignal.timeout(8000)});return r.ok?massiveTreasurySeries(await r.json()):[];}catch{return [];}});
+  series=series.map(s=>s.points.length?s:backup.find(b=>b.id===s.id&&b.points.length)??s);
+ }
+ // bondsPanel already tried the keyed API. Retry missing series through the
+ // official public export only, rather than repeating a failing API request.
+ const fallback=await Promise.all(series.filter(s=>!s.points.length).map(async s=>({...s,points:normalizeCreditPoints(await observations(s.id,'',day(Date.now()-3660*86400000)))})));
+ return {...base,series:series.map(s=>s.points.length?s:fallback.find(f=>f.id===s.id)??s)};
+}
+export async function bondsCreditPanel(env:BondsCreditEnv):Promise<BondsCreditPanel>{return cached('bonds-credit-v2',900000,async()=>{
  const sovereigns:Config[]=SOVEREIGN_MARKETS.map(m=>({id:m.id,label:m.name+' · 10 años',unit:'%',frequency:'monthly',currency:m.currency,scope:'sovereign'}));
- const [base,series,proxies]=await Promise.all([bondsPanel({FRED_KEY:env.FRED_KEY,FMP_KEY:env.FMP_KEY??'',FINNHUB_KEY:env.FINNHUB_KEY??'',TAVILY_KEY:''}),Promise.all([...sovereigns,...CREDIT_CONFIG].map(c=>loadSeries(c,env.FRED_KEY))),listedProxies(env.MASSIVE_API_KEY)]);
+ const [base,series,proxies]=await Promise.all([bondsPanel({FRED_KEY:env.FRED_KEY,FMP_KEY:env.FMP_KEY??'',FINNHUB_KEY:env.FINNHUB_KEY??'',TAVILY_KEY:''}).then(base=>recoverBase(base,env.MASSIVE_API_KEY)),Promise.all([...sovereigns,...CREDIT_CONFIG,...ADDITIONAL_MARKET_CONFIG].map(c=>loadSeries(c,env.FRED_KEY))),listedProxies(env.MASSIVE_API_KEY)]);
+ const extra=series.find(s=>s.id==='DGS20');if(extra?.points.length&&!base.series.some(s=>s.id==='DGS20'))base.series.push(extra);
  return buildBondsCredit(base,series,proxies);
 });}
