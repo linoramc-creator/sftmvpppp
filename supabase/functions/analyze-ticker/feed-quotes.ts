@@ -1,13 +1,14 @@
 import {regularSessionEnd} from './market-session.ts';
 import {instrumentInfo} from './asset-instrument.ts';
-import {feedSymbolAllowed,type FeedGroupKey} from './feed-preferences.ts';
+import {normalizeFeedSymbol,type FeedGroupKey} from './feed-preferences.ts';
 import {marketJson} from './eodhd-market-fetch.ts';
+import {ironReferenceQuote} from './iron-reference.ts';
 export type FeedSession='pre'|'regular'|'post'|'closed';
-export type SessionQuote={symbol:string;label:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close';reference:'previous-close'|'regular-close'|null;timezone?:string};
+export type SessionQuote={symbol:string;label:string;displaySymbol?:string;contractLabel?:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close';reference:'previous-close'|'regular-close'|null;timezone?:string};
 const commodityUnits:Record<string,string>={'GC=F':'USD/oz t','SI=F':'USD/oz t','CL=F':'USD/barril','BZ=F':'USD/barril','HG=F':'USD/libra','NG=F':'USD/MMBtu','ZW=F':'¢/bushel','ZC=F':'¢/bushel'};
 const positive=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>0;
 const localDate=(ms:number,timezone:string)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(ms);
-export function feedSymbols(value:unknown):string[]|null{if(value===undefined||value==='')return [];if(typeof value!=='string'||value.length>100)return null;const items=value.split(',').map(s=>s.trim().toUpperCase());return items.length<=6&&items.every(s=>/^[A-Z0-9^][A-Z0-9.^=-]{0,14}$/.test(s))?[...new Set(items)]:null;}
+export function feedSymbols(value:unknown):string[]|null{if(value===undefined||value==='')return [];if(typeof value!=='string'||value.length>111)return null;const items=value.split(',').map(s=>s.trim().toUpperCase());return items.length<=7&&items.every(s=>/^[A-Z0-9^][A-Z0-9.^=-]{0,14}$/.test(s))?[...new Set(items)]:null;}
 function phase(meta:any,time:number,symbol=''):FeedSession{for(const [key,name] of [['pre','pre'],['regular','regular'],['post','post']] as const){const p=meta?.currentTradingPeriod?.[key];const end=key==='regular'?regularSessionEnd(meta,symbol):p?.end;if(positive(p?.start)&&positive(end)&&time>=p.start*1000&&time<end*1000)return name;}return 'closed';}
 export function normalizeFeedQuote(symbol:string,label:string,raw:any,intraday:any=null,now=Date.now()):SessionQuote{
  const daily=raw?.chart?.result?.[0],meta=daily?.meta??{},times=daily?.timestamp??[],closes=daily?.indicators?.quote?.[0]?.close??[];
@@ -47,17 +48,23 @@ const verifiedAssets=new Map<string,{at:number;label:string}>();
 const verifyingAssets=new Map<string,Promise<{symbol:string;label:string}|null>>();
 // A metadata check is required when an asset is added. Persisted choices are
 // subsequently priced from the existing quote cache, rather than researched again.
-export async function validateFeedAsset(group:FeedGroupKey,symbol:string):Promise<{symbol:string;label:string}|null>{
- if(!feedSymbolAllowed(group,symbol))return null;
+export async function validateFeedAsset(group:FeedGroupKey,input:string,deps:{read?:(symbol:string)=>Promise<any>;iron?:typeof ironReferenceQuote;now?:number}={}):Promise<{symbol:string;label:string}|null>{
+ const symbol=normalizeFeedSymbol(group,input);if(!symbol)return null;
+ const cacheable=!deps.read&&!deps.iron&&deps.now===undefined;
  const key=`${group}:${symbol}`,hit=verifiedAssets.get(key);
- if(hit&&Date.now()-hit.at<300000)return {symbol,label:hit.label};
- if(verifyingAssets.has(key))return verifyingAssets.get(key)!;
+ if(cacheable&&hit&&Date.now()-hit.at<300000)return {symbol,label:hit.label};
+ if(cacheable&&verifyingAssets.has(key))return verifyingAssets.get(key)!;
  const operation=(async()=>{
-  const raw=await chart(symbol,false),data=raw?.chart?.result?.[0],meta=data?.meta??{};
+  if(group==='commodities'&&symbol==='SGX-IODEX'){
+   const now=deps.now??Date.now(),value=await (deps.iron??ironReferenceQuote)(now),date=typeof value.date==='string'?Date.parse(value.date+'T00:00:00Z'):NaN;
+   if(!positive(value.price)||!Number.isFinite(date)||new Date(date).toISOString().slice(0,10)!==value.date||date>now||now-date>10*86400000)return null;
+   if(cacheable)verifiedAssets.set(key,{at:Date.now(),label:value.label});return{symbol,label:value.label};
+  }
+  const raw=await (deps.read??((value:string)=>chart(value,false)))(symbol),data=raw?.chart?.result?.[0],meta=data?.meta??{};
   const type=String(meta.instrumentType??'').toUpperCase();
-  const allowed=group==='indices'?['INDEX','INDICES','FUTURE']:group==='etfs'?['ETF']:['CURRENCY','CRYPTOCURRENCY'];
+  const allowed=group==='indices'?['INDEX','INDICES','FUTURE']:group==='etfs'?['ETF']:group==='commodities'?['FUTURE']:['CURRENCY','CRYPTOCURRENCY'];
   if(!allowed.includes(type)||!positive(meta.regularMarketPrice)&&!(data?.indicators?.quote?.[0]?.close??[]).some(positive))return null;
-  const label=feedAssetLabel(symbol,meta);if(verifiedAssets.size>=256)verifiedAssets.delete(verifiedAssets.keys().next().value!);
-  verifiedAssets.set(key,{at:Date.now(),label});return {symbol,label};
- })().finally(()=>verifyingAssets.delete(key));verifyingAssets.set(key,operation);return operation;
+  if(typeof meta.symbol==='string'&&normalizeFeedSymbol(group,meta.symbol)!==symbol)return null;
+  const label=feedAssetLabel(symbol,meta);if(cacheable){if(verifiedAssets.size>=256)verifiedAssets.delete(verifiedAssets.keys().next().value!);verifiedAssets.set(key,{at:Date.now(),label});}return {symbol,label};
+ })().catch(()=>null).finally(()=>{if(cacheable)verifyingAssets.delete(key);});if(cacheable)verifyingAssets.set(key,operation);return operation;
 }

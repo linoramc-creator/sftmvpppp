@@ -91,7 +91,7 @@ export function watchContext(asset:BriefAsset,benchmark?:BriefAsset):WatchContex
 }
 export async function buildBrief(symbols:string[],env:BriefEnv,preview=false,now=Date.now(),time='07:00',date=zoneDate(now)):Promise<BriefData>{
  const window=briefWindow(now,preview,time,date),cutoff=window.cutoff;
- const watched=[...new Set(symbols)].slice(0,6),all=[...MARKETS,...watched.filter(s=>!MARKETS.some(m=>m[0]===s)).map(s=>[s,s,'Watchlist'] as [string,string,string])];
+ const watched=[...new Set(symbols)].slice(0,7),all=[...MARKETS,...watched.filter(s=>!MARKETS.some(m=>m[0]===s)).map(s=>[s,s,'Watchlist'] as [string,string,string])];
  const dailyCharts=new Map<string,Promise<any>>();
  const daily=(symbol:string)=>{if(!dailyCharts.has(symbol))dailyCharts.set(symbol,get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=6mo&interval=1d&includePrePost=false`,{headers:{'User-Agent':'Mozilla/5.0'}}));return dailyCharts.get(symbol)!;};
  const primaryNews=await eodhdNews(),baseComplete=datedNews(marketNews(primaryNews),window.start,cutoff,12).length>=12,politicsComplete=datedNews(geopoliticalNews(primaryNews,cutoff,cutoff-window.start),window.start,cutoff,6).length>=6;

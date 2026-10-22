@@ -12,13 +12,15 @@ vi.mock('@/components/AuthGate',()=>({useProfile:()=>({id:'feed-instruments-user
 
 it('opens every index and ETF through the watchlist asset route without enabling unrelated quote groups',async()=>{
  const quote=(symbol:string,label:string)=>({symbol,label,price:100,currency:'USD',date:'2026-10-16',change:1,session:'closed'});
- api.mockImplementation(async(_url:string,init:RequestInit)=>({ok:true,json:async()=>JSON.parse(init.body as string).panel==='feedMarkets'?{groups:[{label:'ÍNDICES',items:[quote('^KS11','KOSPI · Corea del Sur'),quote('NQ=F','Nasdaq 100 · Futuro')]},{label:'ETF PRINCIPALES',items:[quote('QQQ','Nasdaq 100 · QQQ')]},{label:'DIVISAS Y ACTIVOS DIGITALES',items:[{...quote('EURUSD=X','EUR/USD'),price:1.16473}]},{label:'MATERIAS PRIMAS',items:[quote('GC=F','Oro')]}],treasury:[],earnings:[],fetchedAt:'2026-10-16T21:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-16T21:00Z'}}));
+ api.mockImplementation(async(_url:string,init:RequestInit)=>({ok:true,json:async()=>JSON.parse(init.body as string).panel==='feedMarkets'?{groups:[{label:'ÍNDICES',items:[quote('^KS11','KOSPI · Corea del Sur'),quote('NQ=F','Nasdaq 100 · Futuro')]},{label:'ETF PRINCIPALES',items:[quote('QQQ','Nasdaq 100 · QQQ')]},{label:'DIVISAS Y ACTIVOS DIGITALES',items:[{...quote('EURUSD=X','EUR/USD'),price:1.16473}]},{label:'MATERIAS PRIMAS',items:[quote('GC=F','Oro'),quote('BZ=F','Petróleo Brent'),{...quote('SGX-IODEX','Hierro · IODEX'),displaySymbol:'FEF',contractLabel:'Nov-26'}]}],treasury:[],earnings:[],fetchedAt:'2026-10-16T21:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-16T21:00Z'}}));
  const select=vi.fn();render(<FeedView stocks={[]} data={null} onChange={vi.fn()} onSelect={select}/>);
  fireEvent.click(await screen.findByRole('button',{name:'Abrir ficha de KOSPI · Corea del Sur'}));expect(select).toHaveBeenLastCalledWith('^KS11');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de Nasdaq 100 · Futuro'}));expect(select).toHaveBeenLastCalledWith('NQ=F');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de Nasdaq 100 · QQQ'}));expect(select).toHaveBeenLastCalledWith('QQQ');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de EUR/USD'}));expect(select).toHaveBeenLastCalledWith('EURUSD=X');expect(screen.getByText('1,16473 USD')).toBeVisible();
  expect(screen.queryByRole('button',{name:'Abrir ficha de Oro'})).toBeNull();
+ for(const symbol of ['^KS11','NQ=F','QQQ','EURUSD=X','GC=F','BZ=F','FEF'])expect(screen.getAllByText(symbol,{exact:true})[0]).toBeVisible();
+ expect(screen.getByText('SGX · Nov-26')).toBeVisible();expect(screen.queryByText('SGX-IODEX',{exact:true})).toBeNull();
 });
 
 it('labels six-month and one-year yields and draws only a curve with one common observation date',()=>{
@@ -26,6 +28,7 @@ it('labels six-month and one-year yields and draws only a curve with one common 
  const points=[.5,1,2,5,10,20].map(years=>({years,yield:4,date:'2026-10-16',changeBp:2}));
  const {rerender}=render(<TreasuryCard points={points}/>);
  expect(screen.getByText('6 meses')).toBeVisible();expect(screen.getByText('1 año')).toBeVisible();
+ for(const id of ['DGS6MO','DGS1','DGS2','DGS5','DGS10','DGS20'])expect(screen.getByText(id,{exact:true})).toBeVisible();
  expect(screen.queryByText(/Curva pendiente/)).toBeNull();
  rerender(<TreasuryCard points={points.map((p,i)=>i===0?{...p,date:'2026-10-15'}:p)}/>);
  expect(screen.getByText(/Curva pendiente de una fecha común/)).toBeVisible();

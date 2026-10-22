@@ -942,6 +942,7 @@ function MarketTickerBar({
   const [editing, setEditing]   = useState(false);
   const [paused,setPaused] = useState(false);
   const [draft,   setDraft]     = useState(customStocks.join(", "));
+  const [editError,setEditError] = useState('');
 
   const fmtChange = (n: number | null, suffix = "%") =>
     n == null ? null : `${n > 0 ? "+" : ""}${n.toFixed(2)}${suffix}`;
@@ -952,7 +953,9 @@ function MarketTickerBar({
     :            "text-destructive";
 
   const saveEdit = () => {
-    const parsed = draft.split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.^]{1,10}$/.test(s)).slice(0, 6);
+    const parsed = [...new Set(draft.split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean))];
+    if(parsed.length>7||parsed.some(symbol=>!/^[A-Z0-9^][A-Z0-9.^=-]{0,14}$/.test(symbol))){setEditError('Introduce hasta 7 tickers válidos.');return;}
+    setEditError('');
     onChangeStocks(parsed.length ? parsed : customStocks);
     setEditing(false);
   };
@@ -966,7 +969,7 @@ function MarketTickerBar({
           {/* Fixed indices */}
           {(data?.indices ?? []).map((idx) => (
             <div key={idx.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
-              <span className="text-[9px] tracking-widest text-muted-foreground/45 uppercase">{idx.label}</span>
+              <span className="text-[9px] tracking-widest text-muted-foreground/70 uppercase" title={idx.label}>{idx.symbol}</span>
               <span className="text-[11px] tabular-nums text-foreground/80">
                 {idx.price != null ? `${idx.price.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})} ${idx.unit==='points'||idx.symbol.startsWith('^')?'pts':idx.currency??''}` : "—"}
               </span>
@@ -984,7 +987,7 @@ function MarketTickerBar({
           {/* 10Y yield */}
           {data?.yield10y != null && (
             <div className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
-              <span className="text-[9px] tracking-widest text-muted-foreground/45">10Y</span>
+              <span className="text-[9px] tracking-widest text-muted-foreground/45" title="Rendimiento del Tesoro de EE. UU. a 10 años">DGS10</span>
               <span className={`text-[11px] tabular-nums ${data.yield10y > 5 ? "text-destructive/80" : "text-foreground/80"}`}>
                 {data.yield10y.toFixed(2)}%
               </span>
@@ -1023,14 +1026,14 @@ function MarketTickerBar({
         </div>
         <div className="flex shrink-0 gap-3 px-3 bg-card text-[9px]">
           <button aria-label={paused?'Reanudar cotizaciones':'Pausar cotizaciones'} onClick={()=>setPaused(p=>!p)} className="text-muted-foreground hover:text-section-heading">{paused?'▶':'Ⅱ'}</button>
-          <button onClick={()=>{setDraft(customStocks.join(', '));setEditing(e=>!e);}} className="text-muted-foreground hover:text-section-heading">{editing?'CERRAR':'EDITAR'}</button>
+          <button onClick={()=>{setDraft(customStocks.join(', '));setEditError('');setEditing(e=>!e);}} className="text-muted-foreground hover:text-section-heading">{editing?'CERRAR':'EDITAR'}</button>
         </div>
       </div>
 
       {/* Edit panel */}
       {editing && (
         <div className="flex items-center gap-2 px-4 py-2 border-t border-border/30 bg-card/50">
-          <span className="text-[9px] tracking-widest text-muted-foreground/40">STOCKS:</span>
+          <span className="text-[9px] tracking-widest text-muted-foreground/40">TICKERS · MÁX. 7:</span>
           <input
             value={draft}
             onChange={e => setDraft(e.target.value.toUpperCase())}
@@ -1039,6 +1042,7 @@ function MarketTickerBar({
             className="flex-1 h-6 px-2 bg-background border border-border text-[11px] text-foreground font-mono focus:outline-none focus:border-section-heading"
           />
           <button onClick={saveEdit} className="text-[9px] tracking-widest text-section-heading hover:text-section-heading/80 px-2 py-1 border border-section-heading/30">GUARDAR</button>
+          {editError&&<p role="alert" className="text-[10px] text-red-300">{editError}</p>}
         </div>
       )}
     </div>

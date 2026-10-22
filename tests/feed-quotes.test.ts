@@ -22,7 +22,16 @@ test('feed does not relabel stale regular prices as extended trading or fabricat
  const r=normalizeFeedQuote('SPY','SPY',daily,intra,Date.parse('2026-10-14T13:00Z'));
  assert.equal(r.session,'closed');assert.equal(r.at,'2026-10-13T20:00:00.000Z');assert.equal(r.change,null);
  assert.deepEqual(feedSymbols('spy,QQQ,SPY'),['SPY','QQQ']);
- for(const bad of ['AAPL,MSFT,NVDA,MU,SPY,QQQ,TLT','https://private','AAPL,',{}])assert.equal(feedSymbols(bad),null);
+ for(const bad of ['AAPL,MSFT,NVDA,MU,SPY,QQQ,TLT,GLD','https://private','AAPL,',{}])assert.equal(feedSymbols(bad),null);
+});
+
+test('feed watchlists keep seven valid symbols including class shares and bounded long symbols',()=>{
+ const symbols=['AAPL','MSFT','NVDA','BRK-B','SPY','QQQ','URTH'];
+ assert.deepEqual(feedSymbols(symbols.join(',')),symbols);
+ assert.deepEqual(feedSymbols('brk-b,QQQ,BRK-B'),['BRK-B','QQQ']);
+ const longest=Array.from({length:7},(_,i)=>'A'.repeat(14)+i);
+ assert.deepEqual(feedSymbols(longest.join(',')),longest);
+ for(const bad of [symbols.concat('TLT').join(','),'A'.repeat(16),'AAPL,BRK/B','AAPL,../secret'])assert.equal(feedSymbols(bad),null);
 });
 test('Asian index returns use the exchange date rather than New York midnight',()=>{
  const data=raw('2026-10-14T05:00Z',110,['2026-10-13T00:00Z','2026-10-14T00:00Z'],[100,110]);

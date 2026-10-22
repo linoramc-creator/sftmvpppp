@@ -8,6 +8,7 @@ const now=Date.parse('2026-10-17T10:00:00Z');
 test('selects most traded SGX IODEX futures contract and preserves its actual dated settlement',()=>{
   const result=parseIronSettlement(report(row('Oct-26','90.97','90.30','20,136')+row('Nov-26','91.23','89.85','146,126')+row('Dec-26','91.29','89.95','112,606')),'2026-10-16',now);
   assert.equal(result?.label,'Hierro · IODEX · Nov-26');assert.equal(result?.price,91.23);
+  assert.equal(result?.symbol,'SGX-IODEX');assert.equal(result?.displaySymbol,'FEF');assert.equal(result?.contractLabel,'Nov-26');
   assert.equal(result?.change,(91.23/89.85-1)*100);assert.equal(result?.currency,'USD');
   assert.equal(result?.unit,'USD/t seca');assert.equal(result?.date,'2026-10-16');assert.equal(result?.at,null);
 });

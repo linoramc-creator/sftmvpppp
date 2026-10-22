@@ -20,12 +20,12 @@ it('starts without suggested tickers and only enables comparison for a valid pai
  expect(screen.getByRole('button',{name:'Comparar'})).toBeEnabled();fireEvent.click(screen.getByRole('button',{name:'Intercambiar activos'}));
  expect(screen.getByLabelText('Primer activo')).toHaveValue('MSFT');expect(screen.getByLabelText('Segundo activo')).toHaveValue('AAPL');expect(fetchMock).not.toHaveBeenCalled();
 });
-it('loads quantitative data without AI, keeps news unlinked and requests AI only explicitly',async()=>{
+it('loads quantitative data without AI, links only the news source footer and requests AI only explicitly',async()=>{
  fetchMock.mockResolvedValueOnce(Response.json(response)).mockResolvedValueOnce(Response.json({...response,ai:{status:'ready',paragraphs:['Las diferencias de riesgo requieren atención.']}}));
  const {container}=render(<RelativeAnalysis/>);
  fireEvent.change(screen.getByLabelText('Primer activo'),{target:{value:'AAPL'}});fireEvent.change(screen.getByLabelText('Segundo activo'),{target:{value:'MSFT'}});fireEvent.click(screen.getByRole('button',{name:'Comparar'}));
  await screen.findByText('Fortaleza relativa');expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({panel:'relativeComparison',symbols:['AAPL','MSFT'],includeAi:false});
- expect(screen.getByText('2 pp')).toBeVisible();expect(container.textContent).not.toContain('Invalid Date');expect(container.querySelector('a')).toBeNull();
+ expect(screen.getByText('2 pp')).toBeVisible();expect(container.textContent).not.toContain('Invalid Date');expect(container.querySelectorAll('a')).toHaveLength(1);expect(screen.getByRole('link',{name:'Abrir artículo en CNBC'})).toHaveAttribute('href','https://www.cnbc.com/story');
  expect(screen.getByText('Resultados empresariales mejoran')).toBeVisible();expect(screen.getAllByText('Sin opciones verificadas')).toHaveLength(2);
  fireEvent.click(screen.getByRole('button',{name:'Fuerza relativa'}));expect(screen.getByRole('button',{name:'Fuerza relativa'})).toHaveAttribute('aria-pressed','true');
  fireEvent.change(screen.getByLabelText('Primer activo'),{target:{value:'NVDA'}});

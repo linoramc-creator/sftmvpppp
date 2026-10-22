@@ -9,7 +9,7 @@ test('all supported analysis routes are classified without a paid-work bypass',(
  assert.equal(classify({panel:'business',subject:'AAPL'}).request_class,'expensive');
  assert.equal(classify({panel:'bonds',subject:'',sector:false}).request_class,'data');
  for(const optionsAction of ['expiries','chain','aggregations','skew','surface','term-structure','ivhv'])assert.equal(classify({optionsAction,ticker:'AAPL',expiry:'2027-01-15'}).request_class,'data');
- for(const invalid of [{ticker:'../secrets'},{ticker:'AAPL?apikey=x'},{sector:'<script>'},{optionsAction:'unknown',ticker:'AAPL'},{optionsAction:'ivhv',ticker:'AAPL',window:1000000},{panel:'news',subject:'AAPL'.repeat(30)},{marketData:true,symbols:Array(7).fill('AAPL')}])assert.throws(()=>classify(invalid),BetaError);
+ for(const invalid of [{ticker:'../secrets'},{ticker:'AAPL?apikey=x'},{sector:'<script>'},{optionsAction:'unknown',ticker:'AAPL'},{optionsAction:'ivhv',ticker:'AAPL',window:1000000},{panel:'news',subject:'AAPL'.repeat(30)},{marketData:true,symbols:Array(8).fill('AAPL')}])assert.throws(()=>classify(invalid),BetaError);
 });
 test('body size, content type and JSON shape are enforced',async()=>{
  await assert.rejects(readBody(post({ticker:'x'.repeat(5000)})),e=>(e as BetaError).status===413);

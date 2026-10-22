@@ -26,7 +26,7 @@ it('loads all comparison views with one form and analyzes the displayed pair and
  fireEvent.change(screen.getByLabelText('Activos para comparar'),{target:{value:'NVDA, MU, AAPL'}});fireEvent.change(screen.getByLabelText('Período de comparación'),{target:{value:'1y'}});
  fireEvent.click(screen.getByRole('button',{name:'Analizar métricas'}));await screen.findByText('Fortaleza relativa');
  expect(JSON.parse(request.mock.calls[1][1].body)).toEqual({panel:'marketComparison',symbols:['SPY','QQQ'],range:'3m',includeAnalysis:true});
- expect(screen.getByText('La diferencia describe un comportamiento ya observado.')).toBeVisible();expect(screen.getByText('Sensibilidad compartida')).toBeVisible();expect(container.querySelector('a')).toBeNull();expect(container.textContent).not.toMatch(/\bIA\b/);expect(container.querySelectorAll('form')).toHaveLength(1);
+ expect(screen.getByText('La diferencia describe un comportamiento ya observado.')).toBeVisible();expect(screen.getByText('Sensibilidad compartida')).toBeVisible();expect(container.querySelectorAll('a')).toHaveLength(1);expect(screen.getByRole('link',{name:'Abrir artículo en CNBC'})).toHaveAttribute('href','https://www.cnbc.com/story');expect(container.textContent).not.toMatch(/\bIA\b/);expect(container.querySelectorAll('form')).toHaveLength(1);
 });
 it('keeps the previous data visible when an updated comparison fails',async()=>{
  request.mockResolvedValueOnce(Response.json(data)).mockResolvedValueOnce(Response.json({error:'Consulta temporalmente no disponible.'},{status:503}));

@@ -18,7 +18,7 @@ it('keeps news independent, removes stale country content, and ignores responses
  await screen.findByRole('heading',{name:'Francia actualiza su plan de deuda'});expect(signal.aborted).toBe(true);
  finish({ok:true,json:async()=>result('US','Noticia antigua de Estados Unidos')});
  await waitFor(()=>expect(screen.queryByText('Noticia antigua de Estados Unidos')).toBeNull());
- expect(container.querySelector('a')).toBeNull();expect(container.textContent).not.toContain('Private provider');
+ expect(screen.getByRole('link',{name:'Abrir artículo en article.example'})).toHaveAttribute('href','https://article.example/FR');expect(container.querySelectorAll('a')).toHaveLength(1);expect(container.textContent).not.toContain('Private provider');
 });
 it('reuses the ten-minute cache for the same account and isolates another account',async()=>{
  api.mockImplementation((_url,init)=>Promise.resolve({ok:true,json:async()=>result(JSON.parse(init.body).subject,'Crédito y mercados')}));

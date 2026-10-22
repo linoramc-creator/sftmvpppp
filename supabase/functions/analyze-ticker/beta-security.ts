@@ -1,5 +1,5 @@
 import {feedSymbols,validateFeedAsset} from './feed-quotes.ts';
-import {FEED_GROUP_KEYS,FEED_DEFAULT_ITEMS,normalizeFeedPreferences,feedPreferencesIdentity,type FeedGroupKey,type FeedPreferences} from './feed-preferences.ts';
+import {FEED_GROUP_KEYS,FEED_DEFAULT_ITEMS,normalizeFeedPreferences,normalizeSavedFeedPreferences,normalizeFeedSymbol,feedPreferencesIdentity,type FeedGroupKey,type FeedPreferences} from './feed-preferences.ts';
 import {profileDisplayName} from './profile-name.ts';
 import {PRIMARY_REPORT_MODEL} from './report-models.ts';
 import {createReportCompletion,observeReportCompletion,reportCompleted} from './report-completion.ts';
@@ -49,7 +49,7 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction){
     if(body.accountAction==='saveFeedPreferences'&&(!body.groups||!normalizeFeedPreferences(body.groups)))throw new BetaError(400,'Configuración de mercado inválida.');
-    if(body.accountAction==='validateFeedAsset'&&(!FEED_GROUP_KEYS.includes(body.group)||!symbol(body.symbol)))throw new BetaError(400,'Activo inválido.');
+    if(body.accountAction==='validateFeedAsset'&&(!FEED_GROUP_KEYS.includes(body.group)||!normalizeFeedSymbol(body.group,body.symbol)))throw new BetaError(400,'Activo inválido.');
     return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
   }
   if(body.panel){
@@ -90,7 +90,7 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
     if(['news','institutional','business','assetSnapshot','assetCandles','assetInsights','extendedHours','regularQuote','assetContext','marketPulse'].includes(body.panel) && !(body.panel==='news'&&body.sector===true) && !symbol(body.subject))throw new BetaError(400,'Ticker inválido.');
     return {request_class:['feed','feedNews','news','business','institutional','assetSnapshot'].includes(body.panel)?'expensive':'data'};
   }
-  if(body.marketData===true){if(body.symbols!==undefined&&(!Array.isArray(body.symbols)||body.symbols.length>6||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Lista de activos inválida.');return {request_class:'data'};}
+  if(body.marketData===true){if(body.symbols!==undefined&&(!Array.isArray(body.symbols)||body.symbols.length>7||body.symbols.some((s:unknown)=>!symbol(s))))throw new BetaError(400,'Lista de activos inválida.');return {request_class:'data'};}
   if(body.macroCalendar===true)return {request_class:'data'};
   if(body.optionsAction){if(!['expiries','chain','aggregations','skew','surface','term-structure','ivhv'].includes(body.optionsAction)||!symbol(body.ticker))throw new BetaError(400,'Consulta de opciones inválida.');if(body.expiry!==undefined&&(typeof body.expiry!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(body.expiry)))throw new BetaError(400,'Vencimiento inválido.');if(body.window!==undefined&&(!Number.isInteger(body.window)||body.window<5||body.window>252))throw new BetaError(400,'Ventana inválida.');return {request_class:'data'};}
   if(body.fundamentals===true||body.risk===true||body.etf===true||body.technicals===true){if(!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');return {request_class:body.etf===true?'expensive':'data'};}
@@ -111,15 +111,16 @@ async function userFrom(req: Request): Promise<User> {
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
 async function account(body: Body,user: User): Promise<Response> {
   switch(body.accountAction){
-    case 'getFeedPreferences':{const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`);return json({groups:normalizeFeedPreferences(rows[0]?.groups)});}
+    case 'getFeedPreferences':{const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`);return json({groups:normalizeSavedFeedPreferences(rows[0]?.groups)});}
     case 'validateFeedAsset':{
-      const symbol=String(body.symbol).trim().toUpperCase();const asset=await validateFeedAsset(body.group as FeedGroupKey,symbol);
+      const asset=await validateFeedAsset(body.group as FeedGroupKey,body.symbol);
       if(!asset)throw new BetaError(400,'No se ha podido verificar ese activo en este recuadro. Comprueba su símbolo y vuelve a intentarlo.');
       return json(asset);
     }
     case 'saveFeedPreferences':{
       const groups=normalizeFeedPreferences(body.groups)!;
-      const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`),previous=normalizeFeedPreferences(rows[0]?.groups)!;
+      const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`),previous=normalizeSavedFeedPreferences(rows[0]?.groups);
+      if(!previous)throw new BetaError(409,'No se ha podido recuperar tu configuración guardada. Actualiza el feed antes de guardar.');
       const additions=FEED_GROUP_KEYS.flatMap(key=>groups[key].filter(symbol=>!previous[key].includes(symbol)&&!FEED_DEFAULT_ITEMS[key].some(([item])=>item===symbol)).map(symbol=>({key,symbol})));
       // Recheck every addition on the server even if a client skips the editor.
       const checked=await Promise.all(additions.map(async item=>({...item,valid:await validateFeedAsset(item.key,item.symbol)})));
@@ -128,7 +129,7 @@ async function account(body: Body,user: User): Promise<Response> {
     }
     case 'getWatchlist':{const rows=await service(`beta_watchlists?user_id=eq.${user.id}&select=symbols&limit=1`);return json({symbols:rows[0]?.symbols??null});}
     case 'saveWatchlist':{
-      if(!Array.isArray(body.symbols)||body.symbols.length>6||body.symbols.some((value:unknown)=>typeof value!=='string'||!SYMBOL.test(value.trim().toUpperCase())))throw new BetaError(400,'Lista de seguimiento inválida.');
+      if(!Array.isArray(body.symbols)||body.symbols.length>7||body.symbols.some((value:unknown)=>typeof value!=='string'||!SYMBOL.test(value.trim().toUpperCase())))throw new BetaError(400,'Lista de seguimiento inválida.');
       const symbols=[...new Set(body.symbols.map((value:string)=>value.trim().toUpperCase()))];await service('beta_watchlists?on_conflict=user_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({user_id:user.id,symbols,updated_at:new Date().toISOString()})});return json({symbols});
     }
     case 'listAlerts':return json(await service(`beta_alerts?user_id=eq.${user.id}&select=*&order=created_at.desc&limit=50`));
@@ -228,7 +229,8 @@ export async function secureRequest(req: Request,dispatch: (body:Body)=>Promise<
     eventId=await rpc('beta_reserve',{uid:user.id,request_class:request.request_class,report_kind:request.report_kind??null,report_subject:request.report_subject??null});
     if(body.panel==='feedMarkets'&&body.feedGroups!==undefined){
       const requested=normalizeFeedPreferences(body.feedGroups)!;
-      const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`),saved=normalizeFeedPreferences(rows[0]?.groups)!;
+      const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`),saved=normalizeSavedFeedPreferences(rows[0]?.groups);
+      if(!saved)throw new BetaError(409,'No se ha podido recuperar tu configuración guardada. Actualiza el feed para sincronizarla.');
       if(feedPreferencesIdentity(requested)!==feedPreferencesIdentity(saved))throw new BetaError(409,'Tu configuración ha cambiado. Actualiza el feed para sincronizarla.');
       body.feedGroups=saved;
     }

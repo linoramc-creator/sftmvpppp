@@ -188,8 +188,6 @@ export async function newsPanel(subject: string, sector: boolean, env: Env, deps
     return { fetchedAt: new Date().toISOString(), articles: summaries.slice(0, articles.length), sectorArticles: summaries.slice(articles.length), sectorName,articleWindowDays:corporateSelection.windowDays,sectorWindowDays:sectorSelection.windowDays };
   });
 }
-const FEED_COMMODITIES: { label: string; items: [string, string][] } =
-  { label: 'MATERIAS PRIMAS', items: [['GC=F', 'Oro'], ['SI=F', 'Plata'], ['CL=F', 'Petróleo WTI'], ['BZ=F', 'Petróleo Brent'], ['HG=F', 'Cobre'], ['NG=F', 'Gas natural'], ['SGX-IODEX', 'Hierro · IODEX']] };
 const validFeedImage = photoUrl;
 export function curateFeed(articles: Article[], limit=9): Article[] {
   const important = /\b(geopolitics|ceasefire|conflict|military|shipping|strait|fed|central bank|interest rates?|inflation|jobs?|payroll|gdp|tariff|trade|war|sanction|opec|oil|gold|energy|currency|dollar|bond yields?|treasury|earnings|guidance|merger|acquisition|markets?|stocks?|equities|recession|credit|china|europe|japan|ee\.\s?uu\.?|bancos? centrales?|inflaci[oó]n|empleo|arancel|petr[oó]leo|oro|divisa|bonos?|tipos|ibex|bolsas?|acciones|resultados|beneficios|deuda|renta variable)\b/i;
@@ -214,7 +212,7 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
 export async function feedMarketsPanel(env:Env,symbols:string[]=[],preferences:FeedPreferences=defaultFeedPreferences()):Promise<MarketFeed>{
   const quote=(symbol:string,label:string,extended:boolean)=>symbol==='SGX-IODEX'?cached('iron-iodex-v1',3600000,()=>ironReferenceQuote()):cached(`feed-price-v4:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
   const editable=(key:keyof FeedPreferences)=>({label:FEED_GROUP_LABELS[key],items:preferences[key].map(symbol=>[symbol,feedPreferenceLabel(key,symbol)] as [string,string])});
-  const groupsToLoad=[editable('indices'),FEED_COMMODITIES,editable('currencies'),editable('etfs')];
+  const groupsToLoad=[editable('indices'),editable('commodities'),editable('currencies'),editable('etfs')];
   return cached(await feedPreferencesKey(symbols,preferences),45000,async()=>{
     const [groups,bonds,events,watchlist]=await Promise.all([
       Promise.all(groupsToLoad.map(async group=>({label:group.label,items:await Promise.all(group.items.map(async([symbol,label])=>{const result=await quote(symbol,label,group.label==='ETF PRINCIPALES'||symbol==='NQ=F');return {...result,label:label===symbol?result.label:label};}))}))),

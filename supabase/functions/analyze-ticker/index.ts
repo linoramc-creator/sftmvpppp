@@ -4036,7 +4036,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
     // Market data — no Gemini needed
     if (body.marketData === true) {
       const extraSymbols: string[] = Array.isArray(body.symbols)
-        ? (body.symbols as any[]).filter(s => typeof s === "string" && /^[A-Z0-9.^]{1,10}$/.test(s)).slice(0, 6)
+        ? [...new Set((body.symbols as unknown[]).filter((s): s is string => typeof s === "string").map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9^][A-Z0-9.^=-]{0,14}$/.test(s)))].slice(0, 7)
         : [];
       return await handleMarketData(env, extraSymbols);
     }

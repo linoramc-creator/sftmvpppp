@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {classify,secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
-import {defaultFeedPreferences,normalizeFeedPreferences,feedPreferencesKey} from '../supabase/functions/analyze-ticker/feed-preferences.ts';
+import {defaultFeedPreferences,normalizeFeedPreferences,normalizeSavedFeedPreferences,normalizeFeedSymbol,feedSuggestions,feedPreferencesKey,FEED_GROUP_KEYS} from '../supabase/functions/analyze-ticker/feed-preferences.ts';
+import {validateFeedAsset} from '../supabase/functions/analyze-ticker/feed-quotes.ts';
 
 test('normalizes bounded preferences without mutating default arrays or accepting hidden properties',()=>{
  const defaults=defaultFeedPreferences();assert.equal(defaults.indices[0],'^GSPC');assert.ok(defaults.indices.includes('NQ=F'));assert.ok(defaults.currencies.includes('BTC-USD'));
@@ -18,7 +19,7 @@ test('market cache identifies the ordered public selection in a bounded key',asy
  assert.notEqual(first,await feedPreferencesKey(['AAPL'],{...defaults,indices:[...defaults.indices].reverse()}));
 });
 const uid='22222222-2222-4222-8222-222222222222',other='33333333-3333-4333-8333-333333333333';
-function securityFixture(t:any,type='INDEX'){
+function securityFixture(t:any,type:string|((symbol:string)=>string)='INDEX',previous?:unknown){
  const previousFetch=globalThis.fetch,previousDeno=(globalThis as any).Deno,writes:any[]=[],paths:string[]=[];
  (globalThis as any).Deno={env:{get:(key:string)=>key==='SUPABASE_URL'?'https://project.supabase.co':'test-secret'}};
  globalThis.fetch=async(input:any,init:any={})=>{
@@ -27,8 +28,8 @@ function securityFixture(t:any,type='INDEX'){
   if(url.includes('/rpc/beta_active_user'))return Response.json(true);
   if(url.includes('/rpc/beta_reserve'))return Response.json('44444444-4444-4444-8444-444444444444');
   if(url.includes('/beta_usage'))return new Response(null,{status:204});
-  if(url.includes('/beta_feed_preferences')){if(init.method==='POST'){writes.push(JSON.parse(init.body));return new Response(null,{status:204});}return Response.json([]);}
-  if(url.includes('/v8/finance/chart/'))return Response.json({chart:{result:[{meta:{instrumentType:type,regularMarketPrice:100,shortName:'Verified asset'}}]}});
+  if(url.includes('/beta_feed_preferences')){if(init.method==='POST'){writes.push(JSON.parse(init.body));return new Response(null,{status:204});}return Response.json(previous?[{groups:previous}]:[]);}
+  if(url.includes('/v8/finance/chart/')){const symbol=decodeURIComponent(new URL(url).pathname.split('/').at(-1)!);return Response.json({chart:{result:[{meta:{symbol,instrumentType:typeof type==='function'?type(symbol):type,regularMarketPrice:100,shortName:'Verified asset'}}]}});}
   throw new Error('Unexpected request '+url);
  };
  t.after(()=>{globalThis.fetch=previousFetch;(globalThis as any).Deno=previousDeno;});return {writes,paths};
@@ -59,4 +60,46 @@ test('market requests cannot bypass saved preferences with a different forged se
  securityFixture(t);let dispatched=false;const groups={...defaultFeedPreferences(),etfs:['SPY']};
  const response=await secureRequest(request({panel:'feedMarkets',subject:'AAPL',feedGroups:groups}),async()=>{dispatched=true;return Response.json({});});
  assert.equal(response.status,409);assert.equal(dispatched,false);await response.json();
+});
+test('new selections enforce seven per group, while stored legacy selections retain their first seven without writes',async t=>{
+ const defaults=defaultFeedPreferences();for(const key of FEED_GROUP_KEYS)assert.equal(defaults[key].length,7);
+ const legacy={indices:['^FTSE','^N225'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EURUSD=X','JPY=X']};
+ const expected={...legacy,etfs:legacy.etfs.slice(0,7),commodities:defaults.commodities};assert.deepEqual(normalizeSavedFeedPreferences(legacy),expected);assert.equal(normalizeFeedPreferences(legacy),null);
+ const {writes}=securityFixture(t,'INDEX',legacy),loaded=await secureRequest(request({accountAction:'getFeedPreferences'}),async()=>Response.json({}));
+ assert.equal(loaded.status,200);assert.deepEqual((await loaded.json()).groups,expected);assert.equal(writes.length,0);
+ for(const key of FEED_GROUP_KEYS){const tooMany={...defaults,[key]:[...defaults[key],key==='commodities'?'KC=F':key==='indices'?'^FTSE':key==='etfs'?'GLD':'EURJPY=X']};assert.equal(normalizeFeedPreferences(tooMany),null);assert.throws(()=>classify({accountAction:'saveFeedPreferences',groups:tooMany}));}
+});
+test('ticker aliases are explicit, duplicate-aware and preserve the direction of native currency pairs',()=>{
+ for(const [group,input,expected]of [['indices','SPX','^GSPC'],['indices','NDX','^NDX'],['etfs','qqq','QQQ'],['currencies','EUR/USD','EURUSD=X'],['currencies','EURUSD','EURUSD=X'],['currencies','USDJPY','JPY=X'],['currencies','USD/JPY','JPY=X'],['currencies','EUR=X','EUR=X'],['currencies','GBP=X','GBP=X'],['currencies','AUD=X','AUD=X'],['currencies','NZD=X','NZD=X'],['currencies','EUR','EURUSD=X'],['currencies','BTC/USD','BTC-USD'],['commodities','GC','GC=F'],['commodities','FEF','SGX-IODEX']] as const)assert.equal(normalizeFeedSymbol(group,input),expected);
+ for(const input of ['USD/USD','https://private','EURUSD;DROP','EUR\nUSD'])assert.equal(normalizeFeedSymbol('currencies',input),null);
+ assert.equal(normalizeFeedSymbol('commodities','FEF=F'),null);
+ const defaults=defaultFeedPreferences();assert.equal(normalizeFeedPreferences({...defaults,currencies:['EURUSD','EUR/USD']}),null);
+ assert.deepEqual(normalizeSavedFeedPreferences({...defaults,currencies:['USDJPY','JPY=X','EUR=X']})?.currencies,['JPY=X','EUR=X']);
+ assert.deepEqual(feedSuggestions('currencies','usd/jpy',[],6).map(([symbol])=>symbol),['JPY=X']);
+ assert.deepEqual(feedSuggestions('commodities','fef',[],6).map(([symbol])=>symbol),['SGX-IODEX']);
+ assert.equal(feedSuggestions('etfs','QQQ',['QQQ']).some(([symbol])=>symbol==='QQQ'),false);
+});
+test('validation endpoints query canonical symbols rather than sending human aliases to market providers',async t=>{
+ const {paths}=securityFixture(t,symbol=>symbol.endsWith('=X')?'CURRENCY':symbol.endsWith('=F')?'FUTURE':'INDEX');
+ for(const [group,input,canonical]of [['indices','SPX','^GSPC'],['currencies','EUR/USD','EURUSD=X'],['currencies','USDJPY','JPY=X'],['commodities','GC','GC=F']] as const){
+  const response=await secureRequest(request({accountAction:'validateFeedAsset',group,symbol:input}),async()=>Response.json({}));assert.equal(response.status,200);assert.equal((await response.json()).symbol,canonical);assert.ok(paths.some(path=>path.includes('/v8/finance/chart/'+encodeURIComponent(canonical))));
+ }
+});
+test('metadata validation cannot add an equity as a future or accept a different asset returned by a provider',async()=>{
+ const raw=(symbol:string,type:string)=>({chart:{result:[{meta:{symbol,instrumentType:type,regularMarketPrice:100}}]}});
+ assert.equal(await validateFeedAsset('commodities','GC',{read:async()=>raw('GC=F','EQUITY')}),null);
+ assert.equal(await validateFeedAsset('commodities','GC',{read:async()=>raw('CL=F','FUTURE')}),null);
+ assert.equal((await validateFeedAsset('commodities','GC',{read:async symbol=>raw(symbol,'FUTURE')}))?.symbol,'GC=F');
+ assert.equal(await validateFeedAsset('etfs','QQQ',{read:async()=>raw('QQQ','EQUITY')}),null);
+});
+test('FEF uses the dated SGX settlement path and stays unavailable when no verified iron quote exists',async()=>{
+ const now=Date.parse('2026-10-22T12:00:00Z'),base={symbol:'SGX-IODEX',label:'Hierro · IODEX · Nov-26',price:91,date:'2026-10-22',currency:'USD'} as any;let charts=0,iron=0;
+ const valid=await validateFeedAsset('commodities','FEF',{now,read:async()=>{charts++;throw Error('Not a Yahoo or NYMEX ticker');},iron:async()=>{iron++;return base;}});
+ assert.equal(valid?.symbol,'SGX-IODEX');assert.equal(charts,0);assert.equal(iron,1);
+ for(const patch of [{price:null},{date:'2026-10-01'},{date:'2026-10-23'}])assert.equal(await validateFeedAsset('commodities','FEF',{now,iron:async()=>({...base,...patch})}),null);
+});
+test('a legacy stored selection matches its seven-item view during authenticated market requests',async t=>{
+ const legacy={indices:['^FTSE'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EURUSD=X']},groups=normalizeSavedFeedPreferences(legacy)!;const {writes}=securityFixture(t,'INDEX',legacy);let dispatched=false;
+ const response=await secureRequest(request({panel:'feedMarkets',subject:'',feedGroups:groups}),async body=>{dispatched=true;return Response.json(body.feedGroups);});
+ assert.equal(response.status,200);assert.equal(dispatched,true);assert.equal(writes.length,0);assert.deepEqual(await response.json(),groups);
 });

@@ -1,6 +1,6 @@
 import {fireEvent,render,screen,within} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
-import {NewsCards} from '../components/FeedCards';
+import {NewsCards,articleSource} from '../components/FeedCards';
 import {FeedView,NewsView} from '../components/MarketPanels';
 import type {Article} from '../../../supabase/functions/analyze-ticker/panels';
 
@@ -9,14 +9,16 @@ vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api,accountApi:async()=>({grou
 vi.mock('@/components/AuthGate',()=>({useProfile:()=>({id:'feed-news-user'})}));
 const story:Article={title:'La empresa amplía su capacidad - Reuters',url:'https://www.reuters.com/business/example',source:'Reuters',date:'2026-10-15',image:'https://images.example.test/economy-factory.jpg',excerpt:'La empresa anunció una nueva fábrica. La inversión asciende a 100 millones.',keyPoints:['La empresa anunció una nueva fábrica.','La inversión asciende a 100 millones.']};
 
-it('presents article key points without outgoing article links or provider labels',()=>{
+it('presents a cover and key points with one publisher link only at the end of each article',()=>{
  const {container}=render(<NewsCards articles={[story]}/>);
  expect(screen.getByRole('heading',{name:'La empresa amplía su capacidad'})).toBeVisible();
  const points=screen.getByRole('list',{name:'Puntos clave'});
  expect(within(points).getAllByRole('listitem')).toHaveLength(2);
  expect(within(points).getByText('La inversión asciende a 100 millones.')).toBeVisible();
- expect(container.querySelector('a')).toBeNull();
- expect(container.textContent).not.toContain('Reuters');
+ const link=screen.getByRole('link',{name:'Abrir artículo en Reuters'});
+ expect(link).toHaveAttribute('href',story.url);expect(link).toHaveAttribute('target','_blank');expect(link).toHaveAttribute('rel','noopener noreferrer');
+ expect(container.querySelectorAll('a')).toHaveLength(1);expect(link.closest('footer')).toBe(container.querySelector('article')!.lastElementChild);
+ expect(screen.getByRole('heading',{name:'La empresa amplía su capacidad'}).closest('a')).toBeNull();expect(container.querySelector('img')?.closest('a')).toBeNull();
  expect(container.textContent).not.toContain(story.url);
 });
 
@@ -25,7 +27,7 @@ it('keeps a cached article readable when there is no AI summary or usable photo'
  const {container}=render(<NewsCards articles={[cached]} compact/>);
  expect(screen.getByText('La empresa anunció una nueva fábrica.')).toBeVisible();
  expect(container.querySelector('img')).toBeNull();
- expect(container.querySelector('a')).toBeNull();
+ expect(screen.getByRole('link',{name:'Abrir artículo en Reuters'})).toBeVisible();
 });
 
 it('hides a failed cover while retaining the factual summary',()=>{
@@ -35,30 +37,41 @@ it('hides a failed cover while retaining the factual summary',()=>{
  expect(screen.getByText('La inversión asciende a 100 millones.')).toBeVisible();
 });
 
-it('uses natural-height editorial rows and small side thumbnails without reserving empty image space',()=>{
+it('uses responsive article cards with a full-width cover and no forced card heights',()=>{
  const {container}=render(<NewsCards articles={[story]} compact/>);
  const card=container.querySelector('article')!,cover=card.querySelector('img')!;
- expect(card).toHaveClass('flex','items-start');
- expect(card.parentElement).toHaveClass('space-y-3');
- expect(cover).toHaveClass('w-24','h-20','sm:w-36');
+ expect(card).not.toHaveClass('flex');
+ expect(card.parentElement).toHaveClass('grid','items-start','grid-cols-1','sm:grid-cols-2');
+ expect(cover).toHaveClass('w-full','aspect-[16/9]');
  expect(card).not.toHaveClass('h-full');
  expect(screen.getByRole('list',{name:'Puntos clave'})).toBeVisible();
 });
 
-it('avoids duplicate or empty cards and shows long summaries through an optional disclosure',()=>{
+it('avoids duplicate or empty cards and keeps all key points visible without a disclosure',()=>{
  const more={...story,keyPoints:[...story.keyPoints!,'La compañía prevé completar el proyecto durante el próximo ejercicio.']};
  const {container}=render(<NewsCards articles={[more,{...story,url:story.url+'/copy'},{...story,title:'<p></p>',url:story.url+'/empty'}]}/>);
  expect(container.querySelectorAll('article')).toHaveLength(1);
- expect(container.querySelector('article')!.parentElement).toHaveClass('columns-1','md:columns-2');
- expect(container.querySelector('article')).toHaveClass('break-inside-avoid');
- expect(within(screen.getByRole('list',{name:'Puntos clave'})).getAllByRole('listitem')).toHaveLength(2);
- const details=container.querySelector('details')!;
- expect(details).not.toHaveAttribute('open');
- fireEvent.click(screen.getByText('Más contexto'));
- expect(details).toHaveAttribute('open');
+ expect(container.querySelector('article')!.parentElement).toHaveClass('grid','items-start','md:grid-cols-2','xl:grid-cols-3');
+ expect(within(screen.getByRole('list',{name:'Puntos clave'})).getAllByRole('listitem')).toHaveLength(3);
+ expect(container.querySelector('details')).toBeNull();
  expect(screen.getByText('La compañía prevé completar el proyecto durante el próximo ejercicio.')).toBeVisible();
  expect(container.querySelector('time')).toHaveAttribute('datetime','2026-10-15');
- expect(container.querySelector('a')).toBeNull();
+ expect(container.querySelectorAll('a')).toHaveLength(1);
+});
+
+it('links to the real publisher without naming the upstream data API',()=>{
+ const{container}=render(<NewsCards articles={[{...story,source:'EODHD'},{...story,title:'El mercado analiza la nueva inversión',url:'https://www.cnbc.com/2026/10/15/story.html',source:'FMP'}]}/>);
+ expect(screen.getByRole('link',{name:'Abrir artículo en Reuters'})).toHaveAttribute('href',story.url);
+ expect(screen.getByRole('link',{name:'Abrir artículo en CNBC'})).toHaveAttribute('href','https://www.cnbc.com/2026/10/15/story.html');
+ expect(container.textContent).not.toMatch(/EODHD|FMP/);expect(container.querySelectorAll('a')).toHaveLength(2);
+ expect(articleSource({...story,url:'http://safe-news.example/story',source:'Safe News'})).toEqual({url:'http://safe-news.example/story',label:'Safe News'});
+ expect(articleSource({...story,source:''})?.label).toBe('Reuters');expect(articleSource({...story,source:story.url})?.label).toBe('Reuters');
+ expect(articleSource({...story,url:'https://journal.example/economy',source:'EODHD'})?.label).toBe('journal.example');
+});
+
+it.each(['javascript:alert(1)','data:text/html,<script>bad()</script>','file:///private/news.html','https://secret:password@www.reuters.com/story','https://www.reuters.com/story?api_key=private','https://www.reuters.com/story?key=private','https://www.reuters.com/story#token=private','https://api.eodhd.com/api/news','https://query1.finance.yahoo.com/v8/finance/chart/AAPL','https://news.example/api/data','http://localhost:3000/private','http://127.0.0.1/private','https://internal.local/story'])('does not create an unsafe or credential-bearing source link: %s',url=>{
+ const{container}=render(<NewsCards articles={[{...story,url}]}/>);
+ expect(container.querySelector('a')).toBeNull();expect(screen.getByRole('heading',{name:'La empresa amplía su capacidad'})).toBeVisible();
 });
 
 it('opens an earnings asset through the same selection handler as the watchlist',async()=>{
@@ -74,7 +87,7 @@ it('opens an earnings asset through the same selection handler as the watchlist'
  expect(select).toHaveBeenLastCalledWith('AAPL');
 });
 
-it('uses the same nonclickable summaries for ticker and sector report news',async()=>{
+it('uses the same article cards and a single source footer for ticker and sector report news',async()=>{
  api.mockResolvedValue({ok:true,json:async()=>({articles:[story],sectorArticles:[{...story,title:'La industria anuncia inversiones',url:story.url+'/sector'}],sectorName:'Industria',articleWindowDays:14,sectorWindowDays:30,fetchedAt:'2026-10-15T10:00:00Z'})});
  const {container}=render(<NewsView subject="NEWS-TEST"/>);
  await screen.findByRole('heading',{name:'La empresa amplía su capacidad'});
@@ -87,7 +100,7 @@ it('uses the same nonclickable summaries for ticker and sector report news',asyn
  expect(screen.getByRole('tab',{name:'Sector · Industria 1'})).toHaveFocus();
  expect(screen.getByText('Últimos 30 días')).toBeVisible();
  expect(screen.getAllByRole('list',{name:'Puntos clave'})).toHaveLength(1);
- expect(container.querySelector('a')).toBeNull();
+ expect(screen.getByRole('link',{name:'Abrir artículo en Reuters'})).toHaveAttribute('href',story.url+'/sector');expect(container.querySelectorAll('a')).toHaveLength(1);
 });
 
 it('opens the category with results and resets the selected scope when the ticker changes',async()=>{

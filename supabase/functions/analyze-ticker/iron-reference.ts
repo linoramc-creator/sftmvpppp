@@ -4,7 +4,7 @@ import type { SessionQuote } from './feed-quotes.ts';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const clean = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ').replace(/\s+/g, ' ').trim();
 const positive = (value: string) => /^\d[\d,]*(?:\.\d+)?$/.test(value) && Number(value.replace(/,/g, '')) > 0 ? Number(value.replace(/,/g, '')) : null;
-const unavailable = (): SessionQuote => ({symbol:'SGX-IODEX',label:'Hierro · IODEX',price:null,change:null,date:null,currency:'USD',unit:'USD/t seca',session:'closed',at:null,delaySeconds:null,priceKind:'quote',reference:null,timezone:'Asia/Singapore'});
+const unavailable = (): SessionQuote => ({symbol:'SGX-IODEX',displaySymbol:'FEF',label:'Hierro · IODEX',price:null,change:null,date:null,currency:'USD',unit:'USD/t seca',session:'closed',at:null,delaySeconds:null,priceKind:'quote',reference:null,timezone:'Asia/Singapore'});
 
 export function parseIronSettlement(html: string, expectedDate: string, now = Date.now()): SessionQuote | null {
   if (html.length > 1000000 || !/^\d{4}-\d{2}-\d{2}$/.test(expectedDate)) return null;
@@ -29,7 +29,7 @@ export function parseIronSettlement(html: string, expectedDate: string, now = Da
   }).sort((a,b) => b.volume - a.volume);
   const selected = candidates[0];
   if (!selected) return null;
-  return {...unavailable(),label:`Hierro · IODEX · ${selected.contract}`,price:selected.price,change:(selected.price / selected.previous - 1) * 100,date,reference:'previous-close'};
+  return {...unavailable(),contractLabel:selected.contract,label:`Hierro · IODEX · ${selected.contract}`,price:selected.price,change:(selected.price / selected.previous - 1) * 100,date,reference:'previous-close'};
 }
 
 export async function ironReferenceQuote(now = Date.now()): Promise<SessionQuote> {
