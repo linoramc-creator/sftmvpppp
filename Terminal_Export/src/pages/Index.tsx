@@ -13,6 +13,7 @@ import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "luc
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 import IndexChartsPanel from '@/components/IndexChartsPanel';
+import SectorComparables,{stripComparisonTable,comparisonActivityReport} from '@/components/SectorComparables';
 import { IncomeChart, CashFlowChart, BalanceChart, MarginsChart, GrowthChart, type IncomeData, type CashFlowData, type BalanceData, type MarginsData, type GrowthData } from "@/components/charts/FintechCharts";
 import { OptionsSubSection } from "@/components/options/OptionsSubSection";
 import { RiskSubSection } from "@/components/charts/RiskCharts";
@@ -1064,7 +1065,7 @@ function ReportView({
   // Sections appear progressively while the report streams; a tab shows up
   // as soon as its content (or structured data) exists. Order never changes.
   const available = EXPECTED_TABS.filter((key) => {
-    if (["Desglose de ingresos", "Institucional", "Noticias"].includes(key) && ticker) return true;
+    if (["Desglose de ingresos", "Institucional", "Noticias", "Sector"].includes(key) && ticker) return true;
     if (sections[key]) return true;
     if (key === "Resumen Ejecutivo" && !!ticker) return true;
     if (key === "Finanzas" && quarterlyData.length > 0) return true;
@@ -1131,7 +1132,8 @@ function ReportView({
               {active === "Desglose de ingresos" && <BusinessView key={ticker} ticker={ticker} />}
               {active === "Institucional" && <InstitutionalView key={ticker} ticker={ticker} />}
               {active === "Noticias" && <NewsView key={ticker} subject={ticker} />}
-              {sections[active] && !["Desglose de ingresos", "Institucional", "Noticias", "Calendario Macro"].includes(active) && renderElements(sections[active])}
+              {active === 'Sector' && <SectorComparables key={ticker} subject={ticker} report={content} isLoading={isLoading}>{()=>renderElements(parseSections(stripComparisonTable(content),EXPECTED_TABS)['Sector']??[])}</SectorComparables>}
+              {sections[active] && !["Desglose de ingresos", "Institucional", "Noticias", "Calendario Macro", "Sector"].includes(active) && renderElements(sections[active])}
               {isLoading && (
                 <span className="terminal-cursor text-section-heading ml-1" />
               )}
@@ -1270,7 +1272,7 @@ function SectorReportView({
         // "Calendario Macro" has no LLM content — it always renders its own
         // deterministic data component once a sector report exists.
         const isMacro = key === "Calendario Macro";
-        if (!sectionNodes && !isMacro && key !== "Noticias y Tendencias") return null;
+        if (!sectionNodes && !isMacro && key !== "Noticias y Tendencias" && key !== 'Empresas Líderes') return null;
 
         const isOpen = expanded[key] !== false;
         const isLast = key === SECTOR_TABS[SECTOR_TABS.length - 1];
@@ -1299,8 +1301,8 @@ function SectorReportView({
                 {isMacro && <MacroCalendarSubSection />}
                 {key === "Noticias y Tendencias" && <NewsView key={sectorName} subject={sectorName} sector />}
                 {key === "Noticias y Tendencias" && sectionNodes && renderElements(sectorTrends(sectionNodes))}
-                {sectionNodes && key !== "Noticias y Tendencias" && !isMacro && renderElements(sectionNodes)}
-                {key === "Empresas Líderes" && <Suspense fallback={<div role="status" className="mt-4 h-40 rounded-xl bg-secondary/30 motion-safe:animate-pulse" aria-label="Cargando actividad del sector"/>}><SectorActivity sector={sectorName} report={content} isLoading={isLoading}/></Suspense>}
+                {key==='Empresas Líderes'&&<SectorComparables subject={sectorName} sector report={content} isLoading={isLoading}>{(verified,companies)=><>{renderElements(parseSections(stripComparisonTable(content),SECTOR_TABS)['Empresas Líderes']??[])}{verified&&<Suspense fallback={<div role="status" className="mt-4 h-40 rounded-xl bg-secondary/30 motion-safe:animate-pulse" aria-label="Cargando actividad del sector"/>}><SectorActivity sector={sectorName} report={comparisonActivityReport(companies)} isLoading={isLoading}/></Suspense>}</>}</SectorComparables>}
+                {sectionNodes && key !== "Noticias y Tendencias" && key !== 'Empresas Líderes' && !isMacro && renderElements(sectionNodes)}
                 {isLoading && isLast && (
                   <span className="terminal-cursor text-section-heading ml-1" />
                 )}

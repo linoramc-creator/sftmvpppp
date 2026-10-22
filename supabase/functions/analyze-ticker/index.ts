@@ -25,6 +25,7 @@ import {mergeEodhdPriority} from './eodhd-client.ts';
 import {eodhdTreasury} from './eodhd-bonds.ts';
 import {issuerResearch} from './issuer-research.ts';
 import {sectorActivity} from './sector-activity.ts';
+import {discoverTickerPeers,loadComparableCompanies,peerRowsForReport,sectorComparables} from './sector-comparables.ts';
 import { massiveContext } from './massive-news.ts';
 import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
 import { researchPeers } from './business-research.ts';
@@ -460,10 +461,10 @@ async function finnhubGet(path: string, key: string) {
   } catch (_) { return null; }
 }
 
-async function fetchFinnhubData(ticker: string, key: string) {
+async function fetchFinnhubData(ticker: string, key: string, peersEnabled = true) {
   const [summary,primaryQuote]=await Promise.all([eYahooQuoteSummary(ticker,'quoteType,assetProfile,financialData,summaryDetail,defaultKeyStatistics,price'),eodhdQuote(ticker)]);
   const fallbackPrice=eNum(summary?.price?.regularMarketPrice),preferredQuote=primaryQuote??(fallbackPrice!==null&&fallbackPrice>0?{close:fallbackPrice,change_p:eNum(summary?.price?.regularMarketChangePercent),timestamp:eNum(summary?.price?.regularMarketTime)}:null);
-  if(summary){const p=summary.price??{},f=summary.financialData??{},s=summary.summaryDetail??{},k=summary.defaultKeyStatistics??{},a=summary.assetProfile??{},r=summary.recommendationTrend?.trend?.[0];return {profile:{name:summary.quoteType?.longName??ticker,ticker,country:a.country,currency:p.currency,exchange:p.exchangeName,finnhubIndustry:a.industry??a.sector,marketCapitalization:p.marketCap==null?null:p.marketCap/1e6,shareOutstanding:k.sharesOutstanding==null?null:k.sharesOutstanding/1e6},quote:preferredQuote?{c:preferredQuote.close,dp:preferredQuote.change_p,t:preferredQuote.timestamp}:null,metrics:{peTTM:s.trailingPE,pbAnnual:k.priceToBook,evToEbitda:k.enterpriseToEbitda,enterpriseValue:k.enterpriseValue,roeTTM:f.returnOnEquity==null?null:f.returnOnEquity*100,netProfitMarginTTM:f.profitMargins==null?null:f.profitMargins*100,revenueGrowthTTMYoy:f.revenueGrowth==null?null:f.revenueGrowth*100,beta:k.beta},recommendations:r?{...r,period:summary.eodhd?.updatedAt}:null,allRecommendations:r?[r]:[],news:[],peers:[],structuredSummary:summary};}
+  if(summary){const p=summary.price??{},f=summary.financialData??{},s=summary.summaryDetail??{},k=summary.defaultKeyStatistics??{},a=summary.assetProfile??{},r=summary.recommendationTrend?.trend?.[0];const peers=peersEnabled&&summary.quoteType?.quoteType==='EQUITY'?await cached('industry-peers-v1:'+ticker,86400000,()=>discoverTickerPeers(ticker,summary,{FINNHUB_KEY:key})):{symbols:[]};return {profile:{name:summary.quoteType?.longName??ticker,ticker,country:a.country,currency:p.currency,exchange:p.exchangeName,finnhubIndustry:a.industry??a.sector,marketCapitalization:p.marketCap==null?null:p.marketCap/1e6,shareOutstanding:k.sharesOutstanding==null?null:k.sharesOutstanding/1e6},quote:preferredQuote?{c:preferredQuote.close,dp:preferredQuote.change_p,t:preferredQuote.timestamp}:null,metrics:{peTTM:s.trailingPE,pbAnnual:k.priceToBook,evToEbitda:k.enterpriseToEbitda,enterpriseValue:k.enterpriseValue,roeTTM:f.returnOnEquity==null?null:f.returnOnEquity*100,netProfitMarginTTM:f.profitMargins==null?null:f.profitMargins*100,revenueGrowthTTMYoy:f.revenueGrowth==null?null:f.revenueGrowth*100,beta:k.beta},recommendations:r?{...r,period:summary.eodhd?.updatedAt}:null,allRecommendations:r?[r]:[],news:[],peers:peers.symbols.slice(0,5),structuredSummary:summary};}
   const t = encodeURIComponent(ticker);
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
@@ -492,6 +493,8 @@ async function fetchFinnhubData(ticker: string, key: string) {
 
 async function fetchPeerData(peers: string[], key: string) {
   if (!peers.length) return [];
+  const structured=peerRowsForReport(await loadComparableCompanies(peers,null,{summary:eYahooQuoteSummary}));
+  if(structured.length===peers.length)return structured;
   const results = await Promise.all(
     peers.slice(0, 5).map(async (peer) => {
       const t = encodeURIComponent(peer);
@@ -538,7 +541,7 @@ async function fetchPeerData(peers: string[], key: string) {
       };
     })
   );
-  return results.filter(Boolean);
+  return [...structured,...results.filter((row):row is NonNullable<typeof row>=>!!row&&!structured.some(item=>item.ticker===row.ticker))];
 }
 
 // =====================================================
@@ -1447,10 +1450,10 @@ function buildTickerDataContext(
   }
 
   if (peerData.length > 0) {
-    lines.push("", "--- DATOS FINANCIEROS DE COMPETIDORES (FINNHUB) ---");
+    lines.push("", "--- DATOS FINANCIEROS VERIFICADOS DE EMPRESAS COMPARABLES ---");
     lines.push("Ticker | Empresa | Precio | Market Cap | P/E | P/B | EV/EBITDA | ROE | Net Margin | Rev Growth YoY | 52W Return | Beta");
     for (const pd of peerData) {
-      lines.push(`${pd.ticker} | ${pd.name} | ${pd.price} | ${pd.marketCap} | ${pd.pe} | ${pd.pb} | ${pd.evEbitda} | ${pd.roe} | ${pd.netMargin} | ${pd.revenueGrowth} | ${pd.weekReturn52} | ${pd.beta}`);
+      lines.push(`${pd.ticker} | ${pd.name} | ${pd.price} | ${pd.marketCap} | ${pd.pe} | ${pd.pb} | ${pd.evEbitda} | ${pd.roe} | ${pd.netMargin} | ${pd.revenueGrowth} | ${pd.weekReturn52} | ${pd.beta} | cotización: ${pd.quoteAt??'sin fecha'} | fundamentales: ${pd.recordDate??'sin fecha'}`);
     }
   }
 
@@ -1961,7 +1964,7 @@ async function handleTickerAnalysis(ticker: string, env: EnvKeys, etfMode = fals
 
       try {
         // Step 1: Finnhub profile (sequential — companyName/sector/peers needed for Tavily queries)
-        const finnhubData = await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY);
+        const finnhubData = await fetchFinnhubData(cleanTicker, env.FINNHUB_KEY,!etfMode);
         if(!finnhubData?.profile?.name){controller.enqueue(encoder.encode(sseData({__error:'No se ha podido verificar este activo. Comprueba el símbolo y el mercado.'})));return;}
         const companyName = finnhubData?.profile?.name ?? cleanTicker;
         const sector      = finnhubData?.profile?.finnhubIndustry ?? "";
@@ -2095,7 +2098,7 @@ Genera el informe completo sobre ${cleanTicker} (${companyName}) con las 7 secci
 - En ## Finanzas: incluye la tabla de métricas actuales. Las tablas trimestrales se renderizan automáticamente — NO las generes.
 - En ## Valoración: desarrolla Factores de Riesgo con nivel **ALTO/MEDIO/BAJO** al final de cada viñeta.
 - En ## Finanzas: para cualquier métrica no disponible en Finnhub, usa DATOS TWELVE DATA o FMP. Si no hay dato en ninguna fuente, OMITE esa fila. CERO N/D permitidos.
-- En ## Sector: usa los datos de peers de Finnhub para la tabla comparativa. Omite columnas sin dato.
+- En ## Sector: usa únicamente las empresas comparables y métricas verificadas del contexto. Conserva moneda, fecha y período. Omite columnas sin datos; no estimes huecos ni trates empresas relacionadas como competidores directos sin evidencia.
 - En ## Señales Técnicas: usa los INDICADORES TÉCNICOS (TWELVE DATA). Si faltan datos, deriva tendencia del precio vs SMA o rango 52W.
 - En ## Institucional: usa los datos estructurados de FMP como fuente principal.
 - En ## Noticias / ## Resumen: integra los indicadores FRED en el contexto macro.
@@ -4022,6 +4025,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if (body.panel === "comparison") return panelJson(await comparison(body.symbols.map((s:string)=>s.trim().toUpperCase()),env.FMP_KEY));
       if (body.panel === "correlation") return panelJson(await correlations(body.symbols.map((s:string)=>s.trim().toUpperCase()),typeof body.range==="string"?body.range:"3m"));
       const subject = typeof body.subject === "string" ? body.subject.trim() : "";
+      if(body.panel==='sectorComparables')return panelJson(await sectorComparables(body.sector===true?subject:subject.toUpperCase(),body.sector===true?'sector':'ticker',env,{summary:eYahooQuoteSummary,hints:body.peers}));
       if (body.panel === "news" && subject.length > 0 && subject.length <= 80) return panelJson(await newsPanel(subject, body.sector === true, env, deps));
       if (!/^[A-Za-z0-9.^-]{1,12}$/.test(subject)) return jsonError("Símbolo inválido", 400);
       if (body.panel === "business") return panelJson(await businessPanel(subject.toUpperCase(), env, deps));

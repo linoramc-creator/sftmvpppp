@@ -30,10 +30,13 @@ it('shows four-hour OHLC candles and a genuine empty latest-news state',async()=
 });
 it('passes the detected ETF kind so analysis opens the ETF report flow',async()=>{
  const time=Date.parse('2026-10-16T20:00Z'),analyze=vi.fn();
- api.mockResolvedValue({ok:true,json:async()=>({symbol:'QQQ',name:'Invesco QQQ Trust',description:'Fondo cotizado sobre el Nasdaq 100.',currency:'USD',exchange:'NASDAQ',timezone:'America/New_York',price:100,change:1,quoteAt:new Date(time).toISOString(),candles:[],instrument:{kind:'etf',priceUnit:'USD',volumeUnit:'fund-units'},news:[],session:'Sesión regular',newsSince:new Date(time-86400000).toISOString(),fetchedAt:new Date().toISOString()})});
+ api.mockResolvedValue({ok:true,json:async()=>({symbol:'QQQ',name:'Invesco QQQ Trust',description:'Fondo cotizado sobre el Nasdaq 100.',currency:'USD',exchange:'NASDAQ',timezone:'America/New_York',price:100,change:1,quoteAt:new Date(time).toISOString(),candles:[],instrument:{kind:'etf',priceUnit:'USD',volumeUnit:'fund-units'},news:[],newsWindowDays:7,session:'Sesión regular',newsSince:new Date(time-7*86400000).toISOString(),fetchedAt:new Date().toISOString()})});
  render(<AssetDetail symbol="QQQ" stocks={['QQQ']} onSelect={vi.fn()} onBack={vi.fn()} onAnalyze={analyze}/>);
  await screen.findByRole('heading',{name:'Invesco QQQ Trust'});
  await waitFor(()=>expect(screen.getByRole('button',{name:'Analizar QQQ'})).toBeEnabled());
+ expect(screen.getByText('Últimos 7 días')).toBeVisible();
+ expect(screen.getByText(/No hay noticias relevantes con hora de publicación verificable en los últimos 7 días/)).toBeVisible();
+ expect(screen.queryByText('Últimas 24 horas')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'Analizar QQQ'}));
  expect(analyze).toHaveBeenCalledWith('QQQ','etf');
 });

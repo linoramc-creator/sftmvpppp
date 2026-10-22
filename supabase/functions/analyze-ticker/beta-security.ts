@@ -55,7 +55,12 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
     if(body.panel==='feedMarkets'&&(body.feedGroups===null||!normalizeFeedPreferences(body.feedGroups)))throw new BetaError(400,'Configuración de mercado inválida.');
-    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','bondsCreditNews','issuerResearch','instrumentSearch','sectorActivity','news','institutional','business','assetSnapshot','assetCandles','assetInsights','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','bondsCreditNews','issuerResearch','instrumentSearch','sectorActivity','sectorComparables','news','institutional','business','assetSnapshot','assetCandles','assetInsights','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='sectorComparables'){
+      if((body.sector!==undefined&&typeof body.sector!=='boolean')||(body.sector===true?(typeof body.subject!=='string'||!/^[\p{L}\p{N} &.,()/-]{2,80}$/u.test(body.subject.trim())):!symbol(body.subject)))throw new BetaError(400,'Comparación sectorial inválida.');
+      if(body.peers!==undefined&&(!Array.isArray(body.peers)||body.peers.length>8||body.peers.some((p:unknown)=>!p||typeof p!=='object'||Array.isArray(p)||!symbol((p as Body).symbol)||typeof (p as Body).name!=='string'||(p as Body).name.length>120||/[<>\p{Cc}\p{Cf}]/u.test((p as Body).name))))throw new BetaError(400,'Empresas comparables inválidas.');
+      return {request_class:'data'};
+    }
     if(body.panel==='instrumentSearch'){if(typeof body.query!=='string'||body.query.trim().length<1||body.query.length>100||/[<>\p{Cc}\p{Cf}]|https?:|:\/\/|api[_-]?(?:key|token)\s*=/iu.test(body.query)||body.kind!==undefined&&!['stock','etf'].includes(body.kind))throw new BetaError(400,'Búsqueda inválida.');return {request_class:'data'};}
     if(body.panel==='issuerResearch'){if(!symbol(body.subject))throw new BetaError(400,'Ticker inválido.');return {request_class:'expensive'};}
     if(body.panel==='bondsCreditNews'){

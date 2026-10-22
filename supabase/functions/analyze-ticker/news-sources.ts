@@ -33,7 +33,7 @@ export function parsePublisherRss(xml:string,now=Date.now()):Article[]{
 // Verified official syndication feeds supplement discovery without AI calls.
 const RSS_FEEDS=['https://www.cnbc.com/id/100003114/device/rss/rss.html','https://www.cnbc.com/id/100727362/device/rss/rss.html','https://www.cnbc.com/id/19854910/device/rss/rss.html','https://www.cnbc.com/id/15839135/device/rss/rss.html','https://www.cnbc.com/id/10000664/device/rss/rss.html','https://www.eleconomista.es/rss/rss-mercados.php','https://www.eleconomista.es/rss/rss-economia.php','https://feeds.bbci.co.uk/news/world/rss.xml','https://feeds.bbci.co.uk/news/business/rss.xml'];
 async function fetchPublisherFeed(initial:string):Promise<Article[]>{
- let url=initial;const signal=AbortSignal.timeout(8000),hosts=new Set(RSS_FEEDS.map(feed=>new URL(feed).hostname));
+ let url=initial;const signal=AbortSignal.timeout(8000),hosts=new Set([...RSS_FEEDS.map(feed=>new URL(feed).hostname),'feeds.finance.yahoo.com']);
  try{for(let hop=0;hop<3;hop++){
   const parsed=new URL(url);if(parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.port||!hosts.has(parsed.hostname))return [];
   const r=await fetch(url,{redirect:'manual',signal,headers:{Accept:'application/rss+xml,application/xml,text/xml'}});
@@ -44,4 +44,8 @@ async function fetchPublisherFeed(initial:string):Promise<Article[]>{
  }}catch{/* Keep all other providers available. */}return [];
 }
 export async function publisherNews():Promise<Article[]>{return (await Promise.all(RSS_FEEDS.map(fetchPublisherFeed))).flat();}
+export async function tickerPublisherNews(symbol:string):Promise<Article[]>{
+ if(!/^[A-Z0-9][A-Z0-9.^=-]{0,24}$/.test(symbol))return [];
+ return fetchPublisherFeed(`https://feeds.finance.yahoo.com/rss/2.0/headline?${new URLSearchParams({s:symbol,region:'US',lang:'en-US'})}`);
+}
 export function reportNewsContext(articles:Article[]){return {answer:'',results:articles.map(a=>({title:a.title,url:a.url,content:a.excerpt??'',published_date:a.publishedAt??a.date}))};}

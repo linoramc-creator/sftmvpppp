@@ -85,3 +85,31 @@ test('loader uses two parallel reads without AI and tolerates individual provide
  const fundamentalOnly=await loadAssetInsights('TEST',{now,fundamentals:async()=>fundamentals(),read:async()=>{throw new Error('history unavailable');}});
  assert.equal(fundamentalOnly.priceStudy.observations,0);assert.equal(fundamentalOnly.financials.rows.length,2);
 });
+
+test('return behavior calculates real horizons and a complete distribution without duplicating drawdown',()=>{
+ const prices=[100,110,99,99,108.9,103.455,...Array(16).fill(103.455)],result=buildAssetPriceStudy(chart(prices),'TEST',now),b=result.behavior;
+ assert.equal(b.samples,21);assert.equal(b.distribution.reduce((sum,r)=>sum+r.count,0),21);
+ assert.ok(Math.abs(b.distribution.reduce((sum,r)=>sum+r.frequencyPct,0)-100)<1e-9);
+ assert.ok(Math.abs(b.horizons.find(h=>h.sessions===20)!.returnPct!-(103.455/110-1)*100)<1e-9);
+ assert.equal(b.horizons.find(h=>h.sessions===60)!.returnPct,null);
+ assert.equal(b.momentum.length,2);assert.equal(b.momentum[0].return60Pct,null);
+ assert.ok(Math.abs(b.positiveSessionsPct!-2/21*100)<1e-9);
+ assert.ok(Math.abs(b.medianGainPct!-10)<1e-9);assert.ok(Math.abs(b.medianLossPct!+7.5)<1e-9);
+});
+
+test('return behavior bounds statistics to 252 returns and handles unchanged or insufficient history honestly',()=>{
+ const steady=buildAssetPriceStudy(chart(Array(300).fill(100),'2025-01-01'),'TEST',now).behavior;
+ assert.equal(steady.samples,252);assert.equal(steady.positiveSessionsPct,0);assert.equal(steady.medianGainPct,null);assert.equal(steady.medianLossPct,null);
+ assert.equal(steady.distribution.find(r=>r.label==='0 a 1%')?.count,252);
+ assert.equal(steady.horizons.find(h=>h.sessions===252)?.returnPct,0);
+ const empty=buildAssetPriceStudy(null,'TEST',now).behavior;
+ assert.equal(empty.samples,0);assert.equal(empty.positiveSessionsPct,null);assert.deepEqual(empty.momentum,[]);assert.ok(empty.horizons.every(h=>h.returnPct===null));
+});
+
+test('distribution decimal boundaries do not misclassify exact one- and five-percent returns',()=>{
+ const result=buildAssetPriceStudy(chart([100,99,100,105,100,95,100,101]),'TEST',now).behavior;
+ const count=(label:string)=>result.distribution.find(r=>r.label===label)?.count;
+ assert.equal(count('< −5%'),0);assert.equal(count('−5 a −3%'),2);
+ assert.equal(count('−2 a −1%'),0);assert.equal(count('−1 a 0%'),1);
+ assert.equal(count('0 a 1%'),0);assert.equal(count('1 a 2%'),2);assert.equal(count('≥ 5%'),2);
+});

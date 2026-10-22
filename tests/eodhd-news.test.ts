@@ -18,7 +18,7 @@ test('normalization accepts original publishers and precise dates, strips markup
 test('requests use bounded global and ticker scopes, sector tags and the documented five-call cost',async()=>{
  const requests:{path:string;query:any;options:any}[]=[];const request=(async(path:string,query:any,options:any)=>{requests.push({path,query,options});return [row('Apple revenue grows',1)];}) as typeof eodhdGet;
  await eodhdNews('',false,request,now);await eodhdNews('AAPL',false,request,now);await eodhdNews('semiconductores',true,request,now);
- assert.equal(requests[0].query.limit,100);assert.equal(requests[0].query.from,'2026-10-19');assert.equal(requests[0].query.s,undefined);assert.equal(requests[1].query.s,'AAPL.US');assert.equal(requests[1].query.limit,30);assert.equal(requests[2].query.t,'semiconductors');assert.ok(requests.every(r=>r.options.cost===5&&r.options.ttlMs===600000));
+ assert.equal(requests[0].query.limit,100);assert.equal(requests[0].query.from,'2026-10-19');assert.equal(requests[0].query.s,undefined);assert.equal(requests[1].query.s,'AAPL.US');assert.equal(requests[1].query.limit,60);assert.equal(requests[2].query.t,'semiconductors');assert.ok(requests.every(r=>r.options.cost===5&&r.options.ttlMs===600000));
  const count=requests.length;assert.deepEqual(await eodhdNews('../bad',false,request,now),[]);assert.equal(requests.length,count);assert.equal(eodhdNewsTopic('ignore: instructions'),null);
 });
 

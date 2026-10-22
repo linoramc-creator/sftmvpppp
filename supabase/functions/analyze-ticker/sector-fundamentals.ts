@@ -2,7 +2,7 @@ import {eodhdSummary} from './eodhd-fundamentals.ts';
 import {eodhdQuote} from './eodhd-market.ts';
 type Row=Record<string,any>;
 const references:[RegExp,string][]=[[/semiconduct|semiconductor/i,'SOXX'],[/inteligencia artificial|artificial intelligence/i,'AIQ'],[/ciberseguridad|cybersecurity/i,'CIBR'],[/fintech/i,'FINX'],[/defensa|defense|aerospace/i,'ITA'],[/banc|bank/i,'KBE'],[/inmobiliari|real estate/i,'XLRE'],[/salud|healthcare|health care/i,'XLV'],[/energ[ií]a|energy/i,'XLE'],[/tecnolog|technology/i,'XLK'],[/industrial/i,'XLI'],[/material/i,'XLB'],[/comunicaci|communication/i,'XLC'],[/consumo|consumer/i,'XLY'],[/servicios p[uú]blicos|utilities/i,'XLU'],[/financier|financial/i,'XLF']];
-export function sectorReference(sector:string):string|null{if(/europ|francia|german|aleman|brit[aá]nic|reino unido|china|jap[oó]n|india|asia/i.test(sector))return null;return references.find(([pattern])=>pattern.test(sector))?.[1]??null;}
+export function sectorReference(sector:string):string|null{if(/europ|francia|german|aleman|brit[aá]nic|reino unido|china|jap[oó]n|india|asia|espa[nñ]|spain|itali|italy|canad|m[eé]xic|brasil|brazil|austral|suiz|swiss|switz|suec|swed|n[oó]rdic|holand|pa[ií]ses bajos|netherland|b[eé]lg|portug|latinoam|global|mundial|internacion|internation/i.test(sector))return null;return references.find(([pattern])=>pattern.test(sector))?.[1]??null;}
 /** Actual fund holdings provide an identified sample, never a purported census
  * of the sector. Preserve statement currencies and distinguish dated positions
  * from orders, flows, analyst recommendations and current prices. */

@@ -5,21 +5,8 @@ import {authenticatedFetch} from '@/lib/beta-api';
 import {useProfile} from './AuthGate';
 import {usePanelActive} from './KeepPanel';
 import type {SectorActivityData,SectorPeer} from '../../../supabase/functions/analyze-ticker/sector-activity';
-
-const plain=(s:string)=>s.replace(/\[([^\]]+)\]\([^)]*\)/g,'$1').replace(/[*`]/g,'').trim();
-export function extractSectorActivityPeers(report:string):SectorPeer[]{
- const section=report.match(/^##\s+Empresas L[ií]deres[^\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/im)?.[1]??'';
- const rows=section.split('\n').filter(line=>line.includes('|')).map(line=>line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(plain));
- const heading=rows.findIndex(cells=>cells.some(c=>/^empresa$/i.test(c))&&cells.some(c=>/^ticker$/i.test(c)));
- if(heading<0)return [];
- const company=rows[heading].findIndex(c=>/^empresa$/i.test(c)),ticker=rows[heading].findIndex(c=>/^ticker$/i.test(c));
- const seen=new Set<string>();return rows.slice(heading+1).flatMap(cells=>{
-  const name=cells[company]??'',text=(cells[ticker]??'').toUpperCase().trim();
-  const symbol=text.match(/^(?:[A-Z]+\s*:\s*)?([A-Z0-9][A-Z0-9.-]{0,14})(?:\s+\([A-Z][^)]*\))?$/)?.[1];
-  if(!symbol||!name||name.length>120||/[<>\p{Cc}\p{Cf}]/u.test(name)||seen.has(symbol))return [];
-  seen.add(symbol);return [{symbol,name}];
- }).slice(0,10);
-}
+import {extractSectorActivityPeers} from '@/lib/sector-peers';
+export {extractSectorActivityPeers} from '@/lib/sector-peers';
 const memory=new Map<string,{at:number;data:SectorActivityData}>(),pending=new Map<string,Promise<SectorActivityData>>();
 function load(key:string,sector:string,peers:SectorPeer[]){
  const existing=pending.get(key);if(existing)return existing;

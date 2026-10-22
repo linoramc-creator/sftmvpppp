@@ -1,5 +1,6 @@
 import { photoUrl } from '../../../supabase/functions/analyze-ticker/news-covers';
-import {useState} from 'react';
+import {useId,useState} from 'react';
+import {ChevronDown} from 'lucide-react';
 
 import {ResponsiveContainer,LineChart,Line,XAxis,YAxis,Tooltip} from 'recharts';
 import {cleanNewsPoint,newsKeyPoints} from '../../../supabase/functions/analyze-ticker/news-summary';
@@ -7,6 +8,11 @@ import {cleanHeadline,cleanNewsExcerpt} from '@/lib/editorial';
 import type {Article,MarketFeed,FeedQuote} from '../../../supabase/functions/analyze-ticker/panels';
 import {commonTreasuryDate,treasuryLabel} from '../../../supabase/functions/analyze-ticker/treasury-curve';
 const number=(v:number|null,digits=2)=>v===null?'—':v.toLocaleString('es-ES',{maximumFractionDigits:digits});
+const newsIdentity=(text:string)=>text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
+export function visibleNewsArticles(articles:Article[]):Article[]{
+  const seen=new Set<string>();
+  return articles.filter(article=>{const key=newsIdentity(cleanHeadline(cleanNewsPoint(typeof article?.title==='string'?article.title:'')));if(!key||seen.has(key))return false;seen.add(key);return true;});
+}
 export function FeedQuoteStamp({quote}:{quote:FeedQuote}){
  const labels={pre:'PREMARKET',regular:'MARKET',post:'POSTMARKET',closed:'CIERRE'},time=quote.at?Date.parse(quote.at):NaN,age=Number.isFinite(time)?Math.max(0,Math.floor((Date.now()-time)/1000)):null;
  const timezone=quote.timezone??'America/New_York',zoneLabel=({'America/New_York':'ET','Asia/Tokyo':'JST','Asia/Seoul':'KST','America/Chicago':'CT'} as Record<string,string>)[timezone]??timezone;
@@ -16,21 +22,30 @@ export function FeedQuoteStamp({quote}:{quote:FeedQuote}){
 }
 export function NewsCover({article,compact=false}:{article:Article;compact?:boolean}){
   const [failed,setFailed]=useState(false);
-  const usable=photoUrl(article.image)&&!failed;
-  return usable?<img src={article.image} alt="" className={compact?'w-full h-24 mb-3 sm:w-36 sm:mb-0 shrink-0 rounded object-cover bg-muted':'aspect-[16/9] w-full object-cover bg-muted'} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<400||img.naturalHeight<220||img.naturalWidth/img.naturalHeight<1.25||img.naturalWidth/img.naturalHeight>2.6)setFailed(true);}}/>:null;
+  const usable=failed?undefined:photoUrl(article.image);
+  return usable?<img src={usable} alt="" className={compact?'h-20 w-24 shrink-0 rounded-lg object-cover bg-slate-900 sm:h-24 sm:w-36':'max-h-44 aspect-[16/9] w-full object-cover bg-slate-900'} loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)} onLoad={e=>{const img=e.currentTarget;if(img.naturalWidth<400||img.naturalHeight<220||img.naturalWidth/img.naturalHeight<1.25||img.naturalWidth/img.naturalHeight>2.6)setFailed(true);}}/>:null;
 }
 export function NewsCards({articles,geo=false,compact=false}:{articles:Article[];geo?:boolean;compact?:boolean}){
-  return articles.length?<div className={compact?'grid xl:grid-cols-2 gap-3':'grid md:grid-cols-2 xl:grid-cols-3 gap-4'}>{articles.map(article=>{
-    const headline=cleanHeadline(cleanNewsPoint(article.title));
-    const normalized=(text:string)=>text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
-    const points=newsKeyPoints(article).map(cleanNewsExcerpt).filter(point=>point&&normalized(point)!==normalized(headline));
-    const published=article.publishedAt&&Number.isFinite(Date.parse(article.publishedAt))?new Date(article.publishedAt).toLocaleString('es-ES'):article.date;
-    return <article key={article.url} className={`border border-border overflow-hidden rounded-md bg-background/30 ${compact?'sm:flex sm:items-start sm:gap-4 p-3 sm:p-4':''}`}>
+  const id=useId().replace(/:/g,'');
+  const items=visibleNewsArticles(articles).map(article=>{
+    const headline=cleanHeadline(cleanNewsPoint(typeof article.title==='string'?article.title:''));
+    const key=newsIdentity(headline);
+    const pointKeys=new Set<string>();
+    const points=newsKeyPoints(article).map(cleanNewsExcerpt).filter(point=>{const value=newsIdentity(point);if(!value||value===key||pointKeys.has(value))return false;pointKeys.add(value);return true;});
+    const instant=article.publishedAt&&Number.isFinite(Date.parse(article.publishedAt))?new Date(article.publishedAt):null;
+    const date=typeof article.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(article.date)&&Number.isFinite(Date.parse(article.date))&&new Date(article.date).toISOString().slice(0,10)===article.date?article.date:null;
+    const published=instant?instant.toLocaleString('es-ES',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):date?new Date(date+'T12:00:00Z').toLocaleDateString('es-ES',{timeZone:'UTC',day:'2-digit',month:'short',year:'numeric'}):'';
+    return {article,headline,points,published,dateTime:instant?.toISOString()??date??undefined};
+  });
+  return items.length?<div aria-label={geo?'Noticias geopolíticas':undefined} className={`font-body [&_h3]:font-body ${compact?'space-y-3':'columns-1 gap-3 md:columns-2'}`}>{items.map(({article,headline,points,published,dateTime},index)=>{
+    const headingId=`news-${id}-${index}`;
+    return <article key={article.url||headingId} aria-labelledby={headingId} className={`overflow-hidden rounded-xl border border-slate-700/40 bg-[#0b111b] ${compact?'flex items-start gap-3 p-3 sm:gap-4 sm:p-4':'mb-3 inline-block w-full break-inside-avoid align-top'}`}>
       <NewsCover key={article.image??article.url} article={article} compact={compact}/>
-      <div className={compact?'min-w-0 flex-1':'p-4'}>
-        {published&&<p className="text-[10px] text-muted-foreground mb-2">{published}</p>}
-        <h3 className="text-sm leading-relaxed font-semibold text-foreground">{headline}</h3>
-        {points.length>0&&<ul aria-label="Puntos clave" className="mt-3 space-y-2">{points.map((point,i)=><li key={i} className="flex gap-2 text-xs leading-relaxed text-foreground/75"><span aria-hidden="true" className="w-1 h-1 rounded-full shrink-0 bg-section-heading/70 mt-[7px]"/><span>{point}</span></li>)}</ul>}
+      <div className={compact?'min-w-0 flex-1':'px-4 pb-4 pt-3'}>
+        {published&&<time dateTime={dateTime} className="mb-1.5 block text-[10px] leading-relaxed tabular-nums text-slate-500">{published}</time>}
+        <h3 id={headingId} className="!m-0 !border-0 !p-0 font-body !text-sm !font-semibold !normal-case !leading-snug !tracking-normal !text-slate-100">{headline}</h3>
+        {points.length>0&&<ul aria-label="Puntos clave" className="!mb-0 mt-2.5 space-y-1.5">{points.slice(0,2).map((point,i)=><li key={i} className="!mb-0 flex gap-2 font-body !text-xs leading-relaxed text-slate-400"><span aria-hidden="true" className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-blue-400/70"/><span>{point}</span></li>)}</ul>}
+        {points.length>2&&<details className="group mt-2.5 border-t border-slate-800/70 pt-2.5"><summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded text-[10px] font-medium text-blue-300/80 transition-colors hover:text-blue-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 [&::-webkit-details-marker]:hidden">Más contexto<ChevronDown aria-hidden="true" size={12} className="transition-transform group-open:rotate-180"/></summary><ul aria-label="Contexto adicional" className="!mb-0 mt-2 space-y-1.5">{points.slice(2).map((point,i)=><li key={i} className="!mb-0 flex gap-2 font-body !text-xs leading-relaxed text-slate-400"><span aria-hidden="true" className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-blue-400/70"/><span>{point}</span></li>)}</ul></details>}
       </div>
     </article>;
   })}</div>:<p className="text-sm text-muted-foreground">No se han podido obtener noticias recientes en este momento.</p>;

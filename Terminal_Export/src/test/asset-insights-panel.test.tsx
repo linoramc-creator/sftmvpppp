@@ -19,7 +19,7 @@ function fixture(symbol:string):AssetInsights{return {
  symbol,fetchedAt:'2026-10-21T20:00:00Z',profile:{name:'Example company',kind:'equity',description:'Industrial products and recurring maintenance services.',sector:'Industrials',industry:'Electrical equipment',country:'United States',currency:'USD',financialCurrency:'USD',exchange:'NYSE',employees:12000,updatedAt:'2026-10-20'},
  metrics:[{id:'revenueTtm',label:'Ingresos · doce meses',value:1200000000,unit:'currency',currency:'USD',period:'TTM',periodEnd:'2026-06-30'},{id:'profitMargin',label:'Margen neto',value:-2,unit:'percent',currency:null,period:'TTM',periodEnd:'2026-06-30'}],
  financials:{unit:'millions',scale:1000000,frequency:'quarterly',rows:[]},fund:null,
- priceStudy:{from:'2025-10-01',to:'2026-10-20',observations:265,adjustment:'adjusted-close',annualizationDays:252,monthlyReturns:[{year:2026,month:7,returnPct:2.5,partial:false,from:'2026-06-30',to:'2026-07-31'},{year:2026,month:10,returnPct:-1.2,partial:true,from:'2026-09-30',to:'2026-10-20'}],underwater:[{date:'2026-10-19',drawdownPct:0,sessionsUnderwater:0},{date:'2026-10-20',drawdownPct:-5,sessionsUnderwater:1}],summary:{currentDrawdownPct:-5,maximumDrawdownPct:-20,currentSessionsUnderwater:1,longestSessionsUnderwater:45,trendEfficiency20Pct:30,trendDirection20:'down',sortino:.7,downsideAnnualizedPct:15,upsideAnnualizedPct:18,returnSamples:252}},
+ priceStudy:{from:'2025-10-01',to:'2026-10-20',observations:265,adjustment:'adjusted-close',annualizationDays:252,behavior:{samples:252,from:'2025-10-01',to:'2026-10-20',positiveSessionsPct:51,medianGainPct:1.2,medianLossPct:-1.1,momentum:[{date:'2026-10-19',return20Pct:2,return60Pct:null},{date:'2026-10-20',return20Pct:3,return60Pct:5}],horizons:[{sessions:20,returnPct:3,from:'2026-09-22',to:'2026-10-20'},{sessions:60,returnPct:5,from:'2026-07-28',to:'2026-10-20'}],distribution:[{label:'0 a 1%',count:100,frequencyPct:100/252*100}]},monthlyReturns:[{year:2026,month:7,returnPct:2.5,partial:false,from:'2026-06-30',to:'2026-07-31'},{year:2026,month:10,returnPct:-1.2,partial:true,from:'2026-09-30',to:'2026-10-20'}],underwater:[{date:'2026-10-19',drawdownPct:0,sessionsUnderwater:0},{date:'2026-10-20',drawdownPct:-5,sessionsUnderwater:1}],summary:{currentDrawdownPct:-5,maximumDrawdownPct:-20,currentSessionsUnderwater:1,longestSessionsUnderwater:45,trendEfficiency20Pct:30,trendDirection20:'down',sortino:.7,downsideAnnualizedPct:15,upsideAnnualizedPct:18,returnSamples:252}},
 };}
 const quarter=(period:string,currency:string,revenue:number):AssetFinancialPoint=>({period,filingDate:'2026-10-01',currency,revenue,freeCashFlow:0,fcfMarginPct:0,grossMarginPct:40,operatingCashFlow:10,netIncome:-2,cash:30,totalDebt:15,netDebt:-15});
 const response=(data:AssetInsights)=>({ok:true,json:async()=>data});
@@ -87,23 +87,42 @@ it('calendar marks a partial month and leaves unreported months empty instead of
  expect(screen.queryByText('0,0')).not.toBeInTheDocument();expect(within(table).getByText(/Un asterisco indica el mes parcial/)).toBeInTheDocument();
 });
 
-it('switches drawdown into duration without changing the history or treating sessions as calendar days',async()=>{
- render(<AssetInsightsPanel symbol="INSIGHT_DRAWDOWN"/>);
- fireEvent.click(await screen.findByRole('button',{name:'Caídas y recuperación'}));
- const initial=observations();expect(screen.getByRole('button',{name:'Caída'})).toHaveAttribute('aria-pressed','true');expect(screen.getByTestId('area-series')).toHaveAttribute('data-key','drawdownPct');
- expect(screen.getByText('1 sesiones')).toBeInTheDocument();expect(screen.getByLabelText(/no son días naturales/)).toBeInTheDocument();
- fireEvent.click(screen.getByRole('button',{name:'Duración'}));
- expect(screen.getByRole('button',{name:'Duración'})).toHaveAttribute('aria-pressed','true');expect(screen.getByTestId('area-series')).toHaveAttribute('data-key','sessionsUnderwater');expect(observations()).toEqual(initial);
- expect(screen.getByText('Tiempo bajo el máximo de cierre')).toBeInTheDocument();
+it('replaces duplicated drawdown with rolling momentum and a bounded daily-return distribution',async()=>{
+ render(<AssetInsightsPanel symbol="INSIGHT_BEHAVIOR"/>);
+ fireEvent.click(await screen.findByRole('button',{name:'Impulso y distribución'}));
+ expect(screen.queryByText('Mayor caída de la muestra')).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Caídas y recuperación'})).not.toBeInTheDocument();
+ expect(screen.getAllByTestId('line-series').map(n=>n.getAttribute('data-key'))).toEqual(['return20Pct','return60Pct']);
+ expect(observations()[0].return60Pct).toBeNull();
+ expect(screen.getByText('Sesiones positivas')).toBeInTheDocument();expect(screen.getByText('51,0%')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Distribución diaria'}));
+ expect(screen.getByTestId('weight-chart')).toHaveAttribute('data-observations',expect.stringContaining('frequencyPct'));
+ expect(screen.getByTestId('bar-series')).toHaveAttribute('data-key','frequencyPct');
+ expect(screen.getByText('Distribución de los movimientos diarios')).toBeInTheDocument();
 });
 
-it('opens an index directly on usable price studies when corporate fundamentals do not apply',async()=>{
+it('opens an index on momentum instead of repeating drawdown when company fundamentals do not apply',async()=>{
  const data=fixture('INSIGHT_INDEX');data.profile.kind='index';data.metrics=[];data.priceStudy.adjustment='price';
  state.api.mockResolvedValue(response(data));render(<AssetInsightsPanel symbol={data.symbol}/>);
- const drawdown=await screen.findByRole('button',{name:'Caídas y recuperación'});
- expect(drawdown).toHaveAttribute('aria-pressed','true');expect(screen.getByTestId('area-series')).toHaveAttribute('data-key','drawdownPct');
- expect(screen.queryByRole('button',{name:'Negocio y métricas'})).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'Evolución financiera'})).not.toBeInTheDocument();
- expect(screen.getByText(/Variaciones de precio; no incluyen rendimientos de una cartera/)).toBeInTheDocument();
+ expect(await screen.findByRole('button',{name:'Impulso y distribución'})).toHaveAttribute('aria-pressed','true');
+ expect(screen.queryByRole('button',{name:'Negocio y métricas'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Evolución financiera'})).not.toBeInTheDocument();
+ expect(screen.getByText(/Variaciones de precio entre cierres/)).toBeInTheDocument();
+});
+
+it('does not display a meaningless distribution when there are fewer than 20 daily returns',async()=>{
+ const data=fixture('INSIGHT_SHORT');data.metrics=[];data.priceStudy.behavior.samples=2;
+ state.api.mockResolvedValue(response(data));render(<AssetInsightsPanel symbol={data.symbol}/>);
+ await screen.findByText(/al menos 20 variaciones/);
+ expect(screen.queryByRole('group',{name:'Vista de comportamiento'})).not.toBeInTheDocument();
+});
+
+it('uses the distribution at exactly 20 returns rather than drawing an invisible one-point momentum line',async()=>{
+ const data=fixture('INSIGHT_TWENTY');data.metrics=[];data.priceStudy.behavior.samples=20;data.priceStudy.behavior.momentum=data.priceStudy.behavior.momentum.slice(0,1);
+ state.api.mockResolvedValue(response(data));render(<AssetInsightsPanel symbol={data.symbol}/>);
+ expect(await screen.findByRole('button',{name:'Distribución diaria'})).toHaveAttribute('aria-pressed','true');
+ expect(screen.getByRole('button',{name:/^Impulso$/})).toBeDisabled();
+ expect(screen.queryByTestId('line-series')).not.toBeInTheDocument();expect(screen.getByTestId('bar-series')).toHaveAttribute('data-key','frequencyPct');
 });
 
 it('retries a failed authenticated request and does not cache an unauthorized response',async()=>{

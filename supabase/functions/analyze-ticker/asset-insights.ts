@@ -8,7 +8,8 @@ type Row=Record<string,any>;
 export type AssetInsightMetric={id:string;label:string;value:number;unit:'currency'|'percent'|'multiple'|'count';currency:string|null;period:'TTM'|'latest-quarter'|'record'|'fund';periodEnd:string|null};
 export type AssetFinancialPoint={period:string;filingDate:string|null;currency:string|null;revenue:number|null;freeCashFlow:number|null;fcfMarginPct:number|null;grossMarginPct:number|null;operatingCashFlow:number|null;netIncome:number|null;cash:number|null;totalDebt:number|null;netDebt:number|null};
 export type MonthlyReturn={year:number;month:number;returnPct:number;partial:boolean;from:string;to:string};
-export type PriceStudy={from:string|null;to:string|null;observations:number;adjustment:'adjusted-close'|'price';annualizationDays:number;monthlyReturns:MonthlyReturn[];underwater:{date:string;drawdownPct:number;sessionsUnderwater:number}[];summary:{currentDrawdownPct:number|null;maximumDrawdownPct:number|null;currentSessionsUnderwater:number|null;longestSessionsUnderwater:number|null;trendEfficiency20Pct:number|null;trendDirection20:'up'|'down'|'flat'|null;sortino:number|null;downsideAnnualizedPct:number|null;upsideAnnualizedPct:number|null;returnSamples:number}};
+export type ReturnBehavior={momentum:{date:string;return20Pct:number|null;return60Pct:number|null}[];horizons:{sessions:number;returnPct:number|null;from:string|null;to:string|null}[];distribution:{label:string;count:number;frequencyPct:number}[];samples:number;from:string|null;to:string|null;positiveSessionsPct:number|null;medianGainPct:number|null;medianLossPct:number|null};
+export type PriceStudy={from:string|null;to:string|null;observations:number;adjustment:'adjusted-close'|'price';annualizationDays:number;monthlyReturns:MonthlyReturn[];behavior:ReturnBehavior;underwater:{date:string;drawdownPct:number;sessionsUnderwater:number}[];summary:{currentDrawdownPct:number|null;maximumDrawdownPct:number|null;currentSessionsUnderwater:number|null;longestSessionsUnderwater:number|null;trendEfficiency20Pct:number|null;trendDirection20:'up'|'down'|'flat'|null;sortino:number|null;downsideAnnualizedPct:number|null;upsideAnnualizedPct:number|null;returnSamples:number}};
 export type AssetInsights={symbol:string;fetchedAt:string;profile:{name:string|null;kind:InstrumentKind;description:string|null;sector:string|null;industry:string|null;country:string|null;currency:string|null;financialCurrency:string|null;exchange:string|null;employees:number|null;updatedAt:string|null};metrics:AssetInsightMetric[];financials:{unit:'millions';scale:1000000;frequency:'quarterly';rows:AssetFinancialPoint[]};fund:{benchmark:string|null;manager:string|null;category:string|null;holdingsCount:number|null;inceptionDate:string|null;topHoldings:{symbol:string;name:string;weightPct:number}[];sectorWeights:{name:string;weightPct:number}[];regions:{name:string;weightPct:number}[];topTenWeightPct:number|null}|null;priceStudy:PriceStudy};
 const record=(value:unknown):Row=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Row:{};
 const text=(value:unknown,max=400)=>typeof value==='string'&&value.trim()?value.trim().slice(0,max):null;
@@ -41,6 +42,18 @@ export function buildAssetPriceStudy(chartInput:unknown,symbol:string,now=Date.n
  }
  const rows=inconsistentAdjustment?[]:[...points].map(([date,value])=>({date,value})).sort((a,b)=>a.date.localeCompare(b.date));
  const returns=rows.slice(1).map((row,i)=>row.value/rows[i].value-1),recent=returns.slice(-252),samples=recent.length;
+ const median=(values:number[])=>{if(!values.length)return null;const sorted=[...values].sort((a,b)=>a-b),mid=Math.floor(sorted.length/2);return (sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2)*100;};
+ const edges=[-Infinity,-5,-3,-2,-1,0,1,2,3,5,Infinity],labels=['< −5%','−5 a −3%','−3 a −2%','−2 a −1%','−1 a 0%','0 a 1%','1 a 2%','2 a 3%','3 a 5%','≥ 5%'];
+ // Stabilize decimal boundaries: 99 / 100 - 1 is slightly below -1% in
+ // binary floating point and must not land in the neighbouring interval.
+ const changesPct=recent.map(r=>Number((r*100).toFixed(10)));
+ const behavior:ReturnBehavior={
+  momentum:rows.map((row,i)=>({date:row.date,return20Pct:i>=20?(row.value/rows[i-20].value-1)*100:null,return60Pct:i>=60?(row.value/rows[i-60].value-1)*100:null})).filter(r=>r.return20Pct!==null),
+  horizons:[5,20,60,126,252].map(sessions=>({sessions,returnPct:rows.length>sessions?(rows.at(-1)!.value/rows[rows.length-1-sessions].value-1)*100:null,from:rows.length>sessions?rows[rows.length-1-sessions].date:null,to:rows.at(-1)?.date??null})),
+  distribution:labels.map((label,i)=>{const count=changesPct.filter(r=>r>=edges[i]&&r<edges[i+1]).length;return {label,count,frequencyPct:samples?count/samples*100:0};}),
+  samples,from:samples?rows[rows.length-samples-1].date:null,to:samples?rows.at(-1)!.date:null,
+  positiveSessionsPct:samples?recent.filter(r=>r>0).length/samples*100:null,medianGainPct:median(recent.filter(r=>r>0)),medianLossPct:median(recent.filter(r=>r<0)),
+ };
  const downside=samples>=60?Math.sqrt(recent.reduce((sum,r)=>sum+Math.min(r,0)**2,0)/samples)*Math.sqrt(annualizationDays):null;
  const upside=samples>=60?Math.sqrt(recent.reduce((sum,r)=>sum+Math.max(r,0)**2,0)/samples)*Math.sqrt(annualizationDays):null;
  const negativeCount=recent.filter(r=>r<0).length,mean=samples?recent.reduce((sum,r)=>sum+r,0)/samples:null;
@@ -61,7 +74,7 @@ export function buildAssetPriceStudy(chartInput:unknown,symbol:string,now=Date.n
   monthlyReturns.push({year:y,month:m,returnPct:(row.value/previous.value-1)*100,partial:i===monthly.length-1&&row.date<calendarEnd,from:previous.date,to:row.date});
  }
  const last=underwater.at(-1);
- return {from:rows[0]?.date??null,to:rows.at(-1)?.date??null,observations:rows.length,adjustment:requiresAdjustment?'adjusted-close':'price',annualizationDays,monthlyReturns,underwater,summary:{currentDrawdownPct:last?.drawdownPct??null,maximumDrawdownPct:rows.length?worst:null,currentSessionsUnderwater:last?.sessionsUnderwater??null,longestSessionsUnderwater:rows.length?longest:null,trendEfficiency20Pct:direction!==null?(path>0?Math.min(100,Math.abs(direction)/path*100):0):null,trendDirection20:direction===null?null:direction>0?'up':direction<0?'down':'flat',sortino,downsideAnnualizedPct:downside===null?null:downside*100,upsideAnnualizedPct:upside===null?null:upside*100,returnSamples:samples}};
+ return {from:rows[0]?.date??null,to:rows.at(-1)?.date??null,observations:rows.length,adjustment:requiresAdjustment?'adjusted-close':'price',annualizationDays,monthlyReturns,behavior,underwater,summary:{currentDrawdownPct:last?.drawdownPct??null,maximumDrawdownPct:rows.length?worst:null,currentSessionsUnderwater:last?.sessionsUnderwater??null,longestSessionsUnderwater:rows.length?longest:null,trendEfficiency20Pct:direction!==null?(path>0?Math.min(100,Math.abs(direction)/path*100):0):null,trendDirection20:direction===null?null:direction>0?'up':direction<0?'down':'flat',sortino,downsideAnnualizedPct:downside===null?null:downside*100,upsideAnnualizedPct:upside===null?null:upside*100,returnSamples:samples}};
 }
 
 /** Chart-ready, dated reported fundamentals. Monetary financial series are in
@@ -110,4 +123,4 @@ export async function loadAssetInsights(symbol:string,deps:Dependencies={}):Prom
  const [raw,history]=await Promise.allSettled([fundamentals(symbol),read(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error'},{timeoutMs:8000,acceptPrimary:value=>buildAssetPriceStudy(value?.chart?.result?.[0],symbol,now).observations>=2})]);
  return buildAssetInsights(raw.status==='fulfilled'?raw.value:null,history.status==='fulfilled'?history.value?.chart?.result?.[0]:null,symbol,now);
 }
-export async function assetInsights(symbol:string):Promise<AssetInsights>{return cached('asset-insights-v1:'+symbol,300000,()=>loadAssetInsights(symbol));}
+export async function assetInsights(symbol:string):Promise<AssetInsights>{return cached('asset-insights-v2:'+symbol,300000,()=>loadAssetInsights(symbol));}

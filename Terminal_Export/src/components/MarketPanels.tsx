@@ -6,10 +6,11 @@ import {useProfile} from './AuthGate';
 import {useFeedPreferences} from '@/hooks/use-feed-preferences';
 import {FEED_GROUP_KEYS,FEED_GROUP_LABELS} from '../../../supabase/functions/analyze-ticker/feed-preferences';
 import type { MarketData } from "@/lib/analyze";
-import {NewsCards,TreasuryCard,EarningsList,FeedQuoteStamp} from './FeedCards';
+import {NewsCards,TreasuryCard,EarningsList,FeedQuoteStamp,visibleNewsArticles} from './FeedCards';
 import { authenticatedFetch } from "@/lib/beta-api";
 import {useTerminalEntry,waitForVisibleFeedImages} from '@/lib/terminal-entry';
-import { useEffect, useState, useRef, type ReactNode } from 'react';
+import { useEffect, useState, useRef, useId, type ReactNode } from 'react';
+import {RefreshCw} from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
 import type { Article, BondsPanel, BusinessPanel, OpinionsPanel, NewsPanel, MarketFeed, FeedQuote, Point, SegmentPeriod, Series } from '../../../supabase/functions/analyze-ticker/panels';
 
@@ -77,10 +78,26 @@ function Documents({ articles }: { articles: Article[] }) {
 }
 export function NewsView({ subject, sector = false }: { subject: string; sector?: boolean }) {
   const state = usePanel<NewsPanel>('news', subject, sector);
-  if (!state.data) return <Status {...state} />;
-  const list = (articles: Article[]) => articles.length ? <Documents articles={articles} /> : <p className="text-sm py-4">No hay noticias relevantes disponibles en este período.</p>;
-  return <div className="space-y-5 py-3">{state.error && <Status {...state} />}<Box title={sector ? 'NOTICIAS DEL SECTOR' : 'NOTICIAS · ' + subject}>{list(state.data.articles)}</Box>
-    {!sector && state.data.sectorName && <Box title={'NOTICIAS DEL SECTOR · ' + state.data.sectorName}>{list(state.data.sectorArticles ?? [])}</Box>}<Stamp at={state.data.fetchedAt} /></div>;
+  const key=panelKey('news',subject,sector),id=useId().replace(/:/g,'');
+  const [selection,setSelection]=useState<{key:string;category:'asset'|'sector'}>({key,category:'asset'});
+  if (!state.data || state.loadedKey!==key) return <Status {...state} />;
+  const primary=visibleNewsArticles(state.data.articles??[]),related=visibleNewsArticles(state.data.sectorArticles??[]);
+  const hasSector=!sector&&!!(state.data.sectorName||related.length);
+  const preferred=selection.key===key?selection.category:'asset';
+  const selected=preferred==='sector'&&hasSector&&related.length?'sector':primary.length?'asset':hasSector&&related.length?'sector':'asset';
+  const articles=selected==='sector'?related:primary;
+  const windowDays=selected==='sector'?state.data.sectorWindowDays:state.data.articleWindowDays;
+  const tabs=[{id:'asset' as const,label:sector?'Sector':`Activo · ${subject}`,count:primary.length},...(hasSector?[{id:'sector' as const,label:`Sector${state.data.sectorName?' · '+state.data.sectorName:''}`,count:related.length}]:[])].filter(tab=>tab.count>0);
+  const showTabs=tabs.length>1&&primary.length+related.length>0;
+  return <section className="space-y-3 py-3 font-body [&_h2]:font-body" aria-label={sector?'Noticias del sector':`Noticias de ${subject}`}>
+    {state.error&&<Status {...state}/>}
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700/40 bg-[#0b111b] px-4 py-3">
+      <div><h2 className="text-sm font-semibold text-slate-100">{sector||selected==='sector'?`Noticias del sector${!sector&&state.data.sectorName?' · '+state.data.sectorName:''}`:'Noticias y contexto'}</h2><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 [&_p]:!mb-0 [&_p]:!text-[10px]">{(windowDays===14||windowDays===30)&&<span>Últimos {windowDays} días</span>}{Number.isFinite(Date.parse(state.data.fetchedAt))&&<Stamp at={state.data.fetchedAt}/>}</div></div>
+      <button type="button" aria-label="Actualizar noticias" disabled={state.loading} onClick={state.retry} className="rounded-lg border border-slate-700/50 p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 disabled:opacity-40"><RefreshCw size={13} className={state.loading?'motion-safe:animate-spin':''}/></button>
+      {showTabs&&<div role="tablist" aria-label="Ámbito de noticias" className="flex w-full flex-wrap gap-1.5 border-t border-slate-800/70 pt-3" onKeyDown={event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const enabled=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)')];if(!enabled.length)return;event.preventDefault();const current=enabled.indexOf(document.activeElement as HTMLButtonElement),index=event.key==='Home'?0:event.key==='End'?enabled.length-1:(current+(event.key==='ArrowLeft'?-1:1)+enabled.length)%enabled.length;enabled[index].click();enabled[index].focus();}}>{tabs.map(tab=><button type="button" role="tab" key={tab.id} id={`news-${id}-${tab.id}`} aria-controls={`news-${id}-panel`} aria-selected={selected===tab.id} tabIndex={selected===tab.id?0:-1} disabled={!tab.count} onClick={()=>setSelection({key,category:tab.id})} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 disabled:opacity-35 ${selected===tab.id?'bg-blue-400/10 font-medium text-blue-200':'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}>{tab.label}<span className={`rounded px-1.5 py-0.5 text-[10px] tabular-nums ${selected===tab.id?'bg-blue-400/15 text-blue-200':'bg-slate-800 text-slate-500'}`}>{tab.count}</span></button>)}</div>}
+    </div>
+    <div id={`news-${id}-panel`} role={showTabs?'tabpanel':undefined} aria-labelledby={showTabs?`news-${id}-${selected}`:undefined}>{articles.length?<Documents articles={articles}/>:<p className="rounded-xl border border-slate-800/70 px-4 py-5 text-xs leading-relaxed text-slate-400">No hay noticias relevantes verificadas para este período.</p>}</div>
+  </section>;
 }
 function feedPrice(price: number | null, currency: string,symbol='') {
   if (price === null) return 'N/D';
