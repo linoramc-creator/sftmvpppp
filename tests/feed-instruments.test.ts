@@ -1,14 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {TREASURY_MATURITIES,treasuryLabel,commonTreasuryDate} from '../supabase/functions/analyze-ticker/treasury-curve.ts';
+import {TREASURY_MATURITIES,treasuryLabel,treasuryIdentifier,commonTreasuryDate} from '../supabase/functions/analyze-ticker/treasury-curve.ts';
 import {instrumentInfo,sessionStats} from '../supabase/functions/analyze-ticker/asset-instrument.ts';
 import {chartRiskData} from '../supabase/functions/analyze-ticker/asset-risk.ts';
 import {hourlyToFourHours} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
 import {regularSessionEnd} from '../supabase/functions/analyze-ticker/market-session.ts';
 
-test('Treasury curve includes the published 6-month and 1-year series and preserves dates',()=>{
- assert.deepEqual(TREASURY_MATURITIES.map(p=>p.series),['DGS6MO','DGS1','DGS2','DGS5','DGS10','DGS20']);
- assert.equal(treasuryLabel(.5),'6 meses');assert.equal(treasuryLabel(1),'1 año');
+test('Treasury curve includes the published 3-month, 6-month and 1-year series and preserves dates',()=>{
+ assert.deepEqual(TREASURY_MATURITIES.map(p=>p.series),['DGS3MO','DGS6MO','DGS1','DGS2','DGS5','DGS10','DGS20']);
+ assert.equal(treasuryLabel(.25),'3 meses');assert.equal(treasuryIdentifier(.25),'DGS3MO');assert.equal(treasuryLabel(.5),'6 meses');assert.equal(treasuryLabel(1),'1 año');
  const points=TREASURY_MATURITIES.map(p=>({years:p.years,yield:4,date:'2026-10-16',changeBp:2}));
  assert.equal(commonTreasuryDate(points),'2026-10-16');
  assert.equal(commonTreasuryDate(points.map((p,i)=>i===0?{...p,date:'2026-10-15'}:p)),null);

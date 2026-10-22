@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {classify,secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
-import {defaultFeedPreferences,normalizeFeedPreferences,normalizeSavedFeedPreferences,normalizeFeedSymbol,feedSuggestions,feedPreferencesKey,FEED_GROUP_KEYS} from '../supabase/functions/analyze-ticker/feed-preferences.ts';
+import {defaultFeedPreferences,normalizeFeedPreferences,normalizeSavedFeedPreferences,normalizeFeedSymbol,feedSuggestions,feedPreferencesKey,FEED_GROUP_KEYS,FEED_GROUP_LIMITS,FEED_SUGGESTIONS} from '../supabase/functions/analyze-ticker/feed-preferences.ts';
 import {validateFeedAsset} from '../supabase/functions/analyze-ticker/feed-quotes.ts';
 
 test('normalizes bounded preferences without mutating default arrays or accepting hidden properties',()=>{
@@ -14,7 +14,7 @@ test('normalizes bounded preferences without mutating default arrays or acceptin
 });
 test('market cache identifies the ordered public selection in a bounded key',async()=>{
  const defaults=defaultFeedPreferences(),first=await feedPreferencesKey(['AAPL'],defaults);
- assert.match(first,/^feed-markets-v9:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
+ assert.match(first,/^feed-markets-v10:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
  assert.notEqual(first,await feedPreferencesKey(['MSFT'],defaults));
  assert.notEqual(first,await feedPreferencesKey(['AAPL'],{...defaults,indices:[...defaults.indices].reverse()}));
 });
@@ -61,13 +61,27 @@ test('market requests cannot bypass saved preferences with a different forged se
  const response=await secureRequest(request({panel:'feedMarkets',subject:'AAPL',feedGroups:groups}),async()=>{dispatched=true;return Response.json({});});
  assert.equal(response.status,409);assert.equal(dispatched,false);await response.json();
 });
-test('new selections enforce seven per group, while stored legacy selections retain their first seven without writes',async t=>{
- const defaults=defaultFeedPreferences();for(const key of FEED_GROUP_KEYS)assert.equal(defaults[key].length,7);
+test('new selections allow ten ETF and seven in other groups, while legacy custom selections retain their assets without writes',async t=>{
+ const defaults=defaultFeedPreferences();for(const key of FEED_GROUP_KEYS)assert.equal(defaults[key].length,FEED_GROUP_LIMITS[key]);
  const legacy={indices:['^FTSE','^N225'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EURUSD=X','JPY=X']};
- const expected={...legacy,etfs:legacy.etfs.slice(0,7),commodities:defaults.commodities};assert.deepEqual(normalizeSavedFeedPreferences(legacy),expected);assert.equal(normalizeFeedPreferences(legacy),null);
+ const expected={...legacy,commodities:defaults.commodities};assert.deepEqual(normalizeSavedFeedPreferences(legacy),expected);assert.equal(normalizeFeedPreferences(legacy),null);
  const {writes}=securityFixture(t,'INDEX',legacy),loaded=await secureRequest(request({accountAction:'getFeedPreferences'}),async()=>Response.json({}));
  assert.equal(loaded.status,200);assert.deepEqual((await loaded.json()).groups,expected);assert.equal(writes.length,0);
- for(const key of FEED_GROUP_KEYS){const tooMany={...defaults,[key]:[...defaults[key],key==='commodities'?'KC=F':key==='indices'?'^FTSE':key==='etfs'?'GLD':'EURJPY=X']};assert.equal(normalizeFeedPreferences(tooMany),null);assert.throws(()=>classify({accountAction:'saveFeedPreferences',groups:tooMany}));}
+ for(const key of FEED_GROUP_KEYS){const tooMany={...defaults,[key]:[...defaults[key],key==='commodities'?'KC=F':key==='indices'?'^FTSE':key==='etfs'?'VTI':'EURJPY=X']};assert.equal(normalizeFeedPreferences(tooMany),null);assert.throws(()=>classify({accountAction:'saveFeedPreferences',groups:tooMany}));}
+ const longer={...defaults,etfs:[...defaults.etfs,'VTI','VT']};assert.deepEqual(normalizeSavedFeedPreferences(longer)?.etfs,defaults.etfs);
+});
+
+test('ETF defaults and suggestions are unique while future seven-ETF selections stay explicitly personalized',async t=>{
+ const defaults=defaultFeedPreferences(),oldDefaults=defaults.etfs.slice(0,7),saved={...defaults,etfs:oldDefaults};
+ assert.deepEqual(defaults.etfs,['SPY','QQQ','URTH','IWM','VEA','VWO','TLT','GLD','HYG','LQD']);
+ assert.deepEqual(feedSuggestions('etfs','',[],10).map(([symbol])=>symbol),defaults.etfs);
+ assert.equal(new Set(FEED_SUGGESTIONS.etfs.map(([symbol])=>symbol)).size,FEED_SUGGESTIONS.etfs.length);
+ assert.deepEqual(normalizeSavedFeedPreferences(saved)?.etfs,oldDefaults);
+ assert.deepEqual(normalizeSavedFeedPreferences({...saved,etfs:[...oldDefaults].reverse()})?.etfs,[...oldDefaults].reverse());
+ const {writes}=securityFixture(t,'ETF',saved),loaded=await secureRequest(request({accountAction:'getFeedPreferences'}),async()=>Response.json({}));
+ assert.deepEqual((await loaded.json()).groups.etfs,oldDefaults);assert.equal(writes.length,0);
+ const response=await secureRequest(request({accountAction:'saveFeedPreferences',groups:defaults}),async()=>Response.json({}));
+ assert.equal(response.status,200);assert.deepEqual((await response.json()).groups.etfs,defaults.etfs);assert.equal(writes[0].user_id,uid);
 });
 test('ticker aliases are explicit, duplicate-aware and preserve the direction of native currency pairs',()=>{
  for(const [group,input,expected]of [['indices','SPX','^GSPC'],['indices','NDX','^NDX'],['etfs','qqq','QQQ'],['currencies','EUR/USD','EURUSD=X'],['currencies','EURUSD','EURUSD=X'],['currencies','USDJPY','JPY=X'],['currencies','USD/JPY','JPY=X'],['currencies','EUR=X','EUR=X'],['currencies','GBP=X','GBP=X'],['currencies','AUD=X','AUD=X'],['currencies','NZD=X','NZD=X'],['currencies','EUR','EURUSD=X'],['currencies','BTC/USD','BTC-USD'],['commodities','GC','GC=F'],['commodities','FEF','SGX-IODEX']] as const)assert.equal(normalizeFeedSymbol(group,input),expected);

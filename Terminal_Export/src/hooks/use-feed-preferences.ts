@@ -14,7 +14,7 @@ export function useFeedPreferences(accountId:string){
  },[accountId,attempt]);
  const save=async(value:FeedPreferences)=>{
   const account=accountId;if(owner.current!==account)throw new Error('Tu sesión ha cambiado. Vuelve a abrir la configuración.');
-  const requested=normalizeFeedPreferences(value);if(!requested)throw new Error('Elige hasta siete activos distintos por recuadro.');
+  const requested=normalizeFeedPreferences(value);if(!requested)throw new Error('Elige hasta diez ETF y hasta siete activos distintos en los demás recuadros.');
   const result=await accountApi<{groups:FeedPreferences}>('saveFeedPreferences',{groups:requested});
   if(owner.current!==account)throw new Error('Tu sesión ha cambiado.');
   const normalized=normalizeFeedPreferences(result.groups);if(!normalized)throw new Error('No se ha podido guardar la configuración.');

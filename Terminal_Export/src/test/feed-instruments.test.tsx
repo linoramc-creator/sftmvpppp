@@ -23,12 +23,12 @@ it('opens every index and ETF through the watchlist asset route without enabling
  expect(screen.getByText('SGX · Nov-26')).toBeVisible();expect(screen.queryByText('SGX-IODEX',{exact:true})).toBeNull();
 });
 
-it('labels six-month and one-year yields and draws only a curve with one common observation date',()=>{
+it('labels three-month, six-month and one-year yields and draws only a curve with one common observation date',()=>{
  vi.stubGlobal('ResizeObserver',class {observe(){}unobserve(){}disconnect(){}});
- const points=[.5,1,2,5,10,20].map(years=>({years,yield:4,date:'2026-10-16',changeBp:2}));
+ const points=[.25,.5,1,2,5,10,20].map(years=>({years,yield:4,date:'2026-10-16',changeBp:2}));
  const {rerender}=render(<TreasuryCard points={points}/>);
- expect(screen.getByText('6 meses')).toBeVisible();expect(screen.getByText('1 año')).toBeVisible();
- for(const id of ['DGS6MO','DGS1','DGS2','DGS5','DGS10','DGS20'])expect(screen.getByText(id,{exact:true})).toBeVisible();
+ expect(screen.getByText('3 meses')).toBeVisible();expect(screen.getByText('6 meses')).toBeVisible();expect(screen.getByText('1 año')).toBeVisible();
+ for(const id of ['DGS3MO','DGS6MO','DGS1','DGS2','DGS5','DGS10','DGS20'])expect(screen.getByText(id,{exact:true})).toBeVisible();
  expect(screen.queryByText(/Curva pendiente/)).toBeNull();
  rerender(<TreasuryCard points={points.map((p,i)=>i===0?{...p,date:'2026-10-15'}:p)}/>);
  expect(screen.getByText(/Curva pendiente de una fecha común/)).toBeVisible();

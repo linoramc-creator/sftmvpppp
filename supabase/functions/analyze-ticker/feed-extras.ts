@@ -7,7 +7,7 @@ type Row=Record<string,any>;
 export type EarningsEvent={symbol:string;date:string;session:string;eps:number|null;revenue:number|null;currency?:string|null;fiscalDate?:string|null};
 async function get(url:string):Promise<any>{try{const r=await fetch(url,{signal:AbortSignal.timeout(10000)});return r.ok?await r.json():null;}catch{return null;}}
 const number=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)?v:null;
-export async function treasury(key:string):Promise<TreasuryPoint[]>{return cached('feed-treasury-v3',3600000,async()=>{
+export async function treasury(key:string):Promise<TreasuryPoint[]>{return cached('feed-treasury-v4',3600000,async()=>{
  const primary=await eodhdTreasury(1);
  return Promise.all(TREASURY_MATURITIES.map(async({years,series})=>{
   const history=primary.find(s=>s.id===series)?.points;if(history?.length){const last=history.at(-1)!,previous=history.at(-2);return {years,yield:last.value,date:last.date,changeBp:previous?(last.value-previous.value)*100:null};}

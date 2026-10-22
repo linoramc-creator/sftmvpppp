@@ -17,7 +17,7 @@ it('presents a cover and key points with one publisher link only at the end of e
  expect(within(points).getByText('La inversión asciende a 100 millones.')).toBeVisible();
  const link=screen.getByRole('link',{name:'Abrir artículo en Reuters'});
  expect(link).toHaveAttribute('href',story.url);expect(link).toHaveAttribute('target','_blank');expect(link).toHaveAttribute('rel','noopener noreferrer');
- expect(container.querySelectorAll('a')).toHaveLength(1);expect(link.closest('footer')).toBe(container.querySelector('article')!.lastElementChild);
+ expect(container.querySelectorAll('a')).toHaveLength(1);expect(link.closest('footer')).toBe(link.closest('article')!.lastElementChild!.lastElementChild);
  expect(screen.getByRole('heading',{name:'La empresa amplía su capacidad'}).closest('a')).toBeNull();expect(container.querySelector('img')?.closest('a')).toBeNull();
  expect(container.textContent).not.toContain(story.url);
 });
@@ -37,12 +37,12 @@ it('hides a failed cover while retaining the factual summary',()=>{
  expect(screen.getByText('La inversión asciende a 100 millones.')).toBeVisible();
 });
 
-it('uses responsive article cards with a full-width cover and no forced card heights',()=>{
+it('uses full-width compact rows with optional thumbnails and no fixed-height card or image placeholder',()=>{
  const {container}=render(<NewsCards articles={[story]} compact/>);
  const card=container.querySelector('article')!,cover=card.querySelector('img')!;
- expect(card).not.toHaveClass('flex');
- expect(card.parentElement).toHaveClass('grid','items-start','grid-cols-1','sm:grid-cols-2');
- expect(cover).toHaveClass('w-full','aspect-[16/9]');
+ expect(card).toHaveClass('flex','sm:flex-row');
+ expect(card.parentElement).toHaveClass('space-y-3');
+ expect(cover).toHaveClass('shrink-0','sm:w-36','object-cover');
  expect(card).not.toHaveClass('h-full');
  expect(screen.getByRole('list',{name:'Puntos clave'})).toBeVisible();
 });
@@ -51,7 +51,7 @@ it('avoids duplicate or empty cards and keeps all key points visible without a d
  const more={...story,keyPoints:[...story.keyPoints!,'La compañía prevé completar el proyecto durante el próximo ejercicio.']};
  const {container}=render(<NewsCards articles={[more,{...story,url:story.url+'/copy'},{...story,title:'<p></p>',url:story.url+'/empty'}]}/>);
  expect(container.querySelectorAll('article')).toHaveLength(1);
- expect(container.querySelector('article')!.parentElement).toHaveClass('grid','items-start','md:grid-cols-2','xl:grid-cols-3');
+ expect(container.querySelector('article')!.parentElement).toHaveClass('space-y-3');
  expect(within(screen.getByRole('list',{name:'Puntos clave'})).getAllByRole('listitem')).toHaveLength(3);
  expect(container.querySelector('details')).toBeNull();
  expect(screen.getByText('La compañía prevé completar el proyecto durante el próximo ejercicio.')).toBeVisible();

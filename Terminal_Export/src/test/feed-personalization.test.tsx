@@ -45,14 +45,25 @@ it('loads and saves server preferences and clears the selection when the account
  owner='second';view.rerender(<PreferencesProbe owner={owner}/>);expect(screen.getByText('loading')).toBeVisible();expect(screen.queryByText('^FTSE')).toBeNull();
  await act(async()=>resolveSecond({groups:{...defaultFeedPreferences(),indices:['^DJI']}}));expect(screen.getByText('^DJI')).toBeVisible();
 });
-it('keeps ticker search and suggestions available at seven, then validates a one-click addition after an explicit removal',async()=>{
+it('keeps ticker search and suggestions available at ten ETF, then validates a one-click addition after an explicit removal',async()=>{
  const save=vi.fn().mockResolvedValue(undefined);api.mockResolvedValue({symbol:'QQQM',label:'Nasdaq 100 ETF'});
  render(<FeedGroupEditor group="etfs" preferences={defaultFeedPreferences()} labels={{}} onSave={save}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar etf principales'}));
  const dialog=screen.getByRole('dialog'),input=within(dialog).getByLabelText('Símbolo del activo');expect(input).toBeEnabled();expect(within(dialog).getAllByRole('textbox')).toHaveLength(1);
  fireEvent.change(input,{target:{value:'QQQM'}});expect(within(dialog).getByRole('button',{name:'Añadir QQQM'})).toBeDisabled();expect(within(dialog).getByText('Quita un activo para añadir otro.')).toBeVisible();expect(api).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Quitar SPY'}));fireEvent.click(within(dialog).getByRole('button',{name:'Añadir QQQM'}));
  await within(dialog).findByRole('button',{name:'Quitar QQQM'});expect(api).toHaveBeenCalledTimes(1);expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'etfs',symbol:'QQQM'});
- expect(within(dialog).getByLabelText('Activos seleccionados')).toHaveTextContent('7 / 7');fireEvent.click(within(dialog).getByRole('button',{name:'Guardar'}));await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));expect(save.mock.calls[0][0].etfs).toEqual([...defaultFeedPreferences().etfs.slice(1),'QQQM']);
+ expect(within(dialog).getByLabelText('Activos seleccionados')).toHaveTextContent('10 / 10');fireEvent.click(within(dialog).getByRole('button',{name:'Guardar'}));await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));expect(save.mock.calls[0][0].etfs).toEqual([...defaultFeedPreferences().etfs.slice(1),'QQQM']);
+});
+it('allows an eighth verified ETF without expanding or replacing a custom seven-ETF selection',async()=>{
+ const value={...defaultFeedPreferences(),etfs:defaultFeedPreferences().etfs.slice(0,7)},save=vi.fn().mockResolvedValue(undefined);api.mockResolvedValue({symbol:'GLD',label:'Oro · GLD'});
+ render(<FeedGroupEditor group="etfs" preferences={value} labels={{}} onSave={save}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar etf principales'}));
+ expect(screen.getByLabelText('Activos seleccionados')).toHaveTextContent('7 / 10');fireEvent.click(screen.getByRole('button',{name:'Añadir GLD'}));
+ await screen.findByRole('button',{name:'Quitar GLD'});expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'etfs',symbol:'GLD'});expect(screen.getByLabelText('Activos seleccionados')).toHaveTextContent('8 / 10');
+ fireEvent.click(screen.getByRole('button',{name:'Guardar'}));await waitFor(()=>expect(save).toHaveBeenCalledWith({...value,etfs:[...value.etfs,'GLD']}));
+});
+it('keeps indices limited to seven even though the ETF basket has room for ten',()=>{
+ render(<FeedGroupEditor group="indices" preferences={defaultFeedPreferences()} labels={{}} onSave={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar índices'}));
+ expect(screen.getByLabelText('Activos seleccionados')).toHaveTextContent('7 / 7');fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'FTSE'}});expect(screen.getByRole('button',{name:'Añadir ^FTSE'})).toBeDisabled();expect(api).not.toHaveBeenCalled();
 });
 it('normalizes typed currency pairs and rejects alias duplicates without provider calls',async()=>{
  const value={...defaultFeedPreferences(),currencies:['EURUSD=X','BTC-USD']};api.mockResolvedValue({symbol:'JPY=X',label:'USD/JPY'});
@@ -76,5 +87,9 @@ it('cannot add a response for another ticker or revive an addition after the edi
 function FullPreferencesProbe(){const state=useFeedPreferences('legacy-reader');return <p>{state.ready?JSON.stringify(state.groups):'loading'}</p>;}
 it('reads old three-group settings without losing the chosen order or custom assets',async()=>{
  const legacy={indices:['^FTSE','^N225'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EUR=X','BTC-USD']};api.mockResolvedValue({groups:legacy});
- render(<FullPreferencesProbe/>);const expected={...legacy,etfs:legacy.etfs.slice(0,7),commodities:defaultFeedPreferences().commodities};expect(await screen.findByText(JSON.stringify(expected))).toBeVisible();expect(api).toHaveBeenCalledTimes(1);expect(api).not.toHaveBeenCalledWith('saveFeedPreferences',expect.anything());
+ render(<FullPreferencesProbe/>);const expected={...legacy,commodities:defaultFeedPreferences().commodities};expect(await screen.findByText(JSON.stringify(expected))).toBeVisible();expect(api).toHaveBeenCalledTimes(1);expect(api).not.toHaveBeenCalledWith('saveFeedPreferences',expect.anything());
+});
+it('leaves a saved seven-ETF default-shaped selection unchanged on future reads',async()=>{
+ const saved={...defaultFeedPreferences(),etfs:defaultFeedPreferences().etfs.slice(0,7)};api.mockResolvedValue({groups:saved});render(<FullPreferencesProbe/>);
+ expect(await screen.findByText(JSON.stringify(saved))).toBeVisible();expect(api).toHaveBeenCalledTimes(1);expect(api).not.toHaveBeenCalledWith('saveFeedPreferences',expect.anything());
 });

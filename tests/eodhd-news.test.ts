@@ -63,8 +63,8 @@ test('complete primary sovereign news does not trigger specialist feeds or paid 
 test('feed and brief Treasury rates prioritize official par data through the new API and avoid redundant FRED requests',async()=>{
  const originalFetch=globalThis.fetch,originalDeno=(globalThis as any).Deno,originalNow=Date.now,requests:string[]=[];Date.now=()=>now;
  const yesterday=new Date(now-86400000).toISOString().slice(0,10),before=new Date(now-2*86400000).toISOString().slice(0,10),year=new Date(now).getUTCFullYear();
- const data=['6M','1Y','2Y','5Y','10Y','20Y'].flatMap((tenor,i)=>[{date:before,tenor,rate:3+i/10},{date:yesterday,tenor,rate:3.1+i/10}]);
+ const data=['3M','6M','1Y','2Y','5Y','10Y','20Y'].flatMap((tenor,i)=>[{date:before,tenor,rate:3+i/10},{date:yesterday,tenor,rate:3.1+i/10}]);
  (globalThis as any).Deno={env:{get:(key:string)=>key==='EODHD_API_KEY'?'test-primary-treasury':''}};
  globalThis.fetch=async input=>{const u=new URL(String(input));requests.push(u.hostname+u.pathname);if(u.hostname==='eodhd.com')return Response.json({data:Number(u.searchParams.get('filter[year]'))===year?data:[]});throw new Error('Unexpected fallback request');};
- try{const result=await treasury('test-fred');assert.equal(result.length,6);assert.ok(result.every(p=>p.date===yesterday));assert.ok(result.every(p=>Math.abs(p.changeBp!-10)<1e-10));assert.deepEqual(requests,['eodhd.com/api/ust/yield-rates','eodhd.com/api/ust/yield-rates']);}finally{globalThis.fetch=originalFetch;(globalThis as any).Deno=originalDeno;Date.now=originalNow;}
+ try{const result=await treasury('test-fred');assert.equal(result.length,7);assert.equal(result[0].years,.25);assert.equal(result[0].yield,3.1);assert.ok(result.every(p=>p.date===yesterday));assert.ok(result.every(p=>Math.abs(p.changeBp!-10)<1e-10));assert.deepEqual(requests,['eodhd.com/api/ust/yield-rates','eodhd.com/api/ust/yield-rates']);}finally{globalThis.fetch=originalFetch;(globalThis as any).Deno=originalDeno;Date.now=originalNow;}
 });
