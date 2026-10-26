@@ -9,3 +9,8 @@ entrypoint = "./functions/analyze-ticker/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/daily-brief/index.ts"
+
+[functions.research-monitor]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/research-monitor/index.ts"

@@ -49,6 +49,16 @@ test('relative history uses the exchange date across Asian local midnight',()=>{
   assert.equal(p.kind,'index');assert.equal(p.currency,'JPY');
 });
 
+test('a long daily history creates one reusable timezone formatter, including a bounded invalid-zone fallback',()=>{
+ const NativeDateTimeFormat=Intl.DateTimeFormat;let constructed=0;
+ Intl.DateTimeFormat=new Proxy(NativeDateTimeFormat,{construct(target,args){constructed++;return Reflect.construct(target,args);}});
+ try{
+  const dates=Array.from({length:520},(_,i)=>epoch('2024-10-01T13:30:00Z')+i*86400),prices=dates.map((_,i)=>100+i),raw=fixture({timestamp:dates,indicators:{quote:[{close:prices,volume:dates.map(()=>1000)}],adjclose:[{adjclose:prices.map(v=>v/2)}]}});
+  const result=normalizeRelativeHistory('A',raw,Date.parse('2026-10-17T12:00Z'))!;assert.equal(result.dates.length,520);assert.equal(result.closes.at(-1),prices.at(-1)!/2);assert.equal(constructed,1);
+  raw.chart.result[0].meta.exchangeTimezoneName='invalid/timezone';const utc=normalizeRelativeHistory('A',raw,Date.parse('2026-10-17T12:00Z'))!;assert.equal(utc.dates[0],'2024-10-01');assert.equal(utc.dates.length,520);assert.equal(constructed,3);
+ }finally{Intl.DateTimeFormat=NativeDateTimeFormat;}
+});
+
 test('adjusted closes are mandatory and gaps are dropped without raw-price substitution',()=>{
   const missing=fixture({indicators:{quote:[{close:[100,102,105]}]}});
   assert.equal(normalizeRelativeHistory('A',missing,Date.parse('2026-10-17T12:00:00Z')),null);

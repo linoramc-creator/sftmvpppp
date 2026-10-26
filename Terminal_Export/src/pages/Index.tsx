@@ -1,3 +1,5 @@
+import {researchList,researchSave,RESEARCH_CHANGED} from '@/lib/research-api';
+import {parseSections,renderElements,sectorTrends} from '@/components/research/ReportMarkdown';
 import ReportQuote from '@/components/ReportQuote';
 import {feedTicker,feedTickerContext,treasuryDisplayTicker} from '@/lib/feed-identifiers';
 import KeepPanel from '@/components/KeepPanel';
@@ -25,6 +27,7 @@ import AssetInsightsPanel from "@/components/AssetInsightsPanel";
 import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
 
+const ResearchLibrary=lazy(()=>import('@/components/research/ResearchLibrary'));
 const AssetDetail = lazy(() => import("@/components/AssetDetail"));
 const UnifiedComparison = lazy(() => import("@/pages/UnifiedComparison"));
 const MarketInstrumentDetail = lazy(() => import("@/components/MarketInstrumentDetail"));
@@ -248,7 +251,7 @@ const Index = () => {
   const stockSearch=useInstrumentSearch(),fundSearch=useInstrumentSearch();
   const [saving,setSaving] = useState(false);
   const saveLock = useRef(false);
-  const [reportsError,setReportsError] = useState("");
+
   // Ticker state
   const [ticker, setTicker]               = useState("");
   const [analysis, setAnalysis]           = useState("");
@@ -259,10 +262,10 @@ const Index = () => {
   const [quarterlyDebug, setQuarterlyDebug] = useState<QuarterlyDebug | null>(null);
   const [catalystCalendar, setCatalystCalendar] = useState<CatalystCalendar | null>(null);
   const [tickerIsEtf, setTickerIsEtf]     = useState<string | null>(null);
-  const [savedReports, setSavedReports]   = useState<SavedReport[]>([]);
+  const [researchCount,setResearchCount] = useState(0);
   const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
-  const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
-  const [summaryBusy,setSummaryBusy]=useState(false);
+
+
 
   // ETF apartado state (independent of the ticker flow)
   const [etfInput, setEtfInput]               = useState("");
@@ -324,12 +327,12 @@ const Index = () => {
     void synchronize();return()=>{active=false;};
   },[profile.id,watchlistRetry]);
 
-  useEffect(() => {
-    let active=true;
-    accountApi<any[]>('listReports').then(rows=>{if(active)setSavedReports(rows.map(reportFromRow));}).catch(e=>{if(active)setReportsError(e.message);});
-    return()=>{active=false;abortRef.current?.abort();etfAbortRef.current?.abort();sectorAbortRef.current?.abort();};
+  useEffect(()=>{
+    let active=true;setResearchCount(0);
+    const load=()=>{void researchList().then(value=>{if(active)setResearchCount(value.items.filter(item=>!item.deleted_at).length);}).catch(()=>{});};
+    load();window.addEventListener(RESEARCH_CHANGED,load);
+    return()=>{active=false;window.removeEventListener(RESEARCH_CHANGED,load);abortRef.current?.abort();etfAbortRef.current?.abort();sectorAbortRef.current?.abort();};
   },[profile.id]);
-
   // Fetch market data on mount + every 60s
   useEffect(() => {
     let active = true;
@@ -371,7 +374,7 @@ const Index = () => {
     setQuarterlyDebug(null);
     setCatalystCalendar(null);
     setTickerIsEtf(null);
-    setViewingReport(null);
+
     resetSections();
 
     // ETF detection runs in parallel with the stream. The ticker search no
@@ -516,48 +519,21 @@ const Index = () => {
     }
   }, [sectorInput, toast]);
 
-  const saveCurrent = async (kind: 'ticker'|'etf'|'sector') => {
+  const researchSaveAttempt=useRef<{signature:string;requestId:string}|null>(null);
+  const saveCurrent = async (kind:'ticker'|'etf'|'sector')=>{
     if(saveLock.current)return;
     const subject=kind==='ticker'?currentTicker:kind==='etf'?currentEtf:currentSector;
     const text=kind==='ticker'?analysis:kind==='etf'?etfAnalysis:sectorAnalysis;
-    if(!subject||!text)return;saveLock.current=true;setSaving(true);
-    try{const row=await accountApi<any>('saveReport',{kind,subject,payload:{analysis:text,quarterlyData:kind==='ticker'?quarterlyData:[],etfDeep:kind==='etf'?etfDeep:null}});
-      setSavedReports(previous=>[reportFromRow(row),...previous]);toast({title:'Informe guardado',description:subject+' guardado en tu cuenta.'});
-    }catch(e){toast({title:'No se pudo guardar',description:(e as Error).message,variant:'destructive'});}finally{saveLock.current=false;setSaving(false);}
-  };
-  const handleSave = () => {void saveCurrent('ticker');};
-  const handleSummaryPdf = async () => {
-    if(!viewingReport)return;
-    const printWindow=window.open("","_blank");
-    if(!printWindow){toast({title:"Permite ventanas emergentes",description:"Necesitamos abrir la vista de impresión para crear el PDF."});return;}
-    setSummaryBusy(true);
-    try{
-      const result=await accountApi<{summary:string}>('summarizeReport',{id:viewingReport.id});
-      const updated={...viewingReport,aiSummary:result.summary};setViewingReport(updated);
-      setSavedReports(previous=>previous.map(r=>r.id===updated.id?updated:r));
-      const {downloadAnalysisPdf}=await import("@/lib/reportPdf");
-      downloadAnalysisPdf(result.summary,`${viewingReport.ticker} · resumen ejecutivo`,printWindow);
-    }catch(e){printWindow.close();toast({title:"No se pudo generar el PDF",description:e instanceof Error?e.message:"Inténtalo de nuevo."});}
-    finally{setSummaryBusy(false);}
-  };
-  const handleDeleteReport = async (id:string) => {
-    try{await accountApi('deleteReport',{id});setSavedReports(previous=>previous.filter(r=>r.id!==id));if(viewingReport?.id===id)setViewingReport(null);}
-    catch(e){toast({title:'No se pudo eliminar',description:(e as Error).message,variant:'destructive'});}
-  };
-  const openSaved = async (id:string) => {
-    try{const row=await accountApi<any>('getReport',{id});setViewingReport(reportFromRow(row));setNavTab('ticker');setActiveSection(EXPECTED_TABS[0]);openAllSectorSections();}
-    catch(e){toast({title:'No se pudo abrir',description:(e as Error).message,variant:'destructive'});}
-  };
-  const importLegacy = async () => {
-    if(!profile.isAdmin||saveLock.current)return;
-    let old:any[];try{old=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');if(!Array.isArray(old))throw new Error();}catch{toast({title:'No se pudieron leer los informes antiguos'});return;}
-    if(!old.length){toast({title:'No hay informes antiguos en este navegador'});return;}
-    if(!window.confirm('¿Importar a tu cuenta los informes que guardaste en este navegador antes de activar los perfiles?'))return;
+    if(!subject||!text)return;
+    const payload={analysis:text,quarterlyData:kind==='ticker'?quarterlyData:[],etfDeep:kind==='etf'?etfDeep:null};
+    const signature=JSON.stringify([kind,subject,payload]);
+    if(researchSaveAttempt.current?.signature!==signature)researchSaveAttempt.current={signature,requestId:crypto.randomUUID()};
     saveLock.current=true;setSaving(true);
-    try{while(old.length){const report=old[0];const row=await accountApi<any>('saveReport',{kind:'ticker',subject:report.ticker,payload:{analysis:report.analysis,quarterlyData:report.quarterlyData??[]}});setSavedReports(previous=>[reportFromRow(row),...previous]);old.shift();localStorage.setItem(STORAGE_KEY,JSON.stringify(old));}toast({title:'Informes antiguos importados'});}
-    catch(e){toast({title:'Importación incompleta',description:(e as Error).message,variant:'destructive'});}finally{saveLock.current=false;setSaving(false);}
+    try{await researchSave({requestId:researchSaveAttempt.current.requestId,kind,subject,payload});researchSaveAttempt.current=null;toast({title:'Investigación guardada',description:subject+' guardado en tu biblioteca.'});}
+    catch(cause){toast({title:'No se pudo guardar',description:cause instanceof Error?cause.message:'Inténtalo de nuevo.',variant:'destructive'});}
+    finally{saveLock.current=false;setSaving(false);}
   };
-
+  const handleSave=()=>{void saveCurrent('ticker');};
   const toggleSectorSection = (key: string) =>
     setSectorExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -573,11 +549,11 @@ const Index = () => {
     if (e.key === "Enter" && !isSectorLoading) handleSectorAnalyze();
   };
 
-  const activeAnalysis  = viewingReport ? viewingReport.analysis     : analysis;
-  const activeQuarterly = viewingReport ? viewingReport.quarterlyData : quarterlyData;
-  const activeTicker    = viewingReport ? viewingReport.ticker        : currentTicker;
-  const activeCatalyst  = viewingReport ? null                        : catalystCalendar;
-  const isLive          = !viewingReport;
+  const activeAnalysis=analysis;
+  const activeQuarterly=quarterlyData;
+  const activeTicker=currentTicker;
+  const activeCatalyst=catalystCalendar;
+  const isLive=true;
 
   return (
     <div className="min-h-screen bg-background text-foreground font-mono">
@@ -598,7 +574,7 @@ const Index = () => {
                 { label: "SECTOR",    key: "sector"    },
                 { label: "COMPARAR", key: "comparacion" },
                 { label: "BONOS Y CRÉDITOS", key: "bonos" },
-                { label: "GUARDADOS", key: "guardados" },
+                { label: "BIBLIOTECA", key: "guardados" },
               ] as const).map(({ label, key }) => {
                 const active = navTab === key;
                 return (
@@ -612,9 +588,9 @@ const Index = () => {
                     }`}
                   >
                     {label}
-                    {label === "GUARDADOS" && savedReports.length > 0 && (
+                    {label === "BIBLIOTECA" && researchCount > 0 && (
                       <span className="ml-1.5 text-[9px] bg-white/10 text-white px-1.5 py-0.5">
-                        {savedReports.length}
+                        {researchCount}
                       </span>
                     )}
                   </button>
@@ -696,7 +672,7 @@ const Index = () => {
           )}
 
           {/* Detected ETF → redirect to the dedicated apartado */}
-          {activeTicker && activeAnalysis && viewingReport?.kind !== 'sector' && !tickerIsEtf && <ReportQuote symbol={activeTicker}/>}
+          {activeTicker && activeAnalysis && !tickerIsEtf && <ReportQuote symbol={activeTicker}/>}
           {tickerIsEtf && (
             <div className="mb-4 px-4 py-3 border border-section-heading/30 bg-section-heading/5 flex items-center justify-between gap-3 flex-wrap">
               <span className="text-[11px] text-foreground/80 font-mono">
@@ -711,27 +687,11 @@ const Index = () => {
             </div>
           )}
 
-          {/* Viewing saved banner */}
-          {viewingReport && (
-            <div className="mb-4 px-4 py-2 border border-section-heading/25 bg-section-heading/[0.04] flex items-center justify-between">
-              <span className="text-[10px] text-section-heading/70 tracking-widest">
-                INFORME GUARDADO · {viewingReport.ticker} · {viewingReport.savedAt}
-              </span>
-              <button disabled={summaryBusy} onClick={()=>void handleSummaryPdf()} className="ml-auto mr-4 text-[10px] text-section-heading tracking-widest disabled:opacity-50">{summaryBusy?'RESUMIENDO…':'RESUMEN IA · PDF'}</button>
-              <button
-                onClick={() => setViewingReport(null)}
-                className="text-[10px] text-muted-foreground/50 hover:text-foreground tracking-widest"
-              >
-                CERRAR
-              </button>
-            </div>
-          )}
-
           {/* Loading placeholder */}
           {isLoading && <ReportLoading subject={activeTicker} streaming={Boolean(activeAnalysis)} />}
 
           {/* Report */}
-          {activeAnalysis && (viewingReport?.kind === 'etf' ? <EtfReportView content={activeAnalysis} ticker={activeTicker} etfDeep={viewingReport.etfDeep??null} isLoading={false} activeSection={activeSection} onSelectSection={setActiveSection} /> : viewingReport?.kind === 'sector' ? <SectorReportView content={activeAnalysis} sectorName={activeTicker} isLoading={false} expanded={sectorExpanded} onToggle={toggleSectorSection} /> :
+          {activeAnalysis && (
             <ReportView
               content={activeAnalysis}
               quarterlyData={activeQuarterly}
@@ -896,37 +856,8 @@ const Index = () => {
         </div>
       </KeepPanel>
 
-      {/* ── GUARDADOS tab ───────────────────────────────────────────── */}
-      <KeepPanel active={navTab === "guardados"}>
-        <div className="max-w-5xl mx-auto px-4 pt-5 pb-16">
-          <div className="flex items-center gap-3 mb-4">
-            <span className="w-1.5 h-1.5 bg-section-heading inline-block" />
-            <span className="text-[11px] tracking-widest text-foreground">INFORMES GUARDADOS</span>
-            <span className="text-[10px] text-muted-foreground/40">{savedReports.length}</span>
-          </div>
+      <KeepPanel active={navTab === "guardados"}><Suspense fallback={<p className="p-6 text-sm text-slate-400">Abriendo biblioteca…</p>}><ResearchLibrary accountId={profile.id}/></Suspense></KeepPanel>
 
-          {reportsError&&<p role="alert" className="text-destructive text-sm mb-4">{reportsError}</p>}
-          {profile.isAdmin&&<button disabled={saving} onClick={importLegacy} className="text-xs text-section-heading border border-border p-2 mb-4">Importar informes antiguos de este navegador</button>}
-          {savedReports.length === 0 && !reportsError && (
-            <div className="flex flex-col items-center justify-center py-20 opacity-25">
-              <p className="text-[10px] tracking-widest text-muted-foreground">
-                NO HAY INFORMES GUARDADOS
-              </p>
-            </div>
-          )}
-
-          <div className="space-y-1">
-            {savedReports.map((report) => (
-              <SavedReportCard
-                key={report.id}
-                report={report}
-                onView={() => openSaved(report.id)}
-                onDelete={() => handleDeleteReport(report.id)}
-              />
-            ))}
-          </div>
-        </div>
-      </KeepPanel>
     </div>
   );
 };
@@ -1607,297 +1538,6 @@ function CatalystCalendarSection({ data }: { data: CatalystCalendar | null }) {
 }
 
 // ── Markdown parser ────────────────────────────────────────────────────
-
-// Normalize section names so Gemini drift ("Resumen ejecutivo", "Resumen Ejecutivo.",
-// "##  Resumen Ejecutivo") still matches the canonical EXPECTED_TABS entry.
-function normalizeSectionName(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function parseSections(content: string, knownTabs: string[]): Record<string, React.ReactNode[]> {
-  const lines = cleanReportText(content).split("\n");
-  const sections: Record<string, React.ReactNode[]> = {};
-  // Map of normalized -> canonical name from knownTabs
-  const canonicalByNorm = new Map<string, string>(
-    knownTabs.map(t => [normalizeSectionName(t), t])
-  );
-  let currentSection = knownTabs[0] ?? "Section";
-  let currentElements: React.ReactNode[] = [];
-
-  const flush = () => {
-    if (sections[currentSection]) {
-      sections[currentSection] = [...sections[currentSection], ...currentElements];
-    } else {
-      sections[currentSection] = currentElements;
-    }
-    currentElements = [];
-  };
-
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.startsWith("## ")) {
-      flush();
-      const raw = line.replace(/^##\s+/, "").replace(/[:.]+\s*$/, "").trim();
-      const norm = normalizeSectionName(raw);
-      currentSection = canonicalByNorm.get(norm) ?? raw;
-      i++;
-      continue;
-    }
-
-    if (line.startsWith("|")) {
-      const tableLines: string[] = [];
-      while (i < lines.length && lines[i].startsWith("|")) {
-        tableLines.push(lines[i]);
-        i++;
-      }
-      currentElements.push(renderTable(tableLines, i));
-      continue;
-    }
-
-    if (line.startsWith("### ")) {
-      currentElements.push(<h3 key={i}>{line.slice(4)}</h3>);
-    } else if (line.startsWith("#### ")) {
-      currentElements.push(<h4 key={i}>{line.slice(5)}</h4>);
-    } else if (line.match(/^---+$/)) {
-      currentElements.push(<hr key={i} />);
-    } else if (line.match(/^[-*] /)) {
-      const text = line.slice(2);
-      // Risk bullets: the textual "Nivel/Severidad: **ALTO**" label is
-      // stripped from the copy — the (larger) coloured dot alone encodes the
-      // level; tooltip + aria-label keep it accessible.
-      const level = extractRiskLevel(text);
-      const display = level ? stripRiskLabel(text) : text;
-      const { icon, cls } = level
-        ? { icon: "●", cls: `${RISK_DOT_CLS[level]} text-[15px]` }
-        : getBulletIcon(text);
-      currentElements.push(
-        <li key={i} className="ml-1 mb-6 list-none flex items-start gap-2.5">
-          <span
-            className={`select-none shrink-0 leading-none ${cls}`}
-            style={{ marginTop: level ? "1px" : "3px" }}
-            title={level ? `Nivel de riesgo: ${level}` : undefined}
-            aria-label={level ? `Nivel de riesgo: ${level}` : undefined}
-            role={level ? "img" : undefined}
-          >{icon}</span>
-          <span className="flex-1 text-foreground/75 leading-relaxed" style={{ fontFamily: "var(--font-sans)", fontSize: "15px" }}>
-            {renderInline(display)}
-          </span>
-        </li>
-      );
-    } else if (line.match(/^\d+\. /)) {
-      const m = line.match(/^(\d+)\. (.*)$/);
-      if (m) {
-        currentElements.push(
-          <li key={i} className="ml-4 mb-3 list-decimal text-muted-foreground marker:text-section-heading marker:font-semibold text-xs">
-            <span className="text-foreground/75" style={{ fontFamily: "var(--font-sans)" }}>{renderInline(m[2])}</span>
-          </li>
-        );
-      }
-    } else if (line.startsWith("> ")) {
-      currentElements.push(<blockquote key={i}>{line.slice(2)}</blockquote>);
-    } else if (line.trim() === "") {
-      currentElements.push(<div key={i} className="h-2" />);
-    } else {
-      currentElements.push(<p key={i}>{renderInline(line)}</p>);
-    }
-
-    i++;
-  }
-
-  flush();
-
-  // Keep a section if it has ANY non-spacer content. Tables are wrapped in <div> (so
-  // a naïve "type !== div" check incorrectly drops table-only sections like Sector's
-  // Tabla Comparativa or Empresas Líderes). We treat only the empty-line spacer divs
-  // (rendered with className="h-2") as ignorable.
-  const cleaned: Record<string, React.ReactNode[]> = {};
-  for (const [k, els] of Object.entries(sections)) {
-    const hasSubstance = els.some((el) => {
-      if (el === null || typeof el !== "object") return false;
-      const reactEl = el as { type?: unknown; props?: { className?: string } };
-      if (reactEl.type === "div" && reactEl.props?.className === "h-2") return false;
-      return true;
-    });
-    if (hasSubstance) cleaned[k] = els;
-  }
-  return cleaned;
-}
-
-function renderElements(elements: React.ReactNode[]) {
-  return <div className="space-y-0.5">{elements}</div>;
-}
-
-function sectorTrends(elements: React.ReactNode[]) {
-  let keep = false;
-  return elements.filter(node => {
-    const element = node as { type?: unknown; props?: { children?: unknown } } | null;
-    if (element?.type === 'h3') keep = /Tendencias|Disruptores|Innovaciones/i.test(String(element.props?.children ?? ''));
-    return keep;
-  });
-}
-
-function renderTable(tableLines: string[], baseKey: number) {
-  if (tableLines.length < 2) return null;
-
-  const parseRow = (line: string) =>
-    line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
-
-  const headerCells = parseRow(tableLines[0]);
-
-  // Skip the "Métrica | Valor" table — it's rendered inside the unified Historical Financials table
-  if (headerCells.length === 2 && /^Métrica$/i.test(headerCells[0]) && /^Valor$/i.test(headerCells[1])) {
-    return null;
-  }
-  const isSep = (line: string) => /^\|?[\s\-:|]+\|?$/.test(line);
-  const startData = isSep(tableLines[1]) ? 2 : 1;
-  const ND_VALS = new Set(["N/D", "N/A", "—", "-", ""]);
-
-  const dataRows = tableLines.slice(startData).filter((l) => {
-    if (isSep(l)) return false;
-    const cells = parseRow(l);
-    return cells.slice(1).some((c) => {
-      const v = c.replace(/^\*+|\*+$/g, "").trim();
-      return v && !ND_VALS.has(v);
-    });
-  });
-
-  if (!dataRows.length) return null;
-
-  return (
-    <div key={`tbl-${baseKey}`} className="my-4 overflow-x-auto border border-border">
-      <table className="w-full font-mono min-w-max" style={{ fontSize: "13px" }}>
-        <thead>
-          <tr className="border-b border-border bg-secondary/50">
-            {headerCells.map((cell, j) => (
-              <th
-                key={j}
-                className="px-3 py-2.5 text-left text-[11px] tracking-widest text-muted-foreground/60 font-medium uppercase"
-              >
-                {cell}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/30">
-          {dataRows.map((row, ri) => {
-            const cells = parseRow(row);
-            return (
-              <tr key={ri} className="hover:bg-primary/3 transition-colors">
-                {headerCells.map((_, j) => {
-                  const raw = (cells[j] ?? "").replace(/^\*+|\*+$/g, "").trim() || "—";
-                  const val = raw.replace(/(-?\d+\.\d{3,})/g, (m) => {
-                    const n = parseFloat(m); return isNaN(n) ? m : n.toFixed(2);
-                  });
-                  const isNDVal = ND_VALS.has(val);
-                  const isNum   = /^[-+$]?\d/.test(val) || val.includes("%") || val.includes("x");
-                  const isNeg   = /^-/.test(val) && !isNDVal;
-
-                  let cls = j === 0 ? "text-foreground/80 font-medium" : "text-foreground/65";
-                  if (isNum && !isNeg) cls = "text-primary font-mono";
-                  if (isNeg)          cls = "text-destructive font-mono";
-                  if (isNDVal)        cls = "text-muted-foreground/20";
-
-                  return (
-                    <td key={j} className={`px-3 py-2.5 whitespace-nowrap ${cls}`}>
-                      {renderInline(val)}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ── Risk-level extraction (B3: dot encodes the level, no text label) ───
-
-type RiskLevel = "ALTO" | "MEDIO" | "BAJO";
-
-const RISK_DOT_CLS: Record<RiskLevel, string> = {
-  ALTO:  "text-destructive",
-  MEDIO: "text-amber-400",
-  BAJO:  "text-primary",
-};
-
-const RISK_LABEL_RE = /\s*[.,;:·—-]*\s*(?:Nivel|Severidad)\s*:?\s*\*\*\s*(ALTO|ALTA|MEDIO|MEDIA|BAJO|BAJA)\s*\*\*\s*\.?/gi;
-
-function extractRiskLevel(text: string): RiskLevel | null {
-  const m = /(?:Nivel|Severidad)\s*:?\s*\*\*\s*(ALTO|ALTA|MEDIO|MEDIA|BAJO|BAJA)\s*\*\*/i.exec(text);
-  if (!m) return null;
-  const raw = m[1].toUpperCase();
-  if (raw === "ALTO" || raw === "ALTA") return "ALTO";
-  if (raw === "MEDIO" || raw === "MEDIA") return "MEDIO";
-  return "BAJO";
-}
-
-function stripRiskLabel(text: string): string {
-  return text.replace(RISK_LABEL_RE, "").trim();
-}
-
-// ── Sentiment detection for bullet icons ──────────────────────────────
-
-function getBulletIcon(text: string): { icon: string; cls: string } {
-  const upper = text.toUpperCase();
-  const isNeg = /\*\*(ALTO|HIGH|BEARISH|BAJISTA|SOBRECOMPRADO)\*\*/.test(text) ||
-                /\bALTO\b/.test(upper) || /\bBEARISH\b/.test(upper) || /\bBAJISTA\b/.test(upper);
-  const isPos = /\*\*(BAJO|LOW|BULLISH|ALCISTA|SOBREVENTA)\*\*/.test(text) ||
-                /\bBAJO\b/.test(upper) || /\bBULLISH\b/.test(upper) || /\bALCISTA\b/.test(upper);
-  const isNeu = /\*\*(MEDIO|NEUTRO|NEUTRAL|MIXTO)\*\*/.test(text) ||
-                /\bMEDIO\b/.test(upper) || /\bNEUTRO\b/.test(upper);
-
-  if (isNeg) return { icon: "●", cls: "text-destructive text-[9px]" };
-  if (isPos) return { icon: "●", cls: "text-primary text-[9px]" };
-  if (isNeu) return { icon: "●", cls: "text-amber-400 text-[9px]" };
-  return { icon: "▸", cls: "text-section-heading/50 text-[10px]" };
-}
-
-const RISK_RED = new Set(["ALTO","HIGH","BEARISH","BAJISTA","SOBRECOMPRADO"]);
-const RISK_AMB = new Set(["MEDIO","MEDIUM","NEUTRO","NEUTRAL","MIXTO"]);
-const RISK_GRN = new Set(["BAJO","LOW","BULLISH","ALCISTA","SOBREVENTA"]);
-
-function boldClass(inner: string): string {
-  const u = inner.toUpperCase().trim();
-  if (RISK_RED.has(u)) return "font-semibold text-destructive";
-  if (RISK_AMB.has(u)) return "font-semibold text-amber-400";
-  if (RISK_GRN.has(u)) return "font-semibold text-primary";
-  return "font-semibold text-foreground";
-}
-
-function renderInline(text: string): React.ReactNode {
-  text = cleanReportText(text);
-  const withLinks = text.split(/(\[[^\]]+\]\([^)]+\))/g);
-  return withLinks.map((seg, si) => {
-    const linkMatch = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (linkMatch) seg = linkMatch[1];
-    const parts = seg.split(/(\*\*[^*]+\*\*)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith("**") && part.endsWith("**")) {
-        const inner = part.slice(2, -2);
-        return <strong key={`${si}-${i}`} className={boldClass(inner)}>{inner}</strong>;
-      }
-      const codeParts = part.split(/(`[^`]+`)/g);
-      return codeParts.map((cp, j) => {
-        if (cp.startsWith("`") && cp.endsWith("`")) {
-          return (
-            <code key={`${si}-${i}-${j}`} className="bg-section-heading/10 !text-primary px-1 py-0.5 text-xs">
-              {cp.slice(1, -1)}
-            </code>
-          );
-        }
-        return <span key={`${si}-${i}-${j}`}>{cp}</span>;
-      });
-    });
-  });
-}
 
 export default Index;
 

@@ -3,6 +3,7 @@ import {FEED_GROUP_KEYS,FEED_DEFAULT_ITEMS,normalizeFeedPreferences,normalizeSav
 import {profileDisplayName} from './profile-name.ts';
 import {PRIMARY_REPORT_MODEL} from './report-models.ts';
 import {createReportCompletion,observeReportCompletion,reportCompleted} from './report-completion.ts';
+import {handleResearchAction,researchRequestClass,ResearchError} from './research-library.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string; user_metadata?: Record<string, unknown> };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -20,6 +21,13 @@ async function service(path: string, init: RequestInit = {}) {
     if (message.includes('BETA_STORAGE_LIMIT')) throw new BetaError(409,'Has alcanzado los 100 informes guardados. Elimina alguno antes de guardar otro.');
     if (message.includes('BETA_LIMIT')) throw new BetaError(429,'Has alcanzado un límite de uso de la beta. Inténtalo más tarde.');
     if (message.includes('BETA_FORBIDDEN')) throw new BetaError(403,'No tienes permiso para esta operación.');
+    if(message.includes('BETA_RESEARCH_NOT_FOUND'))throw new ResearchError(404,'Análisis o versión no encontrado.');
+    if(message.includes('BETA_RESEARCH_CONFLICT'))throw new ResearchError(409,'El análisis ha cambiado. Actualiza la biblioteca y vuelve a intentarlo.');
+    if(message.includes('BETA_RESEARCH_BUSY'))throw new ResearchError(409,'Esta operación ya está en curso. Espera unos segundos.');
+    if(message.includes('BETA_RESEARCH_DELETED'))throw new ResearchError(409,'Restaura el análisis antes de continuar.');
+    if(message.includes('BETA_RESEARCH_ITEM_LIMIT'))throw new ResearchError(409,'Has alcanzado el límite de 100 análisis, incluida la papelera.');
+    if(message.includes('BETA_RESEARCH_VERSION_LIMIT'))throw new ResearchError(409,'Has alcanzado el límite de 500 versiones guardadas.');
+    if(message.includes('BETA_RESEARCH_INVALID')||message.includes('BETA_RESEARCH_IMMUTABLE'))throw new ResearchError(400,'Contenido de biblioteca inválido.');
     throw new BetaError(503,'El servicio no está disponible temporalmente.');
   }
   const text = await response.text(); return text ? JSON.parse(text) : null;
@@ -30,12 +38,13 @@ export async function readBody(req: Request): Promise<Body> {
   const reader = req.body?.getReader(); if (!reader) throw new BetaError(400,'Petición vacía.');
   let size = 0; const chunks: Uint8Array[] = [];
   while (true) { const {value,done}=await reader.read(); if(done) break; size+=value.byteLength;
-    if(size>520000){await reader.cancel();throw new BetaError(413,'La petición es demasiado grande.');} chunks.push(value);
+    if(size>1010000){await reader.cancel();throw new BetaError(413,'La petición es demasiado grande.');} chunks.push(value);
   }
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   let body: unknown;try{body=JSON.parse(new TextDecoder().decode(bytes));}catch{throw new BetaError(400,'JSON inválido.');}
   if(!body||Array.isArray(body)||typeof body!=='object')throw new BetaError(400,'Petición inválida.');
-  if((body as Body).accountAction!=='saveReport'&&size>4096)throw new BetaError(413,'La petición es demasiado grande.');
+  const action=(body as Body).accountAction,maximum=action==='researchSave'?1010000:action==='researchMeta'?150000:action==='saveReport'?520000:4096;
+  if(size>maximum)throw new BetaError(413,'La petición es demasiado grande.');
   return body as Body;
 }
 export function classify(body: Body): {request_class:string;report_kind?:string;report_subject?:string} {
@@ -46,8 +55,9 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel==='correlation'&&body.range!==undefined&&!['1m','3m','6m','1y'].includes(body.range))throw new BetaError(400,'Ventana inválida.');
   const symbol = (v: unknown) => typeof v==='string'&&SYMBOL.test(v.trim().toUpperCase());
   if(body.ticker!==undefined&&!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');
-  if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>80))throw new BetaError(400,'Activo inválido.');
+  if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>(body.accountAction==='researchSave'?120:80)))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction){
+    const research=researchRequestClass(body);if(research)return {request_class:research};
     if(body.accountAction==='saveFeedPreferences'&&(!body.groups||!normalizeFeedPreferences(body.groups)))throw new BetaError(400,'Configuración de mercado inválida.');
     if(body.accountAction==='validateFeedAsset'&&(!FEED_GROUP_KEYS.includes(body.group)||!normalizeFeedSymbol(body.group,body.symbol)))throw new BetaError(400,'Activo inválido.');
     return {request_class:body.accountAction==='summarizeReport'?'expensive':'account'};
@@ -110,6 +120,7 @@ async function userFrom(req: Request): Promise<User> {
 }
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
 async function account(body: Body,user: User): Promise<Response> {
+  const research=await handleResearchAction(body,user,{service,rpc,env});if(research)return research;
   switch(body.accountAction){
     case 'getFeedPreferences':{const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`);return json({groups:normalizeSavedFeedPreferences(rows[0]?.groups)});}
     case 'validateFeedAsset':{
@@ -236,5 +247,5 @@ export async function secureRequest(req: Request,dispatch: (body:Body)=>Promise<
     }
     const response=body.accountAction?await account(body,user):await dispatch(body);
     return wrap(eventId?tracked(response,eventId):response);
-  }catch(error){if(eventId)await finish(eventId,'failed');return wrap(json({error:error instanceof BetaError?error.message:'No se ha podido completar la solicitud.'},error instanceof BetaError?error.status:503));}
+  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
 }

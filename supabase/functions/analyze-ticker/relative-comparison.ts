@@ -23,8 +23,9 @@ export function normalizeRelativeHistory(symbol:string,raw:any,now=Date.now()):H
  const c=raw?.chart?.result?.[0],q=c?.indicators?.quote?.[0],adjusted=c?.indicators?.adjclose?.[0]?.adjclose,assetKind=kind(c?.meta?.instrumentType);
  if(!q||!Array.isArray(q.close)||!Array.isArray(c.timestamp))return null;
  const adj=Array.isArray(adjusted)?adjusted:['index','future'].includes(assetKind)?q.close:null;if(!adj)return null;
- let zone=c.meta?.exchangeTimezoneName??'UTC';try{new Intl.DateTimeFormat('en-CA',{timeZone:zone});}catch{zone='UTC';}
- const day=(at:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).format(at);
+ const options:Intl.DateTimeFormatOptions={timeZone:c.meta?.exchangeTimezoneName??'UTC',year:'numeric',month:'2-digit',day:'2-digit'};
+ let formatter:Intl.DateTimeFormat;try{formatter=new Intl.DateTimeFormat('en-CA',options);}catch{formatter=new Intl.DateTimeFormat('en-CA',{...options,timeZone:'UTC'});}
+ const day=(at:number)=>formatter.format(at);
  const today=day(now),regularEnd=regularSessionEnd(c.meta,symbol),quoteTime=num(c.meta?.regularMarketTime);
  const completedToday=regularEnd!==null&&regularEnd*1000<=now&&quoteTime!==null&&day(quoteTime*1000)===today;
  const rows=new Map<string,{date:string;close:number;raw:number;volume:number|null}>();

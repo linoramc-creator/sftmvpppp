@@ -1,0 +1,16 @@
+import type {Article} from './panels.ts';
+export type ResearchKind='ticker'|'etf'|'sector'|'comparison';
+export type ResearchSettings={symbols?:string[];range?:'1m'|'3m'|'6m'|'1y';benchmark?:string;view?:string};
+export type ResearchPayload={analysis:string;quarterlyData:unknown[];etfDeep?:unknown;comparison?:unknown};
+export type ResearchMetric={id:string;label:string;value:number|null;unit:string;currency:string|null;period:string|null;date:string|null;symbol?:string};
+export type ResearchSeries={id:string;label:string;unit:string;currency:string|null;points:{date:string;value:number|null}[]};
+export type ResearchAsset={symbol:string;name:string;currency:string|null;price:number|null;quoteAt:string|null;description:string|null};
+export type ResearchSnapshot={schema:1;kind:ResearchKind;subject:string;capturedAt:string;quality:'complete'|'partial'|'legacy';assets:ResearchAsset[];metrics:ResearchMetric[];series:ResearchSeries[];news:Article[];sections:{title:string;text:string}[];coverage:string[];settings:ResearchSettings};
+export type ResearchChange={id:string;category:'results'|'estimates'|'price'|'news'|'metrics'|'coverage';label:string;importance:'high'|'medium'|'low';before:string;after:string;detail:string;symbol?:string};
+export type ResearchDiff={fingerprint:string;checkedAt:string;baselineAt:string;comparable:boolean;changes:ResearchChange[];material:boolean;performance:{symbol:string;returnPct:number|null;benchmark:string|null;benchmarkReturnPct:number|null;currency:string|null;from:string|null;to:string|null}[];note:string};
+export type ResearchItem={id:string;kind:ResearchKind;subject:string;title:string;folder:string;tags:string[];thesis:string;risks:string;invalidation:string;notes:string;next_review:string|null;monitor_enabled:boolean;email_enabled:boolean;status:'active'|'archived';revision:number;created_at:string;updated_at:string;latest_version:number;needs_review:boolean;last_checked_at:string|null;deleted_at:string|null};
+export type ResearchVersion={id:string;item_id:string;version:number;created_at:string;payload:ResearchPayload;snapshot:ResearchSnapshot;settings:ResearchSettings;summary:string|null;summary_model:string|null;legacy_report_id:string|null};
+export type ResearchVersionHeader=Pick<ResearchVersion,'id'|'item_id'|'version'|'created_at'|'legacy_report_id'>;
+export type ResearchReview={id:string;item_id:string;version_id:string;created_at:string;current_snapshot:ResearchSnapshot;diff:ResearchDiff;explanation:string|null;explanation_model:string|null;acknowledged_at:string|null};
+export type ResearchDetail={item:ResearchItem;versions:ResearchVersionHeader[];version:ResearchVersion;review:ResearchReview|null;mailReady:boolean};
+export type ResearchList={items:ResearchItem[];mailReady:boolean};
