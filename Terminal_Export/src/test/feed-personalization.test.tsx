@@ -13,13 +13,20 @@ it('verifies additions, supports ordering and removal, then saves the whole pers
  api.mockResolvedValue({symbol:'^FTSE',label:'FTSE 100'});
  render(<FeedGroupEditor group="indices" preferences={defaultFeedPreferences()} labels={{}} onSave={save}/>);
  fireEvent.click(screen.getByRole('button',{name:'Personalizar índices'}));
- const dialog=screen.getByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Quitar ^GSPC'}));fireEvent.change(within(dialog).getByLabelText('Símbolo del activo'),{target:{value:'^FTSE'}});fireEvent.click(within(dialog).getByRole('button',{name:'Añadir'}));
- await within(dialog).findByRole('button',{name:'Quitar ^FTSE'});expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'indices',symbol:'^FTSE'});
- fireEvent.click(within(dialog).getByRole('button',{name:'Subir ^FTSE'}));
+ const dialog=screen.getByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Quitar SPX'}));fireEvent.change(within(dialog).getByLabelText('Símbolo del activo'),{target:{value:'^FTSE'}});fireEvent.click(within(dialog).getByRole('button',{name:'Añadir'}));
+ await within(dialog).findByRole('button',{name:'Quitar FTSE'});expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'indices',symbol:'^FTSE'});
+ fireEvent.click(within(dialog).getByRole('button',{name:'Subir FTSE'}));
  fireEvent.click(within(dialog).getByRole('button',{name:'Guardar'}));
  await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));
  const saved=save.mock.calls[0][0] as FeedPreferences;expect(saved.indices).toEqual(['^IXIC','NQ=F','^DJI','^KS11','^N225','^FTSE','^VIX']);expect(saved.etfs).toEqual(defaultFeedPreferences().etfs);
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+});
+it('uses research symbols in selected rows and suggestions but verifies and saves the original instrument IDs',async()=>{
+ const value={...defaultFeedPreferences(),indices:['^GSPC','^N225']},save=vi.fn().mockResolvedValue(undefined);api.mockResolvedValue({symbol:'^IXIC',label:'Nasdaq Composite'});
+ render(<FeedGroupEditor group="indices" preferences={value} labels={{}} onSave={save}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar índices'}));
+ const list=screen.getByRole('list',{name:'Activos del recuadro'});expect(within(list).getByText('SPX')).toBeVisible();expect(within(list).getByText('NKY')).toBeVisible();expect(within(list).queryByText('^N225')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Añadir IXIC'}));await screen.findByRole('button',{name:'Quitar IXIC'});expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'indices',symbol:'^IXIC'});
+ fireEvent.click(screen.getByRole('button',{name:'Guardar'}));await waitFor(()=>expect(save).toHaveBeenCalledWith({...value,indices:['^GSPC','^N225','^IXIC']}));
 });
 it('keeps a failed verification out of the saved list and keeps failed saves open for retry',async()=>{
  api.mockRejectedValue(new Error('El símbolo no está disponible.'));const save=vi.fn().mockRejectedValue(new Error('No se pudo sincronizar.'));
@@ -63,13 +70,13 @@ it('allows an eighth verified ETF without expanding or replacing a custom seven-
 });
 it('keeps indices limited to seven even though the ETF basket has room for ten',()=>{
  render(<FeedGroupEditor group="indices" preferences={defaultFeedPreferences()} labels={{}} onSave={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar índices'}));
- expect(screen.getByLabelText('Activos seleccionados')).toHaveTextContent('7 / 7');fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'FTSE'}});expect(screen.getByRole('button',{name:'Añadir ^FTSE'})).toBeDisabled();expect(api).not.toHaveBeenCalled();
+ expect(screen.getByLabelText('Activos seleccionados')).toHaveTextContent('7 / 7');fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'FTSE'}});expect(screen.getByRole('button',{name:'Añadir FTSE'})).toBeDisabled();expect(api).not.toHaveBeenCalled();
 });
 it('normalizes typed currency pairs and rejects alias duplicates without provider calls',async()=>{
  const value={...defaultFeedPreferences(),currencies:['EURUSD=X','BTC-USD']};api.mockResolvedValue({symbol:'JPY=X',label:'USD/JPY'});
  render(<FeedGroupEditor group="currencies" preferences={value} labels={{}} onSave={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar divisas y activos digitales'}));
  fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'EUR/USD'}});fireEvent.click(screen.getByRole('button',{name:'Añadir'}));expect(screen.getByRole('alert')).toHaveTextContent('ya está');expect(api).not.toHaveBeenCalled();
- fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'USDJPY'}});fireEvent.click(screen.getByRole('button',{name:'Añadir'}));await screen.findByRole('button',{name:'Quitar JPY=X'});expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'currencies',symbol:'JPY=X'});
+ fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'USDJPY'}});fireEvent.click(screen.getByRole('button',{name:'Añadir'}));await screen.findByRole('button',{name:'Quitar USDJPY'});expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'currencies',symbol:'JPY=X'});
 });
 it('presents SGX iron as FEF and uses its internal settlement identifier only in the verified request',async()=>{
  const value={...defaultFeedPreferences(),commodities:['GC=F','CL=F']},save=vi.fn().mockResolvedValue(undefined);api.mockResolvedValue({symbol:'SGX-IODEX',label:'Hierro · Nov-26'});
@@ -81,8 +88,8 @@ it('cannot add a response for another ticker or revive an addition after the edi
  let resolve:(value:any)=>void=()=>{};api.mockImplementation(()=>new Promise(done=>resolve=done));const value={...defaultFeedPreferences(),indices:['^GSPC']};
  render(<FeedGroupEditor group="indices" preferences={value} labels={{}} onSave={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar índices'}));
  fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'FTSE'}});fireEvent.click(screen.getByRole('button',{name:'Añadir'}));fireEvent.click(screen.getByRole('button',{name:'Cancelar'}));fireEvent.click(screen.getByRole('button',{name:'Personalizar índices'}));
- await act(async()=>resolve({symbol:'^FTSE',label:'FTSE 100'}));expect(screen.queryByRole('button',{name:'Quitar ^FTSE'})).toBeNull();
- api.mockResolvedValue({symbol:'^DJI',label:'Wrong asset'});fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'FTSE'}});fireEvent.click(screen.getByRole('button',{name:'Añadir'}));await screen.findByRole('alert');expect(screen.queryByRole('button',{name:'Quitar ^DJI'})).toBeNull();
+ await act(async()=>resolve({symbol:'^FTSE',label:'FTSE 100'}));expect(screen.queryByRole('button',{name:'Quitar FTSE'})).toBeNull();
+ api.mockResolvedValue({symbol:'^DJI',label:'Wrong asset'});fireEvent.change(screen.getByLabelText('Símbolo del activo'),{target:{value:'FTSE'}});fireEvent.click(screen.getByRole('button',{name:'Añadir'}));await screen.findByRole('alert');expect(screen.queryByRole('button',{name:'Quitar DJI'})).toBeNull();
 });
 function FullPreferencesProbe(){const state=useFeedPreferences('legacy-reader');return <p>{state.ready?JSON.stringify(state.groups):'loading'}</p>;}
 it('reads old three-group settings without losing the chosen order or custom assets',async()=>{

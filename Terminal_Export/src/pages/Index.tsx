@@ -1,4 +1,5 @@
 import ReportQuote from '@/components/ReportQuote';
+import {feedTicker,feedTickerContext,treasuryDisplayTicker} from '@/lib/feed-identifiers';
 import KeepPanel from '@/components/KeepPanel';
 import { ReportLoading } from "@/components/ReportLoading";
 import { accountApi } from "@/lib/beta-api";
@@ -969,7 +970,7 @@ function MarketTickerBar({
           {/* Fixed indices */}
           {(data?.indices ?? []).map((idx) => (
             <div key={idx.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
-              <span className="text-[9px] tracking-widest text-muted-foreground/70 uppercase" title={idx.label}>{idx.symbol}</span>
+              <span className="text-[9px] tracking-widest text-muted-foreground/70 uppercase" title={[idx.label,feedTickerContext(idx)].filter(Boolean).join(' · ')}>{feedTicker(idx)}</span>{feedTickerContext(idx)&&<span className="text-[8px] text-muted-foreground/45">{feedTickerContext(idx)}</span>}
               <span className="text-[11px] tabular-nums text-foreground/80">
                 {idx.price != null ? `${idx.price.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})} ${idx.unit==='points'||idx.symbol.startsWith('^')?'pts':idx.currency??''}` : "—"}
               </span>
@@ -987,7 +988,7 @@ function MarketTickerBar({
           {/* 10Y yield */}
           {data?.yield10y != null && (
             <div className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
-              <span className="text-[9px] tracking-widest text-muted-foreground/45" title="Rendimiento del Tesoro de EE. UU. a 10 años">DGS10</span>
+              <span className="text-[9px] tracking-widest text-muted-foreground/45" title="Rendimiento de referencia del Tesoro de EE. UU. a 10 años · CMT diario">{treasuryDisplayTicker(10)}</span>
               <span className={`text-[11px] tabular-nums ${data.yield10y > 5 ? "text-destructive/80" : "text-foreground/80"}`}>
                 {data.yield10y.toFixed(2)}%
               </span>
@@ -1007,7 +1008,7 @@ function MarketTickerBar({
           {/* User stocks */}
           {(data?.stocks ?? []).map((s) => (
             <div key={s.symbol} className="flex items-center gap-2 pr-4 mr-4 border-r border-border/30 shrink-0">
-              <span className="text-[9px] tracking-widest text-muted-foreground/45">{s.symbol}</span>
+              <span className="text-[9px] tracking-widest text-muted-foreground/45">{feedTicker(s)}</span>{feedTickerContext(s)&&<span className="text-[8px] text-muted-foreground/45">{feedTickerContext(s)}</span>}
               <span className="text-[11px] tabular-nums text-foreground/80">
                 {s.price != null ? `${s.price.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})} ${s.unit==='points'?'pts':s.currency??''}` : "—"}
               </span>

@@ -1,7 +1,7 @@
 import {fireEvent,render,screen,within} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
 import {FeedView} from '../components/MarketPanels';
-import {TreasuryCard} from '../components/FeedCards';
+import {TreasuryCard,FeedQuoteStamp} from '../components/FeedCards';
 import AssetSession from '../components/AssetSession';
 import AssetOverview from '../components/AssetOverview';
 import AssetCandles from '../components/AssetCandles';
@@ -19,7 +19,9 @@ it('opens every index and ETF through the watchlist asset route without enabling
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de Nasdaq 100 · QQQ'}));expect(select).toHaveBeenLastCalledWith('QQQ');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de EUR/USD'}));expect(select).toHaveBeenLastCalledWith('EURUSD=X');expect(screen.getByText('1,16473 USD')).toBeVisible();
  expect(screen.queryByRole('button',{name:'Abrir ficha de Oro'})).toBeNull();
- for(const symbol of ['^KS11','NQ=F','QQQ','EURUSD=X','GC=F','BZ=F','FEF'])expect(screen.getAllByText(symbol,{exact:true})[0]).toBeVisible();
+ for(const symbol of ['KOSPI','NQ','QQQ','EURUSD','GC','BZ','FEF'])expect(screen.getAllByText(symbol,{exact:true})[0]).toBeVisible();
+ for(const symbol of ['^KS11','NQ=F','EURUSD=X','GC=F','BZ=F'])expect(screen.queryByText(symbol,{exact:true})).toBeNull();
+ expect(screen.getAllByText('Futuros').length).toBeGreaterThan(0);
  expect(screen.getByText('SGX · Nov-26')).toBeVisible();expect(screen.queryByText('SGX-IODEX',{exact:true})).toBeNull();
 });
 
@@ -28,11 +30,18 @@ it('labels three-month, six-month and one-year yields and draws only a curve wit
  const points=[.25,.5,1,2,5,10,20].map(years=>({years,yield:4,date:'2026-10-16',changeBp:2}));
  const {rerender}=render(<TreasuryCard points={points}/>);
  expect(screen.getByText('3 meses')).toBeVisible();expect(screen.getByText('6 meses')).toBeVisible();expect(screen.getByText('1 año')).toBeVisible();
- for(const id of ['DGS3MO','DGS6MO','DGS1','DGS2','DGS5','DGS10','DGS20'])expect(screen.getByText(id,{exact:true})).toBeVisible();
+ for(const id of ['US03MY','US06MY','US01Y','US02Y','US05Y','US10Y','US20Y'])expect(screen.getByText(id,{exact:true})).toBeVisible();
+ expect(screen.getByText('Rendimientos CMT diarios')).toBeVisible();expect(screen.getByText('US10Y')).toHaveAttribute('title',expect.stringContaining('No es un bono negociable'));
  expect(screen.queryByText(/Curva pendiente/)).toBeNull();
  rerender(<TreasuryCard points={points.map((p,i)=>i===0?{...p,date:'2026-10-15'}:p)}/>);
  expect(screen.getByText(/Curva pendiente de una fecha común/)).toBeVisible();
  vi.unstubAllGlobals();
+});
+
+it('does not present a dated spot close as an intraday market quote when the provider has no exact timestamp',()=>{
+ const quote={symbol:'XAUUSD=X',label:'Oro al contado',price:4200,change:1,currency:'USD',date:'2026-10-23',session:'regular',at:null,delaySeconds:null,priceKind:'quote',reference:'previous-close'} as const;
+ const {rerender}=render(<FeedQuoteStamp quote={quote}/>);expect(screen.getByText('Cierre de referencia · 2026-10-23')).toBeVisible();expect(screen.queryByText(/MARKET/)).toBeNull();
+ rerender(<FeedQuoteStamp quote={{...quote,price:null}}/>);expect(screen.getByText('Sin cotización')).toBeVisible();
 });
 
 const snapshot:AssetSnapshot={symbol:'^GSPC',name:'S&P 500',description:'Índice de referencia.',currency:'USD',exchange:'SNP',timezone:'America/New_York',price:100,change:1,quoteAt:'2026-10-16T20:00Z',candles:[{time:Date.parse('2026-10-16T13:30Z'),open:99,high:101,low:98,close:100,volume:null}],session:'Sesión regular',news:[],newsSince:'2026-10-15T20:00Z',fetchedAt:'2026-10-16T20:00Z',instrument:{kind:'index',priceUnit:'pts',volumeUnit:'unavailable'},sessionStats:{date:'2026-10-16',partial:false,open:99,high:101,low:98,previousClose:99,volume:null,averageVolume20:null,volumeRatio:null,rangePercent:3.03,gapPercent:0,vol20:12,atr14:2,riskDate:'2026-10-16'}};

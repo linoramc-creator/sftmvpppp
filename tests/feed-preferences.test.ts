@@ -14,7 +14,7 @@ test('normalizes bounded preferences without mutating default arrays or acceptin
 });
 test('market cache identifies the ordered public selection in a bounded key',async()=>{
  const defaults=defaultFeedPreferences(),first=await feedPreferencesKey(['AAPL'],defaults);
- assert.match(first,/^feed-markets-v10:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
+ assert.match(first,/^feed-markets-v11:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
  assert.notEqual(first,await feedPreferencesKey(['MSFT'],defaults));
  assert.notEqual(first,await feedPreferencesKey(['AAPL'],{...defaults,indices:[...defaults.indices].reverse()}));
 });
@@ -84,6 +84,7 @@ test('ETF defaults and suggestions are unique while future seven-ETF selections 
  assert.equal(response.status,200);assert.deepEqual((await response.json()).groups.etfs,defaults.etfs);assert.equal(writes[0].user_id,uid);
 });
 test('ticker aliases are explicit, duplicate-aware and preserve the direction of native currency pairs',()=>{
+ for(const input of ['USD=X','USDUSD','USD/USD','USDUSD=X'])assert.equal(normalizeFeedSymbol('currencies',input),null);
  for(const [group,input,expected]of [['indices','SPX','^GSPC'],['indices','NDX','^NDX'],['etfs','qqq','QQQ'],['currencies','EUR/USD','EURUSD=X'],['currencies','EURUSD','EURUSD=X'],['currencies','USDJPY','JPY=X'],['currencies','USD/JPY','JPY=X'],['currencies','EUR=X','EUR=X'],['currencies','GBP=X','GBP=X'],['currencies','AUD=X','AUD=X'],['currencies','NZD=X','NZD=X'],['currencies','EUR','EURUSD=X'],['currencies','BTC/USD','BTC-USD'],['commodities','GC','GC=F'],['commodities','FEF','SGX-IODEX']] as const)assert.equal(normalizeFeedSymbol(group,input),expected);
  for(const input of ['USD/USD','https://private','EURUSD;DROP','EUR\nUSD'])assert.equal(normalizeFeedSymbol('currencies',input),null);
  assert.equal(normalizeFeedSymbol('commodities','FEF=F'),null);
@@ -111,6 +112,29 @@ test('FEF uses the dated SGX settlement path and stays unavailable when no verif
  const valid=await validateFeedAsset('commodities','FEF',{now,read:async()=>{charts++;throw Error('Not a Yahoo or NYMEX ticker');},iron:async()=>{iron++;return base;}});
  assert.equal(valid?.symbol,'SGX-IODEX');assert.equal(charts,0);assert.equal(iron,1);
  for(const patch of [{price:null},{date:'2026-10-01'},{date:'2026-10-23'}])assert.equal(await validateFeedAsset('commodities','FEF',{now,iron:async()=>({...base,...patch})}),null);
+});
+
+test('spot metal defaults and input aliases stay distinct from futures and other currency pairs',()=>{
+ const defaults=defaultFeedPreferences();
+ assert.deepEqual(defaults.commodities,['XAUUSD=X','XAGUSD=X','CL=F','BZ=F','HG=F','NG=F','SGX-IODEX']);
+ assert.equal(defaults.commodities.length,7);assert.equal(defaults.etfs.length,10);
+ for(const [input,expected]of [['XAUUSD','XAUUSD=X'],['XAU/USD','XAUUSD=X'],['XAGUSD','XAGUSD=X'],['XAG/USD','XAGUSD=X'],['GC','GC=F'],['SI','SI=F']] as const)assert.equal(normalizeFeedSymbol('commodities',input),expected);
+ for(const input of ['NKY','IDXNKY'])assert.equal(normalizeFeedSymbol('indices',input),'^N225');
+ for(const input of ['EURUSD=X','JPY=X','XPTUSD=X','XAUJPY=X'])assert.equal(normalizeFeedSymbol('commodities',input),null);
+ assert.equal(normalizeFeedPreferences({...defaults,commodities:['XAUUSD','XAU/USD']}),null);
+ assert.deepEqual(feedSuggestions('commodities','GC',[],7).map(([symbol])=>symbol),['GC=F']);
+ assert.deepEqual(feedSuggestions('commodities','XAUUSD',[],7).map(([symbol])=>symbol),['XAUUSD=X']);
+ const custom=['SI=F','GC=F','CL=F'];assert.deepEqual(normalizeSavedFeedPreferences({...defaults,commodities:custom})?.commodities,custom);
+});
+
+test('commodity validation accepts only genuine USD spot metal identities and dated available spot data',async()=>{
+ const now=Date.parse('2026-10-26T12:00Z'),valid={symbol:'XAUUSD=X',currency:'USD',price:4000,date:'2026-10-23'} as any;
+ assert.deepEqual(await validateFeedAsset('commodities','XAU/USD',{now,spot:async()=>valid}),{symbol:'XAUUSD=X',label:'Oro · Spot'});
+ for(const patch of [{symbol:'GC=F'},{currency:'EUR'},{price:null},{date:'2026-10-26'},{date:'2026-10-01'}])assert.equal(await validateFeedAsset('commodities','XAUUSD',{now,spot:async()=>({...valid,...patch})}),null);
+ const raw=(symbol:string,type:string,currency='USD')=>({chart:{result:[{meta:{symbol,instrumentType:type,currency,regularMarketPrice:4000}}]}});
+ assert.equal((await validateFeedAsset('commodities','XAUUSD',{read:async symbol=>raw(symbol,'CURRENCY')}))?.symbol,'XAUUSD=X');
+ for(const [symbol,type,currency]of [['GC=F','FUTURE','USD'],['XAUUSD=X','FUTURE','USD'],['XAUUSD=X','CURRENCY','EUR']])assert.equal(await validateFeedAsset('commodities','XAUUSD',{read:async()=>raw(symbol,type,currency)}),null);
+ let reads=0;assert.equal(await validateFeedAsset('commodities','EURUSD=X',{read:async()=>{reads++;return raw('EURUSD=X','CURRENCY');}}),null);assert.equal(reads,0);
 });
 test('a legacy stored selection matches its seven-item view during authenticated market requests',async t=>{
  const legacy={indices:['^FTSE'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EURUSD=X']},groups=normalizeSavedFeedPreferences(legacy)!;const {writes}=securityFixture(t,'INDEX',legacy);let dispatched=false;

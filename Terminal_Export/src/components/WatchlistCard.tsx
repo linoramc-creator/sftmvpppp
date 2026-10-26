@@ -3,6 +3,7 @@ import type {FeedQuote} from '../../../supabase/functions/analyze-ticker/panels'
 import {useId,useState} from 'react';
 import {Plus,X} from 'lucide-react';
 import type {MarketData} from '@/lib/analyze';
+import {feedTicker,feedTickerContext} from '@/lib/feed-identifiers';
 
 const MAX_ASSETS=7;
 const QUICK_ADD=[
@@ -33,7 +34,7 @@ export function WatchlistCard({stocks,data,liveQuotes,onChange,onSelect}:{stocks
     <div className="divide-y divide-slate-800/80">{stocks.map(symbol=>{
       const live=liveQuotes?.find(quote=>quote.symbol===symbol),stored=data?.stocks.find(quote=>quote.symbol===symbol),quote=live?{price:live.price,change1d:live.change}:stored;
       return <div key={symbol} className="flex items-center gap-2 py-2.5 first:pt-0">
-        <button type="button" onClick={()=>onSelect(symbol)} className="min-w-0 flex-1 rounded text-left text-sm font-medium text-slate-200 transition-colors hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70" aria-label={`Abrir ficha de ${symbol}`}><span>{symbol}</span><span aria-hidden="true" className="ml-1.5 text-[11px] text-slate-500">↗</span>{live&&<FeedQuoteStamp quote={live}/>}</button>
+        <button type="button" onClick={()=>onSelect(symbol)} className="min-w-0 flex-1 rounded text-left text-sm font-medium text-slate-200 transition-colors hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70" aria-label={`Abrir ficha de ${symbol}`}><span>{feedTicker(live??symbol)}</span><span aria-hidden="true" className="ml-1.5 text-[11px] text-slate-500">↗</span>{feedTickerContext(live??symbol)&&<span className="mt-0.5 block text-[10px] font-normal text-slate-500">{feedTickerContext(live??symbol)}</span>}{live&&<FeedQuoteStamp quote={live}/>}</button>
         <div className="shrink-0 text-right text-sm tabular-nums text-slate-200">{quote?.price==null?'Sin cotización':quote.price.toLocaleString('es-ES',{maximumFractionDigits:2})}<p className={`mt-0.5 text-xs ${quote?.change1d==null?'text-slate-500':quote.change1d>=0?'text-emerald-400':'text-red-400'}`}>{quote?.change1d==null?'—':`${quote.change1d>0?'+':''}${quote.change1d.toFixed(2)}%`}</p></div>
         <button type="button" aria-label={`Quitar ${symbol}`} onClick={()=>{onChange(stocks.filter(item=>item!==symbol));setError('');}} className="rounded p-1.5 text-slate-600 transition-colors hover:bg-slate-800 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70"><X size={13} aria-hidden="true"/></button>
       </div>;

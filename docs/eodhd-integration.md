@@ -1,5 +1,26 @@
 # EODHD: prioridad de datos de MensorTerminal
 
+## Símbolos visibles y metales al contado · 26 de octubre de 2026
+
+El feed presenta símbolos de investigación como SPX, NKY, EURUSD y USDJPY;
+los identificadores originales se conservan para peticiones, caché y clics.
+Las raíces de futuros (GC, SI, CL, BZ, NQ, etc.) siguen identificadas como
+futuros y nunca se renombran como instrumentos al contado. Las parejas de
+divisas conservan su dirección, incluidas las referencias USD/base.
+
+El preajuste de materias primas utiliza XAUUSD y XAGUSD al contado. La cuenta
+actual permite verificar OHLC diarios de XAUUSD.FOREX y XAGUSD.FOREX, pero las
+sondas de cotización e intradía no proporcionaron precios actuales válidos.
+Se muestran cierres diarios completados, con fecha original, USD por onza troy
+y variación entre cierres de la misma serie; no se inventa una hora intradía.
+La lectura diaria se reutiliza durante una hora. Massive se conserva como
+respaldo de barras diarias históricas cuando falte la fuente principal.
+Las selecciones personalizadas de futuros se mantienen.
+
+Los alias del Tesoro US03MY, US06MY, US01Y, US02Y, US05Y, US10Y y US20Y se
+presentan como rendimientos CMT diarios de referencia. No son una cotización
+intradía de un bono concreto ni datos obtenidos de TradingView.
+
 Verificación: 21 de octubre de 2026. La cuenta identifica la suscripción como
 `trial`, con límite declarado de 100.000 unidades de API al día. No se ha
 contratado ni ampliado ningún plan. La cobertura verificada es la de esta clave

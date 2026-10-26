@@ -3,8 +3,10 @@ import {instrumentInfo} from './asset-instrument.ts';
 import {normalizeFeedSymbol,type FeedGroupKey} from './feed-preferences.ts';
 import {marketJson} from './eodhd-market-fetch.ts';
 import {ironReferenceQuote} from './iron-reference.ts';
+import {spotMetal} from './spot-metals.ts';
+import {spotMetalQuote} from './spot-metal-quotes.ts';
 export type FeedSession='pre'|'regular'|'post'|'closed';
-export type SessionQuote={symbol:string;label:string;displaySymbol?:string;contractLabel?:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close';reference:'previous-close'|'regular-close'|null;timezone?:string};
+export type SessionQuote={symbol:string;label:string;displaySymbol?:string;contractLabel?:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close'|'daily-close';reference:'previous-close'|'regular-close'|null;timezone?:string};
 const commodityUnits:Record<string,string>={'GC=F':'USD/oz t','SI=F':'USD/oz t','CL=F':'USD/barril','BZ=F':'USD/barril','HG=F':'USD/libra','NG=F':'USD/MMBtu','ZW=F':'¢/bushel','ZC=F':'¢/bushel'};
 const positive=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>0;
 const localDate=(ms:number,timezone:string)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(ms);
@@ -38,7 +40,7 @@ export function normalizeFeedQuote(symbol:string,label:string,raw:any,intraday:a
  return {...result,price:last.close,change:reference?(last.close/reference-1)*100:null,date:dateAt(last.start),currency:typeof m.currency==='string'?m.currency:result.currency,session:active,at:new Date(last.end).toISOString(),delaySeconds:Math.max(0,Math.floor((now-last.end)/1000)),priceKind:'minute-close',reference:referenceKind};
 }
 async function chart(symbol:string,minute:boolean){return marketJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=${minute?'1m':'1d'}${minute?'&includePrePost=true':''}`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error'},{timeoutMs:8000,acceptPrimary:raw=>{const meta=raw?.chart?.result?.[0]?.meta;return minute||positive(meta?.regularMarketTime)&&positive(meta?.regularMarketPrice);}});}
-export async function feedSessionQuote(symbol:string,label:string,extended=false){const [daily,intraday]=await Promise.all([chart(symbol,false),extended?chart(symbol,true):null]);return normalizeFeedQuote(symbol,label,daily,intraday);}
+export async function feedSessionQuote(symbol:string,label:string,extended=false){if(spotMetal(symbol))return (await spotMetalQuote(symbol,label))!;const [daily,intraday]=await Promise.all([chart(symbol,false),extended?chart(symbol,true):null]);return normalizeFeedQuote(symbol,label,daily,intraday);}
 function feedAssetLabel(symbol:string,meta:any):string{
  if(symbol.endsWith('=X')){const pair=symbol.slice(0,-2);return pair.length===6?`${pair.slice(0,3)}/${pair.slice(3)}`:`USD/${pair}`;}
  const name=typeof meta?.shortName==='string'?meta.shortName:typeof meta?.longName==='string'?meta.longName:symbol;
@@ -48,13 +50,18 @@ const verifiedAssets=new Map<string,{at:number;label:string}>();
 const verifyingAssets=new Map<string,Promise<{symbol:string;label:string}|null>>();
 // A metadata check is required when an asset is added. Persisted choices are
 // subsequently priced from the existing quote cache, rather than researched again.
-export async function validateFeedAsset(group:FeedGroupKey,input:string,deps:{read?:(symbol:string)=>Promise<any>;iron?:typeof ironReferenceQuote;now?:number}={}):Promise<{symbol:string;label:string}|null>{
+export async function validateFeedAsset(group:FeedGroupKey,input:string,deps:{read?:(symbol:string)=>Promise<any>;iron?:typeof ironReferenceQuote;spot?:typeof spotMetalQuote;now?:number}={}):Promise<{symbol:string;label:string}|null>{
  const symbol=normalizeFeedSymbol(group,input);if(!symbol)return null;
- const cacheable=!deps.read&&!deps.iron&&deps.now===undefined;
+ const cacheable=!deps.read&&!deps.iron&&!deps.spot&&deps.now===undefined;
  const key=`${group}:${symbol}`,hit=verifiedAssets.get(key);
  if(cacheable&&hit&&Date.now()-hit.at<300000)return {symbol,label:hit.label};
  if(cacheable&&verifyingAssets.has(key))return verifyingAssets.get(key)!;
  const operation=(async()=>{
+  if(spotMetal(symbol)&&!deps.read){
+   const value=await (deps.spot??spotMetalQuote)(symbol),now=deps.now??Date.now(),stamp=value?.date?Date.parse(value.date+'T00:00Z'):NaN;
+   if(value?.symbol!==symbol||value.currency!=='USD'||!positive(value.price)||!Number.isFinite(stamp)||new Date(stamp).toISOString().slice(0,10)!==value.date||stamp>=Date.parse(new Date(now).toISOString().slice(0,10))||now-stamp>10*86400000)return null;
+   const label=spotMetal(symbol)!.name;if(cacheable)verifiedAssets.set(key,{at:Date.now(),label});return {symbol,label};
+  }
   if(group==='commodities'&&symbol==='SGX-IODEX'){
    const now=deps.now??Date.now(),value=await (deps.iron??ironReferenceQuote)(now),date=typeof value.date==='string'?Date.parse(value.date+'T00:00:00Z'):NaN;
    if(!positive(value.price)||!Number.isFinite(date)||new Date(date).toISOString().slice(0,10)!==value.date||date>now||now-date>10*86400000)return null;
@@ -62,8 +69,9 @@ export async function validateFeedAsset(group:FeedGroupKey,input:string,deps:{re
   }
   const raw=await (deps.read??((value:string)=>chart(value,false)))(symbol),data=raw?.chart?.result?.[0],meta=data?.meta??{};
   const type=String(meta.instrumentType??'').toUpperCase();
-  const allowed=group==='indices'?['INDEX','INDICES','FUTURE']:group==='etfs'?['ETF']:group==='commodities'?['FUTURE']:['CURRENCY','CRYPTOCURRENCY'];
+  const allowed=group==='indices'?['INDEX','INDICES','FUTURE']:group==='etfs'?['ETF']:group==='commodities'?(spotMetal(symbol)?['CURRENCY']:['FUTURE']):['CURRENCY','CRYPTOCURRENCY'];
   if(!allowed.includes(type)||!positive(meta.regularMarketPrice)&&!(data?.indicators?.quote?.[0]?.close??[]).some(positive))return null;
+  if(spotMetal(symbol)&&meta.currency!=='USD')return null;
   if(typeof meta.symbol==='string'&&normalizeFeedSymbol(group,meta.symbol)!==symbol)return null;
   const label=feedAssetLabel(symbol,meta);if(cacheable){if(verifiedAssets.size>=256)verifiedAssets.delete(verifiedAssets.keys().next().value!);verifiedAssets.set(key,{at:Date.now(),label});}return {symbol,label};
  })().catch(()=>null).finally(()=>{if(cacheable)verifyingAssets.delete(key);});if(cacheable)verifyingAssets.set(key,operation);return operation;

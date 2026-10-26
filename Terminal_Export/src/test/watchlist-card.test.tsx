@@ -34,3 +34,10 @@ it('rejects duplicates and malformed symbols without changing the saved selectio
  fireEvent.change(input,{target:{value:'BRK/B'}});fireEvent.click(screen.getByRole('button',{name:'Añadir'}));
  expect(screen.getByRole('alert')).toHaveTextContent('Introduce un ticker válido.');expect(onChange).not.toHaveBeenCalled();
 });
+it('displays research symbols while clicking and removing the original saved instrument identities',()=>{
+ const symbols=['^GSPC','EUR=X','BTC-USD','GC=F','SAP.DE','BRK-B'],select=vi.fn(),change=vi.fn();render(<WatchlistCard stocks={symbols} data={null} onChange={change} onSelect={select}/>);
+ for(const symbol of ['SPX','USDEUR','BTCUSD','GC','SAP.DE','BRK-B'])expect(screen.getByText(symbol,{exact:true})).toBeVisible();
+ expect(screen.getByText('Futuros')).toBeVisible();expect(screen.queryByText('EUR=X',{exact:true})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de EUR=X'}));expect(select).toHaveBeenCalledWith('EUR=X');
+ fireEvent.click(screen.getByRole('button',{name:'Quitar GC=F'}));expect(change).toHaveBeenCalledWith(symbols.filter(symbol=>symbol!=='GC=F'));
+});
