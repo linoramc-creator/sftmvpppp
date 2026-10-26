@@ -25,6 +25,14 @@ it('opens every index and ETF through the watchlist asset route without enabling
  expect(screen.getByText('SGX · Nov-26')).toBeVisible();expect(screen.queryByText('SGX-IODEX',{exact:true})).toBeNull();
 });
 
+it('formats spot metals in troy ounces without using currency-pair decimal precision',async()=>{
+ const spot=(symbol:string,label:string,price:number)=>({symbol,label,price,currency:'USD',unit:'USD/oz t',date:'2026-10-23',change:1,session:'closed',at:null,priceKind:'daily-close'});
+ api.mockImplementation(async(_url:string,init:RequestInit)=>({ok:true,json:async()=>JSON.parse(init.body as string).panel==='feedMarkets'?{groups:[{label:'MATERIAS PRIMAS',items:[spot('XAUUSD=X','Oro · Spot',3997.51777),spot('XAGUSD=X','Plata · Spot',53.95623)]}],treasury:[],earnings:[],fetchedAt:'2026-10-26T12:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-26T12:00Z'}}));
+ render(<FeedView stocks={['IAU']} data={null} onChange={vi.fn()} onSelect={vi.fn()}/>);
+ expect(await screen.findByText('3997,52 USD/oz t')).toBeVisible();expect(screen.getByText('53,956 USD/oz t')).toBeVisible();
+ expect(screen.getByText('XAUUSD',{exact:true})).toBeVisible();expect(screen.queryByText('XAUUSD=X',{exact:true})).toBeNull();
+});
+
 it('labels three-month, six-month and one-year yields and draws only a curve with one common observation date',()=>{
  vi.stubGlobal('ResizeObserver',class {observe(){}unobserve(){}disconnect(){}});
  const points=[.25,.5,1,2,5,10,20].map(years=>({years,yield:4,date:'2026-10-16',changeBp:2}));
@@ -40,7 +48,7 @@ it('labels three-month, six-month and one-year yields and draws only a curve wit
 
 it('does not present a dated spot close as an intraday market quote when the provider has no exact timestamp',()=>{
  const quote={symbol:'XAUUSD=X',label:'Oro al contado',price:4200,change:1,currency:'USD',date:'2026-10-23',session:'regular',at:null,delaySeconds:null,priceKind:'quote',reference:'previous-close'} as const;
- const {rerender}=render(<FeedQuoteStamp quote={quote}/>);expect(screen.getByText('Cierre de referencia · 2026-10-23')).toBeVisible();expect(screen.queryByText(/MARKET/)).toBeNull();
+ const {rerender}=render(<FeedQuoteStamp quote={quote}/>);expect(screen.getByText('Cierre · 23 oct 2026')).toBeVisible();expect(screen.queryByText(/MARKET/)).toBeNull();
  rerender(<FeedQuoteStamp quote={{...quote,price:null}}/>);expect(screen.getByText('Sin cotización')).toBeVisible();
 });
 

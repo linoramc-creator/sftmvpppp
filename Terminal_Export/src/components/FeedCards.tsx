@@ -37,7 +37,10 @@ export function visibleNewsArticles(articles:Article[]):Article[]{
 }
 export function FeedQuoteStamp({quote}:{quote:FeedQuote}){
  const labels={pre:'PREMARKET',regular:'MARKET',post:'POSTMARKET',closed:'CIERRE'},time=quote.at?Date.parse(quote.at):NaN,age=Number.isFinite(time)?Math.max(0,Math.floor((Date.now()-time)/1000)):null;
- if(feedTickerContext(quote)==='Contado'&&!Number.isFinite(time))return <span className="block text-[10px] text-muted-foreground" title="Cotización de contado de cierre. No hay una hora intradiaria verificada.">{quote.price===null?'Sin cotización':`Cierre de referencia · ${quote.date??'Sin fecha disponible'}`}</span>;
+ if(feedTickerContext(quote)==='Contado'&&!Number.isFinite(time)){
+  const date=quote.date?new Date(quote.date+'T12:00:00Z'):null,label=date&&Number.isFinite(date.getTime())?date.toLocaleDateString('es-ES',{timeZone:'UTC',day:'numeric',month:'short',year:'numeric'}):'Sin fecha disponible';
+  return <span className="block text-[10px] text-muted-foreground" title="Cotización de contado de cierre. No hay una hora intradiaria verificada.">{quote.price===null?'Sin cotización':`Cierre · ${label}`}</span>;
+ }
  const timezone=quote.timezone??'America/New_York',zoneLabel=({'America/New_York':'ET','Asia/Tokyo':'JST','Asia/Seoul':'KST','America/Chicago':'CT'} as Record<string,string>)[timezone]??timezone;
  const clock=Number.isFinite(time)?new Date(time).toLocaleString('es-ES',{timeZone:timezone,...(quote.session==='closed'?{day:'2-digit',month:'2-digit'}:{}),hour:'2-digit',minute:'2-digit'})+' '+zoneLabel:quote.date??'Sin hora disponible';
  const reference=quote.reference==='regular-close'?'Variación respecto al cierre regular de esa sesión.':'Variación respecto al cierre regular anterior cuando está disponible.';
