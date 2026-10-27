@@ -3,7 +3,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import ResearchLibrary,{researchNeedsReview} from '../components/research/ResearchLibrary';
 import ResearchSnapshotView,{researchUnit} from '../components/research/ResearchSnapshotView';
 import ResearchOriginalArchive from '../components/research/ResearchOriginalArchive';
-import type {ResearchDetail,ResearchReview,ResearchSnapshot} from '../../../supabase/functions/analyze-ticker/research-types';
+import type {ResearchAssessment,ResearchDetail,ResearchReview,ResearchSnapshot} from '../../../supabase/functions/analyze-ticker/research-types';
 const api=vi.hoisted(()=>vi.fn());
 vi.mock('@/lib/beta-api',()=>({accountApi:api}));
 vi.mock('@/lib/researchPdf',()=>({downloadResearchDossier:vi.fn()}));
@@ -11,13 +11,14 @@ const date='2026-10-26T07:00:00Z';
 const snapshot=(price=100):ResearchSnapshot=>({schema:1,kind:'ticker',subject:'AAPL',capturedAt:date,quality:'complete',assets:[{symbol:'AAPL',name:'Apple',currency:'USD',price,quoteAt:date,description:'Descripción conservada.'}],metrics:[{id:'revenue',label:'Ingresos capturados',value:price,unit:'USD',currency:'USD',period:'2026-Q3',date:'2026-09-30'}],series:[],news:[],sections:[],coverage:[],settings:{}});
 function fixture():ResearchDetail{return {item:{id:'item-a',kind:'ticker',subject:'AAPL',title:'Tesis Apple',folder:'Tecnología',tags:['calidad'],thesis:'Crecimiento del servicio',risks:'Concentración',invalidation:'Pérdida de margen',notes:'Nota inicial',next_review:'2026-11-01',monitor_enabled:true,email_enabled:false,status:'active',revision:7,created_at:date,updated_at:date,latest_version:2,needs_review:false,last_checked_at:null,deleted_at:null},versions:[{id:'version-2',item_id:'item-a',version:2,created_at:date,legacy_report_id:null},{id:'version-1',item_id:'item-a',version:1,created_at:'2026-10-20T07:00:00Z',legacy_report_id:'old-report'}],version:{id:'version-2',item_id:'item-a',version:2,created_at:date,payload:{analysis:'## Tesis guardada\nTexto del informe original.\n\n| Métrica | Valor |\n| --- | --- |\n| Margen preservado | 25% |',quarterlyData:[]},snapshot:snapshot(),settings:{},summary:null,summary_model:null,legacy_report_id:null},review:null,mailReady:false};}
 function review():ResearchReview{return {id:'review-a',item_id:'item-a',version_id:'version-2',created_at:date,current_snapshot:snapshot(110),diff:{fingerprint:'fingerprint',checkedAt:date,baselineAt:'2026-10-20T07:00:00Z',comparable:true,changes:[{id:'price',category:'price',label:'Precio del activo',importance:'medium',before:'100 USD',after:'110 USD',detail:'Variación desde la captura.'}],material:true,performance:[{symbol:'AAPL',returnPct:10,benchmark:'SPY',benchmarkReturnPct:2,currency:'USD',from:'2026-10-20',to:'2026-10-26'}],note:'Precios y períodos comparables.'},explanation:null,explanation_model:null,acknowledged_at:null};}
+function assessment():ResearchAssessment{return {schema:1,versionId:'version-2',asOf:new Date().toISOString(),originalAt:date,model:'test',recipe:'assessment-v1',quality:'partial',executiveReading:'La recurrencia del negocio sostiene su posición; la concentración exige seguimiento.',competitiveAdvantages:[{title:'Ingresos recurrentes',reading:'La base instalada facilita la continuidad comercial.',basis:'inference',confidence:'medium',evidence:[{id:'report:0',kind:'report',label:'Informe guardado',text:'Crecimiento del servicio.'}]}],strengths:[{title:'Crecimiento operativo',reading:'El nivel de ingresos respalda la escala comercial.',basis:'reported',confidence:'high',evidence:[{id:'metric:0',kind:'metric',label:'Datos guardados',text:'Ingresos verificados',metric:{id:'revenue',label:'Ingresos verificados',value:100,unit:'currency',currency:'USD',period:'2026-Q3',date:'2026-09-30'}}]}],weaknesses:[],risks:[],watchpoints:[],news:[],coverageNotes:['No se dispone de estimaciones actualizadas.']};}
 let detail:ResearchDetail;
 beforeEach(()=>{api.mockReset();detail=fixture();api.mockImplementation(async(action:string,body:any)=>{
  if(action==='researchList')return {items:[detail.item],mailReady:false};
  if(action==='researchGet')return body.versionId==='version-1'?{...detail,version:{...detail.version,id:'version-1',version:1,snapshot:{...snapshot(80),quality:'legacy'}}}:detail;
  if(action==='researchCheck')return review();
- if(action==='researchExplain')return {text:'Explicación bajo solicitud.',model:'test',cached:false};
- if(action==='researchSummary')return {summary:'Resumen conservado bajo solicitud.',model:'test',cached:false};
+ if(action==='researchAssess')return {assessment:assessment(),model:'test',cached:false};
+ if(action==='researchSummary')return {summary:'Resumen conservado bajo solicitud.',model:'test',cached:false,recipe:'summary-v2'};
  if(action==='researchMeta')return {...detail.item,...body,revision:8};
  if(action==='researchAcknowledge')return {...detail,review:{...review(),acknowledged_at:date}};
  if(action==='researchDelete'){detail={...detail,item:{...detail.item,deleted_at:date}};return detail.item;}
@@ -30,19 +31,19 @@ it('opens a frozen version with its original analysis and metric table without m
  await open();expect(screen.getByText('Margen preservado')).toBeVisible();expect(screen.getByText('25%')).toBeVisible();expect(screen.getByText('Descripción conservada.')).toBeVisible();
  expect(api.mock.calls.map(([action])=>action)).toEqual(['researchList','researchGet']);
  fireEvent.change(screen.getByRole('combobox',{name:'Versión guardada'}),{target:{value:'version-1'}});await screen.findByText(/Informe importado de la biblioteca anterior/);
- expect(api).toHaveBeenLastCalledWith('researchGet',{id:'item-a',versionId:'version-1'},expect.anything());expect(screen.getByRole('button',{name:'Comprobar cambios'})).toBeDisabled();
+ expect(api).toHaveBeenLastCalledWith('researchGet',{id:'item-a',versionId:'version-1'},expect.anything());expect(screen.getByRole('button',{name:'Evaluar informe'})).toBeEnabled();
 });
-it('checks changes explicitly, keeps saved data separate and generates explanation only when requested',async()=>{
- await open();fireEvent.click(screen.getByRole('tab',{name:'Actual'}));expect(screen.getByText(/La versión original permanece intacta/)).toBeVisible();expect(api.mock.calls.map(([action])=>action)).not.toContain('researchCheck');
- fireEvent.click(screen.getByRole('button',{name:'Comprobar cambios'}));await screen.findByText('Precio del activo');expect(screen.getByText('100 USD')).toBeVisible();expect(screen.getByText('110 USD')).toBeVisible();expect(api.mock.calls.map(([action])=>action)).not.toContain('researchExplain');
- fireEvent.click(screen.getByRole('button',{name:'Explicar cambios'}));await screen.findByText('Explicación bajo solicitud.');expect(api).toHaveBeenCalledWith('researchExplain',{id:'item-a',reviewId:'review-a'});
- fireEvent.click(screen.getByRole('tab',{name:'Guardado'}));expect(screen.getByText('Texto del informe original.')).toBeVisible();expect(screen.queryByText('110 USD')).toBeNull();
- fireEvent.click(screen.getByRole('tab',{name:'Actual'}));expect(screen.getAllByText('110')[0]).toBeVisible();
+it('replaces report comparison with an explicit version assessment and reuses the cached result',async()=>{
+ await open();expect(screen.queryByRole('tab',{name:'Actual'})).toBeNull();expect(screen.queryByRole('tab',{name:'Cambios'})).toBeNull();expect(screen.queryByRole('button',{name:'Comprobar cambios'})).toBeNull();
+ fireEvent.click(screen.getByRole('tab',{name:'Lectura estratégica'}));expect(api.mock.calls.map(([action])=>action)).not.toContain('researchAssess');expect(screen.getAllByRole('button',{name:'Evaluar informe'})).toHaveLength(2);
+ fireEvent.click(screen.getAllByRole('button',{name:'Evaluar informe'})[0]);await screen.findByText('Ingresos recurrentes');expect(screen.getByText('2026-Q3 · 2026-09-30')).toBeVisible();expect(api).toHaveBeenCalledWith('researchAssess',{id:'item-a',versionId:'version-2'},expect.objectContaining({signal:expect.any(AbortSignal)}));
+ fireEvent.click(screen.getByRole('tab',{name:'Informe'}));expect(screen.getByText('Texto del informe original.')).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Ver evaluación'}));expect(screen.getByText('Ingresos recurrentes')).toBeVisible();expect(api.mock.calls.filter(([action])=>action==='researchAssess')).toHaveLength(1);
+ expect(api.mock.calls.map(([action])=>action)).not.toContain('researchCheck');expect(api.mock.calls.map(([action])=>action)).not.toContain('researchExplain');
 });
-it('locks duplicate check actions while a review is in progress',async()=>{
- let resolve:(value:any)=>void=()=>{};const implementation=api.getMockImplementation()!;api.mockImplementation((action:string,body:any)=>action==='researchCheck'?new Promise(done=>resolve=done):implementation(action,body));
- await open();const button=screen.getByRole('button',{name:'Comprobar cambios'});fireEvent.click(button);fireEvent.click(button);expect(api.mock.calls.filter(([action])=>action==='researchCheck')).toHaveLength(1);
- await act(async()=>resolve(review()));await screen.findByText('Precio del activo');
+it('locks duplicate assessment actions while a request is in progress',async()=>{
+ let resolve:(value:any)=>void=()=>{};const implementation=api.getMockImplementation()!;api.mockImplementation((action:string,body:any)=>action==='researchAssess'?new Promise(done=>resolve=done):implementation(action,body));
+ await open();const button=screen.getByRole('button',{name:'Evaluar informe'});fireEvent.click(button);fireEvent.click(button);expect(api.mock.calls.filter(([action])=>action==='researchAssess')).toHaveLength(1);
+ await act(async()=>resolve({assessment:assessment(),model:'test',cached:false}));await screen.findByText('Ingresos recurrentes');
 });
 it('edits owner metadata using the current revision and keeps email unavailable without a configured sender',async()=>{
  await open();fireEvent.click(screen.getByRole('tab',{name:'Organización y tesis'}));expect(screen.getByLabelText('Avisos por correo de la cuenta')).toBeDisabled();fireEvent.change(screen.getByLabelText('Notas'),{target:{value:'Nueva decisión de seguimiento'}});fireEvent.click(screen.getByRole('button',{name:'Guardar organización y tesis'}));
@@ -62,13 +63,34 @@ it('soft-deletes and restores an investigation without a destructive delete endp
  fireEvent.click(screen.getByRole('button',{name:'Restaurar investigación'}));await screen.findByRole('button',{name:'Mover investigación a la papelera'});expect(api).toHaveBeenCalledWith('researchRestore',{id:'item-a'});
 });
 it('creates a summary only explicitly and opens the PDF window synchronously',async()=>{
- await open();expect(api.mock.calls.map(([action])=>action)).not.toContain('researchSummary');fireEvent.click(screen.getByRole('button',{name:'Crear resumen'}));await screen.findByText('Resumen de esta versión');expect(api).toHaveBeenCalledWith('researchSummary',{id:'item-a',versionId:'version-2'});
+ await open();expect(api.mock.calls.map(([action])=>action)).not.toContain('researchSummary');fireEvent.click(screen.getByRole('button',{name:'Crear resumen'}));await screen.findByText('Resumen de esta versión');expect(api).toHaveBeenCalledWith('researchSummary',{id:'item-a',versionId:'version-2'},expect.objectContaining({signal:expect.any(AbortSignal)}));expect(screen.getByRole('button',{name:'Resumen conservado'})).toBeDisabled();
  const popup={close:vi.fn()} as any,opened=vi.spyOn(window,'open').mockReturnValue(popup);fireEvent.click(screen.getByRole('button',{name:'Exportar dossier PDF'}));expect(opened).toHaveBeenCalledWith('','_blank');
  const pdf=await import('@/lib/researchPdf');await waitFor(()=>expect(pdf.downloadResearchDossier).toHaveBeenCalledWith(expect.objectContaining({version:expect.objectContaining({summary:'Resumen conservado bajo solicitud.'})}),popup));
 });
 it('does not expose an old account detail when its pending request completes after the account changed',async()=>{
  let resolve:(value:any)=>void=()=>{};api.mockImplementation((action:string)=>action==='researchList'?Promise.resolve({items:[detail.item],mailReady:false}):new Promise(done=>resolve=done));
  const view=render(<ResearchLibrary accountId="owner-a"/>);fireEvent.click(await screen.findByRole('button',{name:'Abrir Tesis Apple'}));view.rerender(<ResearchLibrary accountId="owner-b"/>);await act(async()=>resolve(detail));expect(screen.queryByText('Texto del informe original.')).toBeNull();expect(screen.queryByRole('tabpanel')).toBeNull();
+});
+it('never carries an assessment to a different report version',async()=>{
+ detail.assessment=assessment();await open();fireEvent.click(screen.getByRole('button',{name:'Ver evaluación'}));expect(screen.getByText('Ingresos recurrentes')).toBeVisible();
+ fireEvent.change(screen.getByRole('combobox',{name:'Versión guardada'}),{target:{value:'version-1'}});await screen.findByText(/Informe importado de la biblioteca anterior/);fireEvent.click(screen.getByRole('tab',{name:'Lectura estratégica'}));expect(screen.queryByText('Ingresos recurrentes')).toBeNull();expect(api.mock.calls.map(([action])=>action)).not.toContain('researchAssess');
+});
+it('cancels a pending assessment on an account change and discards a late response',async()=>{
+ let resolve:(value:any)=>void=()=>{};const implementation=api.getMockImplementation()!;api.mockImplementation((action:string,body:any)=>action==='researchAssess'?new Promise(done=>resolve=done):implementation(action,body));
+ const view=render(<ResearchLibrary accountId="owner-a"/>);fireEvent.click(await screen.findByRole('button',{name:'Abrir Tesis Apple'}));await screen.findByText('Texto del informe original.');fireEvent.click(screen.getByRole('button',{name:'Evaluar informe'}));
+ const signal=api.mock.calls.find(([action])=>action==='researchAssess')?.[2].signal as AbortSignal;view.rerender(<ResearchLibrary accountId="owner-b"/>);expect(signal.aborted).toBe(true);await act(async()=>resolve({assessment:assessment(),cached:false,model:'test'}));expect(screen.queryByText('Ingresos recurrentes')).toBeNull();
+});
+it('keeps a dated assessment visible while refreshing an expired result only on request',async()=>{
+ detail.assessment={...assessment(),asOf:'2026-01-01T07:00:00Z'};await open();fireEvent.click(screen.getByRole('tab',{name:'Lectura estratégica'}));expect(screen.getByText('Ingresos recurrentes')).toBeVisible();expect(api.mock.calls.map(([action])=>action)).not.toContain('researchAssess');fireEvent.click(screen.getByRole('button',{name:'Evaluar informe'}));await waitFor(()=>expect(api.mock.calls.filter(([action])=>action==='researchAssess')).toHaveLength(1));await screen.findByRole('button',{name:'Ver evaluación'});
+});
+it('offers to improve a legacy summary without regenerating it on opening',async()=>{
+ detail.version.summary_recipe='summary-v1';await open();expect(screen.getByRole('button',{name:'Mejorar resumen'})).toBeEnabled();expect(api.mock.calls.map(([action])=>action)).not.toContain('researchSummary');fireEvent.click(screen.getByRole('button',{name:'Mejorar resumen'}));await screen.findByRole('button',{name:'Resumen conservado'});
+});
+it('preserves pending-review acknowledgment without exposing report comparison',async()=>{
+ detail.review=review();detail.item.needs_review=true;await open();expect(screen.getByText('Revisión pendiente')).toBeVisible();expect(screen.queryByText('100 USD')).toBeNull();expect(screen.queryByText('110 USD')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Marcar como revisado'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'Marcar como revisado'})).toBeNull());expect(api).toHaveBeenCalledWith('researchAcknowledge',{id:'item-a',reviewId:'review-a'});
+});
+it('shows assessment failures without losing the report and permits a clean retry',async()=>{
+ const implementation=api.getMockImplementation()!;let attempts=0;api.mockImplementation((action:string,body:any)=>action==='researchAssess'&&attempts++===0?Promise.reject(new Error('Datos no disponibles temporalmente.')):implementation(action,body));await open();fireEvent.click(screen.getByRole('button',{name:'Evaluar informe'}));await screen.findByRole('alert');expect(screen.getByText('Datos no disponibles temporalmente.')).toBeVisible();fireEvent.click(screen.getByRole('tab',{name:'Informe'}));expect(screen.getByText('Texto del informe original.')).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Evaluar informe'}));await screen.findByText('Ingresos recurrentes');expect(screen.queryByRole('alert')).toBeNull();
 });
 it('renders an honest legacy coverage note and a partial snapshot without fabricating a baseline',()=>{
  render(<ResearchSnapshotView snapshot={{...snapshot(),quality:'legacy',assets:[],metrics:[],coverage:['Solo se conserva el texto original.']}} analysis="Texto antiguo"/>);expect(screen.getByText(/no dispone necesariamente de una captura histórica comparable/)).toBeVisible();expect(screen.getByText('Texto antiguo')).toBeVisible();expect(api).not.toHaveBeenCalled();

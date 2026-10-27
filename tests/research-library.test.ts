@@ -6,7 +6,9 @@ import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {handleResearchAction,readResearchDetail,ResearchError,type ResearchDependencies} from '../supabase/functions/analyze-ticker/research-library.ts';
 import {classify,readBody} from '../supabase/functions/analyze-ticker/beta-security.ts';
-import type {ResearchSnapshot,ResearchDiff} from '../supabase/functions/analyze-ticker/research-types.ts';
+import {RESEARCH_SUMMARY_RECIPE,type ResearchSnapshot,type ResearchDiff,type ResearchAssessment} from '../supabase/functions/analyze-ticker/research-types.ts';
+import {PRIMARY_REPORT_MODEL} from '../supabase/functions/analyze-ticker/report-models.ts';
+import {RESEARCH_ASSESSMENT_RECIPE} from '../supabase/functions/analyze-ticker/research-assessment.ts';
 
 const uid='22222222-2222-4222-8222-222222222222',other='33333333-3333-4333-8333-333333333333';
 const requestId='44444444-4444-4444-8444-444444444444';
@@ -14,9 +16,9 @@ const snapshot=(price=100):ResearchSnapshot=>({schema:1,kind:'ticker',subject:'N
 const saveBody=(extra:any={})=>({accountAction:'researchSave',requestId,kind:'ticker',subject:'NEW',payload:{analysis:'Original investment report.',quarterlyData:[]},...extra});
 
 test('research operations enforce paid-work budgets, strict identities and bounded bodies before providers run',async()=>{
- for(const body of [saveBody(),{accountAction:'researchCheck',id:uid},{accountAction:'researchSummary',id:uid,versionId:other},{accountAction:'researchExplain',id:uid,reviewId:other}])assert.equal(classify(body).request_class,'expensive');
+ for(const body of [saveBody(),{accountAction:'researchCheck',id:uid},{accountAction:'researchSummary',id:uid,versionId:other},{accountAction:'researchAssess',id:uid,versionId:other},{accountAction:'researchExplain',id:uid,reviewId:other}])assert.equal(classify(body).request_class,'expensive');
  for(const accountAction of ['researchList','researchGet','researchDelete','researchRestore'])assert.equal(classify({accountAction,id:uid}).request_class,'account');
- for(const body of [{...saveBody(),requestId:'wrong'},{...saveBody(),payload:{analysis:'a',quarterlyData:[],etfDeep:'ignored'},settings:{api_key:'bad'}},{...saveBody(),settings:{symbols:['AAPL',' aapl ']}},{accountAction:'researchGet',id:uid,versionId:'../secret'},{accountAction:'researchMagic',id:uid},{accountAction:'researchCheck',id:uid,marketData:true},{accountAction:'researchMeta',id:uid,expectedRevision:0},{accountAction:'researchMeta',id:uid,expectedRevision:1,next_review:'2026-02-30'},{accountAction:'researchSave',...saveBody(),payload:{analysis:'😀'.repeat(260000),quarterlyData:[]}}])assert.throws(()=>classify(body));
+ for(const body of [{...saveBody(),requestId:'wrong'},{...saveBody(),payload:{analysis:'a',quarterlyData:[],etfDeep:'ignored'},settings:{api_key:'bad'}},{...saveBody(),settings:{symbols:['AAPL',' aapl ']}},{accountAction:'researchGet',id:uid,versionId:'../secret'},{accountAction:'researchAssess',id:uid,versionId:'../secret'},{accountAction:'researchAssess',id:uid},{accountAction:'researchMagic',id:uid},{accountAction:'researchCheck',id:uid,marketData:true},{accountAction:'researchMeta',id:uid,expectedRevision:0},{accountAction:'researchMeta',id:uid,expectedRevision:1,next_review:'2026-02-30'},{accountAction:'researchSave',...saveBody(),payload:{analysis:'😀'.repeat(260000),quarterlyData:[]}}])assert.throws(()=>classify(body));
  const post=(body:unknown)=>new Request('https://example.test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
  await readBody(post(saveBody({payload:{analysis:'a'.repeat(600000),quarterlyData:[]}})));
  await assert.rejects(readBody(post({accountAction:'profile',notes:'a'.repeat(5000)})));
@@ -34,11 +36,13 @@ test('research PostgreSQL transactions preserve archives, versions, ownership an
  const legacyIds=[randomUUID(),randomUUID()],legacyPayload={analysis:'Historic AAPL report, unchanged.',quarterlyData:[],customArchiveField:{preserve:true}};
  await db.query("insert into public.beta_reports(id,user_id,kind,subject,payload,saved_at) values($1,$2,'ticker','AAPL',$3,'2026-10-20T12:00Z'),($4,$2,'ticker','aapl',$3,'2026-10-21T12:00Z')",[legacyIds[0],uid,JSON.stringify(legacyPayload),legacyIds[1]]);
  await db.exec(await readFile(new URL('../supabase/migrations/202610260002_research_library.sql',import.meta.url),'utf8'));
- let captures=0,price=100,aiCalls=0,captureFailure=false;
+ await db.exec("update public.beta_research_versions set summary='Previously generated summary',summary_model='old-model'");
+ await db.exec(await readFile(new URL('../supabase/migrations/202610270001_saved_assessment.sql',import.meta.url),'utf8'));
+ let captures=0,price=100,aiCalls=0,captureFailure=false,assessmentCalls=0,assessmentFailure=false;
  const calls:string[]=[];
  const service=async(path:string)=>{
   calls.push(path);const url=new URL('https://local/'+path),table=url.pathname.slice(1),params:any[]=[],conditions:string[]=[];
-  assert.ok(['beta_research_items','beta_research_versions','beta_research_reviews'].includes(table));assert.ok(url.searchParams.has('user_id'),'Every API table read must bind the owner');
+  assert.ok(['beta_research_items','beta_research_versions','beta_research_reviews','beta_research_assessments'].includes(table));assert.ok(url.searchParams.has('user_id'),'Every API table read must bind the owner');
   for(const[key,value]of url.searchParams)if(!['select','order','limit'].includes(key)){assert.match(key,/^[a-z_]+$/);assert.ok(value.startsWith('eq.'));params.push(value.slice(3));conditions.push(`${key}=$${params.length}`);}
   const select=url.searchParams.get('select')??'*';assert.match(select,/^(?:\*|[a-z_,]+)$/);
   const order=(url.searchParams.get('order')??'').split(',').filter(Boolean).map(value=>{assert.match(value,/^[a-z_]+\.(?:asc|desc)$/);return value.replace('.',' ');}).join(',');
@@ -54,12 +58,14 @@ test('research PostgreSQL transactions preserve archives, versions, ownership an
   const before=baseline.assets[0]?.price??0,after=current.assets[0]?.price??0,material=Math.abs(after-before)>=5;
   return {fingerprint:`price-${before}-${after}`,checkedAt:current.capturedAt,baselineAt:baseline.capturedAt,comparable:true,changes:material?[{id:'price',category:'price',label:'Precio',importance:'high',before:String(before),after:String(after),detail:'Actual price change.'}]:[],material,performance:[],note:''};
  };
- const deps:ResearchDependencies={service,rpc,env:key=>({GEMINI_API_KEY:'test-key',BRIEF_FROM:'terminal@example.com',BRIEF_RESEND_API_KEY:'test-mail'} as Record<string,string>)[key]??'',capture:async()=>{captures++;await Promise.resolve();if(captureFailure){captureFailure=false;throw new ResearchError(503,'Capture unavailable');}return snapshot(price);},compare,explain:async()=>{aiCalls++;return 'Only the stored differences.';},summarize:async()=>{aiCalls++;return 'Only the archived report.';}};
+ const assessmentFixture=(version:any,current:ResearchSnapshot):ResearchAssessment=>({schema:1,versionId:version.id,asOf:current.capturedAt,originalAt:version.created_at,model:PRIMARY_REPORT_MODEL,recipe:RESEARCH_ASSESSMENT_RECIPE,quality:'partial',executiveReading:'Lectura de las evidencias disponibles.',competitiveAdvantages:[],strengths:[],weaknesses:[],risks:[],watchpoints:[],news:[],coverageNotes:['Muestra de prueba; sin datos inventados.']});
+ const deps:ResearchDependencies={service,rpc,env:key=>({GEMINI_API_KEY:'test-key',BRIEF_FROM:'terminal@example.com',BRIEF_RESEND_API_KEY:'test-mail'} as Record<string,string>)[key]??'',capture:async()=>{captures++;await Promise.resolve();if(captureFailure){captureFailure=false;throw new ResearchError(503,'Capture unavailable');}return snapshot(price);},compare,explain:async()=>{aiCalls++;return 'Only the stored differences.';},summarize:async()=>{aiCalls++;return 'Only the archived report.';},assess:async(version,current)=>{assessmentCalls++;if(assessmentFailure){assessmentFailure=false;throw Error('Assessment unavailable');}return assessmentFixture(version,current);}};
  const action=async(body:any,userId=uid)=>{const response=await handleResearchAction(body,{id:userId},deps);assert.ok(response);return response!.json();};
  let detail:any;
  await t.test('legacy import groups subjects and preserves every original payload and save date without capture',async()=>{
   const result=await action({accountAction:'researchList'});assert.equal(result.items.length,1);assert.equal(result.items[0].latest_version,2);assert.equal(captures,0);
   const itemId=result.items[0].id,archived=await action({accountAction:'researchGet',id:itemId});assert.equal(archived.versions.length,2);assert.deepEqual(archived.version.payload,legacyPayload);assert.equal(archived.version.snapshot.quality,'legacy');assert.ok(archived.version.created_at.startsWith('2026-10-21'));assert.ok(archived.version.snapshot.capturedAt.startsWith('2026-10-21'));
+  assert.equal(archived.version.summary,null);assert.equal(archived.version.summary_recipe,'summary-v1');assert.equal((await db.query('select summary from public.beta_research_versions where id=$1',[archived.version.id])).rows[0].summary,'Previously generated summary');
   await action({accountAction:'researchList'});assert.equal((await db.query('select count(*) as n from public.beta_research_versions')).rows[0].n,2);assert.equal((await db.query('select count(*) as n from public.beta_reports')).rows[0].n,2);
  });
  await t.test('request claims prevent duplicate captures and versions during retries and reject reused IDs with different content',async()=>{
@@ -75,6 +81,7 @@ test('research PostgreSQL transactions preserve archives, versions, ownership an
   const legacy=(await action({accountAction:'researchList'})).items.find((row:any)=>row.kind==='ticker'&&row.subject==='AAPL'),legacyDetail=await action({accountAction:'researchGet',id:legacy.id});
   await assert.rejects(action({accountAction:'researchGet',id:detail.item.id,versionId:legacyDetail.version.id}),e=>(e as ResearchError).status===404);
   await assert.rejects(action({accountAction:'researchSummary',id:detail.item.id,versionId:legacyDetail.version.id}),e=>(e as ResearchError).status===404);
+  await assert.rejects(action({accountAction:'researchAssess',id:detail.item.id,versionId:legacyDetail.version.id}),e=>(e as ResearchError).status===404);assert.equal(assessmentCalls,0);
  });
  await t.test('independent save requests allocate atomic versions and metadata detects stale note edits',async()=>{
   const saved=await Promise.all([action(saveBody({requestId:randomUUID()})),action(saveBody({requestId:randomUUID()}))]);assert.deepEqual(saved.map(row=>row.version.version).sort(),[2,3]);detail=await action({accountAction:'researchGet',id:detail.item.id});
@@ -91,7 +98,10 @@ test('research PostgreSQL transactions preserve archives, versions, ownership an
   price=111;await action({accountAction:'researchCheck',id:detail.item.id});assert.equal((await db.query('select count(*) as n from public.beta_research_notifications')).rows[0].n,1);
   price=120;const latest=await action({accountAction:'researchCheck',id:detail.item.id});const notification=(await db.query('select notification_diff from public.beta_research_notifications where review_id=$1',[latest.id])).rows[0];assert.equal(notification.notification_diff.changes[0].before,'110');assert.equal(latest.diff.changes[0].before,'100');
   const explained=await action({accountAction:'researchExplain',id:detail.item.id,reviewId:latest.id});assert.equal(explained.cached,false);const cached=await action({accountAction:'researchExplain',id:detail.item.id,reviewId:latest.id});assert.equal(cached.cached,true);assert.equal(aiCalls,1);
+  await db.query("update public.beta_research_versions set summary='Old short summary',summary_model=$2,summary_recipe='summary-v1' where id=$1",[detail.version.id,PRIMARY_REPORT_MODEL]);
+  const oldSummary=await action({accountAction:'researchGet',id:detail.item.id});assert.equal(oldSummary.version.summary,null);assert.equal(oldSummary.version.summary_recipe,'summary-v1');
   const summary=await action({accountAction:'researchSummary',id:detail.item.id,versionId:detail.version.id});assert.equal(summary.cached,false);assert.equal((await action({accountAction:'researchSummary',id:detail.item.id,versionId:detail.version.id})).cached,true);assert.equal(aiCalls,2);
+  assert.equal((await action({accountAction:'researchGet',id:detail.item.id})).version.summary_recipe,RESEARCH_SUMMARY_RECIPE);
  });
  await t.test('monitor claims and mail claims are deduplicated without changing the personal review date',async()=>{
   const jobs=await rpc('beta_research_claim_due',{batch_size:5});assert.equal(jobs.length,1);assert.equal((await rpc('beta_research_claim_due',{batch_size:5})).length,0);
@@ -110,6 +120,31 @@ test('research PostgreSQL transactions preserve archives, versions, ownership an
   const body=saveBody({requestId:randomUUID()}),before=(await action({accountAction:'researchGet',id:detail.item.id})).versions.length;captureFailure=true;
   await assert.rejects(action(body),/Capture unavailable/);assert.equal((await action({accountAction:'researchGet',id:detail.item.id})).versions.length,before);
   const saved=await action(body);assert.equal(saved.versions.length,before+1);detail=saved;
+ });
+ await t.test('assessment checks ownership before paid IO, caches concurrent requests for24h and never rewrites the archive',async()=>{
+  const before=captures,original=JSON.stringify(detail.version);
+  await assert.rejects(action({accountAction:'researchAssess',id:detail.item.id,versionId:detail.version.id},other),e=>(e as ResearchError).status===404);assert.equal(captures,before);assert.equal(assessmentCalls,0);
+  const requests=await Promise.allSettled([action({accountAction:'researchAssess',id:detail.item.id,versionId:detail.version.id}),action({accountAction:'researchAssess',id:detail.item.id,versionId:detail.version.id})]);
+  assert.ok(requests.some(r=>r.status==='fulfilled'));assert.equal(captures,before+1);assert.equal(assessmentCalls,1);
+  const cached=await action({accountAction:'researchAssess',id:detail.item.id,versionId:detail.version.id});assert.equal(cached.cached,true);assert.equal(captures,before+1);assert.equal(assessmentCalls,1);assert.equal(cached.assessment.versionId,detail.version.id);
+  const reopened=await action({accountAction:'researchGet',id:detail.item.id});assert.deepEqual(reopened.assessment,cached.assessment);assert.equal(JSON.stringify(reopened.version),original);
+  await db.query("update public.beta_research_ai_cache set finished_at=now()-interval '25 hours' where kind='assessment' and target_id=$1",[detail.version.id]);
+  const refreshed=await action({accountAction:'researchAssess',id:detail.item.id,versionId:detail.version.id});assert.equal(refreshed.cached,false);assert.equal(captures,before+2);assert.equal(assessmentCalls,2);
+  assert.equal((await db.query('select count(*) as n from public.beta_research_assessments where version_id=$1',[detail.version.id])).rows[0].n,1);
+ });
+ await t.test('assessment failures release the lease, stale jobs cannot finish and revoked accounts cannot claim',async()=>{
+  await db.query("update public.beta_research_ai_cache set finished_at=now()-interval '25 hours' where kind='assessment' and target_id=$1",[detail.version.id]);
+  assessmentFailure=true;await assert.rejects(action({accountAction:'researchAssess',id:detail.item.id,versionId:detail.version.id}),/Assessment unavailable/);
+  assert.equal((await action({accountAction:'researchAssess',id:detail.item.id,versionId:detail.version.id})).cached,false);
+  const claimBody={kind:'assessment',target_id:detail.version.id,fingerprint:'a'.repeat(64),model:PRIMARY_REPORT_MODEL,recipe:RESEARCH_ASSESSMENT_RECIPE},job=await rpc('beta_research_write',{uid,operation:'ai_claim',data:claimBody});
+  await assert.rejects(rpc('beta_research_write',{uid,operation:'ai_claim',data:claimBody}),/BETA_RESEARCH_BUSY/);
+  await db.query("update public.beta_research_ai_cache set lease_until=now()-interval '1 minute' where id=$1",[job.id]);
+  const reclaimed=await rpc('beta_research_write',{uid,operation:'ai_claim',data:claimBody});assert.notEqual(reclaimed.token,job.token);
+  await assert.rejects(rpc('beta_research_write',{uid,operation:'ai_finish',data:{id:job.id,token:job.token,assessment:assessmentFixture(detail.version,snapshot()),current_snapshot:snapshot(),input_fingerprint:'b'.repeat(64)}}),/BETA_RESEARCH_CONFLICT/);
+  await db.query('update public.beta_profiles set revoked=true where id=$1',[uid]);
+  await assert.rejects(rpc('beta_research_write',{uid,operation:'ai_claim',data:claimBody}),/BETA_REVOKED/);
+  await db.query('update public.beta_profiles set revoked=false where id=$1',[uid]);
+  await rpc('beta_research_write',{uid,operation:'ai_fail',data:{id:reclaimed.id,token:reclaimed.token}});
  });
  await t.test('review retention preserves90 recent states and pending mail while original versions and legacy reports remain intact',async()=>{
   const current=await action({accountAction:'researchGet',id:detail.item.id});await action({accountAction:'researchMeta',id:detail.item.id,expectedRevision:current.item.revision,email_enabled:false});
@@ -131,7 +166,7 @@ test('research PostgreSQL transactions preserve archives, versions, ownership an
   assert.deepEqual(await rpc('beta_research_claim_due',{batch_size:5}),[]);
  });
  await t.test('anonymous and authenticated roles cannot access tables or RPC, and service cannot mutate versions directly',async()=>{
-  for(const role of ['anon','authenticated','service_role']){await db.exec('set role '+role);try{await assert.rejects(db.query("update public.beta_research_versions set summary='Direct write'"),/permission denied/);}finally{await db.exec('reset role');}}
-  for(const role of ['anon','authenticated']){await db.exec('set role '+role);try{await assert.rejects(db.query('select * from public.beta_research_items'),/permission denied/);await assert.rejects(db.query('select public.beta_research_list($1)',[uid]),/permission denied/);}finally{await db.exec('reset role');}}
+  for(const role of ['anon','authenticated','service_role']){await db.exec('set role '+role);try{await assert.rejects(db.query("update public.beta_research_versions set summary='Direct write'"),/permission denied/);await assert.rejects(db.query("update public.beta_research_assessments set model='Foreign update'"),/permission denied/);await assert.rejects(db.query("select public.beta_research_write_base($1,'meta','{}')",[uid]),/permission denied/);}finally{await db.exec('reset role');}}
+  for(const role of ['anon','authenticated']){await db.exec('set role '+role);try{await assert.rejects(db.query('select * from public.beta_research_items'),/permission denied/);await assert.rejects(db.query('select * from public.beta_research_assessments'),/permission denied/);await assert.rejects(db.query('select public.beta_research_list($1)',[uid]),/permission denied/);await assert.rejects(db.query("select public.beta_research_write($1,'meta','{}')",[uid]),/permission denied/);}finally{await db.exec('reset role');}}
  });
 });

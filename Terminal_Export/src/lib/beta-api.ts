@@ -11,7 +11,7 @@ export async function authenticatedFetch(url: string, init: RequestInit = {}) {
   return response;
 }
 export async function accountApi<T>(accountAction: string, body: Record<string, unknown> = {},options:{signal?:AbortSignal}={}): Promise<T> {
-  const deadline=AbortSignal.timeout(accountAction==='researchSave'?90000:['summarizeReport','researchCheck','researchExplain','researchSummary'].includes(accountAction)?85000:20000);
+  const deadline=AbortSignal.timeout(accountAction==='researchSave'?90000:['summarizeReport','researchCheck','researchExplain','researchSummary','researchAssess'].includes(accountAction)?85000:20000);
   const signal=options.signal?AbortSignal.any([options.signal,deadline]):deadline;
   const response = await authenticatedFetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`, { method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountAction,...body}),signal });
   const data = await response.json();

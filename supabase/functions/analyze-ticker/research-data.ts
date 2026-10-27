@@ -10,8 +10,10 @@ import {comparisonSeries} from './market-comparison.ts';
 import {risk} from './market-analytics.ts';
 import {createHash} from 'node:crypto';
 import {PRIMARY_REPORT_MODEL} from './report-models.ts';
+import {summarizeStoredResearch} from './research-summary.ts';
 import type {Article} from './panels.ts';
 import type {ResearchKind,ResearchSettings,ResearchPayload,ResearchMetric,ResearchSeries,ResearchSnapshot,ResearchChange,ResearchDiff,ResearchVersion} from './research-types.ts';
+export {RESEARCH_SUMMARY_RECIPE} from './research-types.ts';
 
 type Dependencies={insights:typeof assetInsights;issuer:typeof issuerResearch;fundamentals:typeof eodhdFundamentalRaw;history:typeof relativeHistory;peers:typeof sectorComparables;news:typeof eodhdNews;quote:typeof regularReportQuote;now:()=>number};
 const defaults:Dependencies={insights:assetInsights,issuer:issuerResearch,fundamentals:eodhdFundamentalRaw,history:relativeHistory,peers:sectorComparables,news:eodhdNews,quote:regularReportQuote,now:Date.now};
@@ -149,4 +151,4 @@ async function narrative(instruction:string,data:unknown,key:string,fetcher:type
  if(!r.ok){await r.body?.cancel();throw new Error('RESEARCH_AI_UNAVAILABLE');}const body=await r.json(),candidate=body.candidates?.[0],result=candidate?.content?.parts?.filter((p:any)=>!p.thought).map((p:any)=>p.text??'').join('').trim();if(candidate?.finishReason!=='STOP'||!result)throw new Error('RESEARCH_AI_UNAVAILABLE');return result.slice(0,16000);
 }
 export async function explainResearchChanges(diff:ResearchDiff,key:string):Promise<string>{return narrative('Explica los cambios materiales en 3–6 puntos precisos, separa hechos de implicaciones condicionales y termina con 2 comprobaciones concretas. No repitas métricas sin cambios. Si no hay cambios materiales, dilo. Indica las limitaciones de la comparación.',diff,key);}
-export async function summarizeResearchVersion(version:ResearchVersion,key:string):Promise<string>{const original=version.payload.analysis,analysis=original.length>44000?original.slice(0,32000)+'\n[Extracto: sección central omitida]\n'+original.slice(-12000):original;return narrative('Resume este informe guardado en una página: tesis central, evidencia cuantitativa fechada, riesgos y variables a vigilar. Diferencia el texto original de la instantánea capturada al guardar cuando sus fechas difieran. No uses datos actuales externos. Si el texto es un extracto, no presupongas el contenido omitido.',{date:version.created_at,kind:version.snapshot.kind,subject:version.snapshot.subject,analysis,assets:version.snapshot.assets.slice(0,10).map(a=>({...a,description:a.description?.slice(0,500)??null})),metrics:version.snapshot.metrics.slice(0,100),coverage:version.snapshot.coverage.slice(0,20)},key);}
+export async function summarizeResearchVersion(version:ResearchVersion,key:string):Promise<string>{return summarizeStoredResearch(version,key);}

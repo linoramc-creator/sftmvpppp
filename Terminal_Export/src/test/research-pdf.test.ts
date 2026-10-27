@@ -1,6 +1,6 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {downloadResearchDossier,renderResearchDossier} from '../lib/researchPdf';
-import {researchPdfFixture} from './research-pdf-fixture';
+import {researchPdfFixture,researchPdfAssessmentFixture} from './research-pdf-fixture';
 
 const parse=(html:string)=>new DOMParser().parseFromString(html,'text/html');
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
@@ -66,4 +66,30 @@ it('writes to the synchronously opened popup and prints once without embedding a
  const target={closed:false,focus:vi.fn(),print:vi.fn(),addEventListener:(name:string,callback:()=>void)=>{listeners[name]=callback;},document:{readyState:'complete',open:vi.fn(),write:(value:string)=>{html=value;},close:vi.fn()}} as unknown as Window;
  downloadResearchDossier(researchPdfFixture(),target);listeners.load();vi.runAllTimers();
  expect(target.print).toHaveBeenCalledTimes(1);expect(target.focus).toHaveBeenCalledTimes(1);expect(parse(html).querySelector('script')).toBeNull();
+});
+
+it('separates the dated strategic reading from the immutable report and hydrates structured metric evidence offline',()=>{
+ const request=vi.spyOn(globalThis,'fetch'),detail=researchPdfAssessmentFixture(),frozen=JSON.stringify(detail),doc=parse(renderResearchDossier(detail));
+ const strategic=[...doc.querySelectorAll('.dossier-section')].find(section=>section.querySelector('h2')?.textContent==='Lectura estratégica')!;
+ expect(strategic).toBeTruthy();expect(strategic.textContent).toContain('Informe original');expect(strategic.textContent).toContain('15 oct 2026');expect(strategic.textContent).toContain('27 oct 2026');
+ expect(strategic.textContent).toContain('Interpretación · Respaldo limitado');expect(strategic.textContent).toContain('Ventajas competitivas');expect(strategic.textContent).toContain('Noticias relevantes');expect(strategic.textContent).toContain('8,4 %');expect(strategic.textContent).toContain('TTM · 30 sept 2026');
+ expect(strategic.textContent).not.toContain('No utilizar este texto');expect(strategic.textContent).not.toContain('test-only-model');expect(strategic.textContent).not.toContain('https://example.test');
+ expect(doc.body.textContent).toContain('6,3 %');expect(doc.body.textContent).toContain('La lectura estratégica se presenta por separado');expect(doc.querySelectorAll('script,img,a[href],link[href],iframe,object,image,use')).toHaveLength(0);
+ expect(request).not.toHaveBeenCalled();expect(JSON.stringify(detail)).toBe(frozen);
+});
+
+it('omits a strategic reading that belongs to another archived version and does not create empty finding sections',()=>{
+ const detail=researchPdfAssessmentFixture();detail.assessment!.versionId='foreign-version';
+ expect(parse(renderResearchDossier(detail)).body.textContent).not.toContain('Lectura estratégica');
+ detail.assessment!.versionId=detail.version.id;detail.assessment!.quality='insufficient';detail.assessment!.competitiveAdvantages=[];detail.assessment!.strengths=[];detail.assessment!.risks=[];detail.assessment!.news=[];
+ const doc=parse(renderResearchDossier(detail));expect(doc.body.textContent).toContain('Lectura estratégica');expect(doc.body.textContent).not.toContain('Fortalezas financieras');expect(doc.body.textContent).not.toContain('Noticias relevantes');expect(doc.body.textContent).toContain('Alcance de la lectura');
+});
+
+it('escapes strategic findings and news and displays correlation and beta as coefficients rather than valuation multiples',()=>{
+ const detail=researchPdfAssessmentFixture(),attack='<img src="https://bad.example/track" onerror="alert(1)"><script>alert(1)</script>';
+ detail.assessment!.competitiveAdvantages[0].title=attack;detail.assessment!.competitiveAdvantages[0].reading=attack;detail.assessment!.competitiveAdvantages[0].evidence[0].text=attack;
+ detail.assessment!.news[0].title=attack;detail.assessment!.news[0].keyPoints=[attack];detail.assessment!.news[0].url='https://api.example.test/?api_key=SECRET';
+ detail.assessment!.strengths[0].evidence=[{id:'beta',kind:'metric',label:'Beta',text:'0,9 ×',metric:{id:'DEMO:beta',label:'Beta',value:.9,unit:'multiple',currency:null,period:'1 año',date:'2026-10-26'}},{id:'corr',kind:'metric',label:'Correlación',text:'0,78 ×',metric:{id:'pair:DEMO:SPY:correlation',label:'Correlación con S&P 500',value:.78,unit:'multiple',currency:null,period:'6 meses',date:'2026-10-26'}}];
+ const html=renderResearchDossier(detail),doc=parse(html);expect(doc.querySelectorAll('script,img,a[href],[onerror],[onload],foreignObject')).toHaveLength(0);expect(doc.body.textContent).toContain(attack);expect(html).not.toContain('api_key=SECRET');
+ expect(doc.body.textContent).toContain('0,9');expect(doc.body.textContent).toContain('0,78');expect(doc.body.textContent).not.toContain('0,9 ×');expect(doc.body.textContent).not.toContain('0,78 ×');
 });

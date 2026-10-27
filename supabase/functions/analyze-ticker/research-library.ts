@@ -1,16 +1,17 @@
 import {captureResearchSnapshot,compareResearchSnapshots,explainResearchChanges,summarizeResearchVersion} from './research-data.ts';
 import {PRIMARY_REPORT_MODEL} from './report-models.ts';
-import type {ResearchKind,ResearchPayload,ResearchSettings,ResearchSnapshot,ResearchItem,ResearchVersion,ResearchReview,ResearchDetail} from './research-types.ts';
+import {assessResearchVersion,RESEARCH_ASSESSMENT_MODEL,RESEARCH_ASSESSMENT_RECIPE} from './research-assessment.ts';
+import {RESEARCH_SUMMARY_RECIPE,type ResearchKind,type ResearchPayload,type ResearchSettings,type ResearchSnapshot,type ResearchItem,type ResearchVersion,type ResearchReview,type ResearchDetail,type ResearchAssessment} from './research-types.ts';
 
 type Body=Record<string,any>;
 type Service=(path:string,init?:RequestInit)=>Promise<any>;
 type Rpc=(name:string,body:Body)=>Promise<any>;
-export type ResearchDependencies={service:Service;rpc:Rpc;env:(key:string)=>string;capture?:typeof captureResearchSnapshot;compare?:typeof compareResearchSnapshots;explain?:typeof explainResearchChanges;summarize?:typeof summarizeResearchVersion};
+export type ResearchDependencies={service:Service;rpc:Rpc;env:(key:string)=>string;capture?:typeof captureResearchSnapshot;compare?:typeof compareResearchSnapshots;explain?:typeof explainResearchChanges;summarize?:typeof summarizeResearchVersion;assess?:typeof assessResearchVersion};
 export class ResearchError extends Error{status:number;constructor(status:number,message:string){super(message);this.status=status;}}
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SYMBOL=/^[A-Z0-9^][A-Z0-9.^=-]{0,24}$/;
-const ACTIONS=new Set(['researchList','researchGet','researchSave','researchMeta','researchCheck','researchExplain','researchSummary','researchAcknowledge','researchDelete','researchRestore']);
-const PAID=new Set(['researchSave','researchCheck','researchExplain','researchSummary']);
+const ACTIONS=new Set(['researchList','researchGet','researchSave','researchMeta','researchCheck','researchExplain','researchSummary','researchAssess','researchAcknowledge','researchDelete','researchRestore']);
+const PAID=new Set(['researchSave','researchCheck','researchExplain','researchSummary','researchAssess']);
 const META_TEXT={title:160,folder:80,thesis:6000,risks:6000,invalidation:6000,notes:16000} as const;
 const ITEM_FIELDS=['id','kind','subject','title','folder','tags','thesis','risks','invalidation','notes','next_review','monitor_enabled','email_enabled','status','revision','created_at','updated_at','latest_version','needs_review','last_checked_at','deleted_at'];
 const invalid=(text='Solicitud de biblioteca inválida.'):never=>{throw new ResearchError(400,text);};
@@ -59,7 +60,7 @@ export function researchRequestClass(body:Body):'account'|'expensive'|null{
  if(action==='researchSave')saveInput(body);
  else if(action==='researchMeta')metadata(body);
  else if(action==='researchList'){if(body.includeDeleted!==undefined&&typeof body.includeDeleted!=='boolean'||body.query!==undefined&&(typeof body.query!=='string'||body.query.length>120||/[\p{Cc}\p{Cf}]/u.test(body.query)))invalid();}
- else{id(body.id);if(action==='researchGet'&&body.versionId!==undefined)id(body.versionId);if(action==='researchSummary')id(body.versionId);if(['researchExplain','researchAcknowledge'].includes(action))id(body.reviewId);}
+ else{id(body.id);if(action==='researchGet'&&body.versionId!==undefined)id(body.versionId);if(['researchSummary','researchAssess'].includes(action))id(body.versionId);if(['researchExplain','researchAcknowledge'].includes(action))id(body.reviewId);}
  return PAID.has(action)?'expensive':'account';
 }
 function canonical(value:unknown):string{
@@ -74,7 +75,9 @@ async function ownItem(uid:string,itemId:string,deps:ResearchDependencies){
 }
 async function ownVersion(uid:string,itemId:string,versionId:string|undefined,deps:ResearchDependencies):Promise<ResearchVersion>{
  const rows=await deps.service(`beta_research_versions?user_id=eq.${uid}&item_id=eq.${id(itemId)}&${versionId?`id=eq.${id(versionId)}`:'order=version.desc'}&select=*&limit=1`);
- if(!rows?.length)throw new ResearchError(404,'Versión no encontrada.');const {user_id,summary_fingerprint,...version}=rows[0];return version;
+ if(!rows?.length)throw new ResearchError(404,'Versión no encontrada.');const {user_id,summary_fingerprint,...version}=rows[0];
+ if(version.summary_recipe!==RESEARCH_SUMMARY_RECIPE||version.summary_model!==PRIMARY_REPORT_MODEL)version.summary=null;
+ return version;
 }
 async function ownReview(uid:string,itemId:string,reviewId:string,deps:ResearchDependencies):Promise<ResearchReview>{
  const rows=await deps.service(`beta_research_reviews?id=eq.${id(reviewId)}&item_id=eq.${id(itemId)}&user_id=eq.${uid}&select=*&limit=1`);
@@ -82,11 +85,12 @@ async function ownReview(uid:string,itemId:string,reviewId:string,deps:ResearchD
 }
 export async function readResearchDetail(uid:string,itemId:string,versionId:string|undefined,deps:ResearchDependencies):Promise<ResearchDetail>{
  const item=await ownItem(uid,itemId,deps),version=await ownVersion(uid,itemId,versionId,deps);
- const [versions,reviews]=await Promise.all([
+ const [versions,reviews,assessments]=await Promise.all([
   deps.service(`beta_research_versions?user_id=eq.${uid}&item_id=eq.${item.id}&select=id,item_id,version,created_at,legacy_report_id&order=version.desc&limit=500`),
   deps.service(`beta_research_reviews?user_id=eq.${uid}&item_id=eq.${item.id}&version_id=eq.${version.id}&select=id,item_id,version_id,created_at,current_snapshot,diff,explanation,explanation_model,acknowledged_at&order=observed_at.desc,id.desc&limit=1`),
+  deps.service(`beta_research_assessments?user_id=eq.${uid}&item_id=eq.${item.id}&version_id=eq.${version.id}&model=eq.${RESEARCH_ASSESSMENT_MODEL}&recipe=eq.${RESEARCH_ASSESSMENT_RECIPE}&select=assessment&limit=1`),
  ]);
- return {item:cleanItem(item),versions,version,review:reviews?.[0]??null,mailReady:researchMailReady(deps.env)};
+ return {item:cleanItem(item),versions,version,review:reviews?.[0]??null,assessment:assessments?.[0]?.assessment??null,mailReady:researchMailReady(deps.env)};
 }
 export async function checkResearchItem(uid:string,itemId:string,deps:ResearchDependencies):Promise<ResearchReview>{
  const item=await ownItem(uid,itemId,deps);if(item.deleted_at)throw new ResearchError(409,'Restaura el análisis antes de revisarlo.');
@@ -95,14 +99,31 @@ export async function checkResearchItem(uid:string,itemId:string,deps:ResearchDe
  bounded(notificationDiff);return write(deps,uid,'review',{id:itemId,version_id:version.id,snapshot:current,diff,notification_diff:notificationDiff,notification_revision:item.notification_revision??0,notification_material:notificationDiff.material});
 }
 async function generate(uid:string,kind:'summary'|'explain',target:ResearchVersion|ResearchReview,deps:ResearchDependencies){
- const model=PRIMARY_REPORT_MODEL,hash=await fingerprint(kind==='summary'?{payload:(target as ResearchVersion).payload,snapshot:(target as ResearchVersion).snapshot,settings:(target as ResearchVersion).settings}:{diff:(target as ResearchReview).diff});
- const claim=await write(deps,uid,'ai_claim',{kind,target_id:target.id,fingerprint:hash,model});
+ const model=PRIMARY_REPORT_MODEL,recipe=kind==='summary'?RESEARCH_SUMMARY_RECIPE:'explain-v1',hash=await fingerprint(kind==='summary'?{recipe,payload:(target as ResearchVersion).payload,snapshot:(target as ResearchVersion).snapshot,settings:(target as ResearchVersion).settings}:{recipe,diff:(target as ResearchReview).diff});
+ const claim=await write(deps,uid,'ai_claim',{kind,target_id:target.id,fingerprint:hash,model,recipe});
  if(claim.state==='ready')return {text:claim.text,cached:true,model};
  try{
   const key=deps.env('GEMINI_API_KEY')||deps.env('Gemini')||deps.env('GOOGLE_API_KEY');if(!key)throw new ResearchError(503,'La generación con IA no está disponible ahora.');
   const text=kind==='summary'?await (deps.summarize??summarizeResearchVersion)(target as ResearchVersion,key):await (deps.explain??explainResearchChanges)((target as ResearchReview).diff,key);
   if(typeof text!=='string'||!text.trim()||text.length>20000)throw new ResearchError(503,'No se ha podido completar el texto.');
   await write(deps,uid,'ai_finish',{id:claim.id,token:claim.token,text});return {text,cached:false,model};
+ }catch(error){try{await write(deps,uid,'ai_fail',{id:claim.id,token:claim.token});}catch{}throw error;}
+}
+async function assess(uid:string,item:Body,version:ResearchVersion,deps:ResearchDependencies){
+ const model=RESEARCH_ASSESSMENT_MODEL,recipe=RESEARCH_ASSESSMENT_RECIPE;
+ const hash=await fingerprint({recipe,payload:version.payload,snapshot:version.snapshot,settings:version.settings});
+ // Ownership, the per-version lease and the 24-hour cache are checked before
+ // any fresh provider or model call. The archived report remains immutable.
+ const claim=await write(deps,uid,'ai_claim',{kind:'assessment',target_id:version.id,fingerprint:hash,model,recipe});
+ if(claim.state==='ready')return {assessment:claim.assessment as ResearchAssessment,cached:true,model};
+ try{
+  const key=deps.env('GEMINI_API_KEY')||deps.env('Gemini')||deps.env('GOOGLE_API_KEY');if(!key)throw new ResearchError(503,'La evaluación no está disponible ahora.');
+  const current=await (deps.capture??captureResearchSnapshot)(item.kind,item.subject,version.settings,version.payload);bounded(current);
+  const assessment=await (deps.assess??assessResearchVersion)(version,current,key);bounded(assessment,128000);
+  if(!object(assessment)||assessment.schema!==1||assessment.versionId!==version.id||assessment.model!==model||assessment.recipe!==recipe||assessment.asOf!==current.capturedAt||assessment.originalAt!==version.created_at||!['complete','partial','insufficient'].includes(assessment.quality)||typeof assessment.executiveReading!=='string'||!['competitiveAdvantages','strengths','weaknesses','risks','watchpoints','news','coverageNotes'].every(field=>Array.isArray((assessment as unknown as Body)[field])))throw new ResearchError(503,'La evaluación no se ha podido completar.');
+  const inputHash=await fingerprint({recipe,versionId:version.id,snapshot:current});
+  await write(deps,uid,'ai_finish',{id:claim.id,token:claim.token,assessment,current_snapshot:current,input_fingerprint:inputHash});
+  return {assessment,cached:false,model};
  }catch(error){try{await write(deps,uid,'ai_fail',{id:claim.id,token:claim.token});}catch{}throw error;}
 }
 export async function handleResearchAction(body:Body,user:{id:string;email?:string},deps:ResearchDependencies):Promise<Response|null>{
@@ -129,6 +150,10 @@ export async function handleResearchAction(body:Body,user:{id:string;email?:stri
  }
  if(action==='researchSummary'){
   await ownItem(uid,body.id,deps);const version=await ownVersion(uid,body.id,body.versionId,deps),result=await generate(uid,'summary',version,deps);return json({summary:result.text,cached:result.cached,model:result.model});
+ }
+ if(action==='researchAssess'){
+  const item=await ownItem(uid,body.id,deps);if(item.deleted_at)throw new ResearchError(409,'Restaura el análisis antes de evaluarlo.');
+  const version=await ownVersion(uid,body.id,body.versionId,deps);return json(await assess(uid,item,version,deps));
  }
  if(action==='researchAcknowledge'){const result=await write(deps,uid,'acknowledge',{id:body.id,review_id:body.reviewId});return json(await readResearchDetail(uid,result.item_id,result.version_id,deps));}
  return json(await write(deps,uid,action==='researchDelete'?'delete':'restore',{id:body.id}));
