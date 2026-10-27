@@ -1,6 +1,6 @@
 import {fireEvent,render,screen,within} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
-import {NewsCards,articleSource} from '../components/FeedCards';
+import {NewsCards,EarningsList,articleSource} from '../components/FeedCards';
 import {FeedView,NewsView} from '../components/MarketPanels';
 import type {Article} from '../../../supabase/functions/analyze-ticker/panels';
 
@@ -85,6 +85,20 @@ it('opens an earnings asset through the same selection handler as the watchlist'
  expect(select).toHaveBeenLastCalledWith('MSFT');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de AAPL'}));
  expect(select).toHaveBeenLastCalledWith('AAPL');
+});
+
+it('preserves the selected earnings event and date for the dedicated preview when available',()=>{
+ const select=vi.fn(),eventSelect=vi.fn(),event={symbol:'GOOGL',date:'2026-10-28',session:'Después del cierre',eps:2.94,revenue:null};
+ render(<EarningsList events={[event]} onSelect={select} onSelectEvent={eventSelect}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de GOOGL · resultados 2026-10-28'}));
+ expect(eventSelect).toHaveBeenCalledWith(event);expect(select).not.toHaveBeenCalled();
+});
+
+it('routes an earnings click with its date while watchlist clicks retain the regular detail route',async()=>{
+ api.mockImplementation(async(_url:string,init:RequestInit)=>{const panel=JSON.parse(init.body as string).panel;return {ok:true,json:async()=>panel==='feedMarkets'?{groups:[],treasury:[],earnings:[{symbol:'MSFT',date:'2026-10-20',session:'Después del cierre',eps:3.1}],fetchedAt:'2026-10-15T10:00:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-15T10:00:00Z'}};});
+ const select=vi.fn(),earnings=vi.fn();render(<FeedView stocks={['AAPL']} data={null} onChange={vi.fn()} onSelect={select} onEarningsSelect={earnings}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'Abrir ficha de MSFT · resultados 2026-10-20'}));expect(earnings).toHaveBeenCalledWith('MSFT','2026-10-20');expect(select).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de AAPL'}));expect(select).toHaveBeenCalledWith('AAPL');expect(earnings).toHaveBeenCalledTimes(1);
 });
 
 it('uses the same article cards and a single source footer for ticker and sector report news',async()=>{

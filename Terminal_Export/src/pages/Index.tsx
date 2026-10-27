@@ -291,7 +291,9 @@ const Index = () => {
 
 
   const [watchSymbol,setWatchSymbol]=useState("");
-  const openWatchAsset=(symbol:string)=>{setWatchSymbol(symbol);setNavTab("seguimiento");};
+  const [earningsDate,setEarningsDate]=useState<string|undefined>();
+  const openWatchAsset=(symbol:string)=>{setWatchSymbol(symbol);setEarningsDate(undefined);setNavTab("seguimiento");};
+  const openEarningsAsset=(symbol:string,date:string)=>{setWatchSymbol(symbol);setEarningsDate(date);setNavTab("seguimiento");};
   const [marketSymbol,setMarketSymbol]=useState('');
   const openMarketAsset=(symbol:string)=>{setMarketSymbol(symbol);setNavTab('mercado');};
 
@@ -618,9 +620,9 @@ const Index = () => {
 
       {/* ── TICKER tab ──────────────────────────────────────────────── */}
       <KeepPanel active={navTab === "bonos"}><Suspense fallback={<div role="status" className="mx-auto my-6 h-64 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse" aria-label="Cargando bonos y créditos"/>}><BondsCreditView /></Suspense></KeepPanel>
-      <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} onMarketSelect={openMarketAsset} watchlistReady={watchlistReady} watchlistError={watchlistError} onRetryWatchlist={()=>setWatchlistRetry(n=>n+1)} tickerReady={marketData!==null&&marketDataKey===customStocks.join(',')}/></main></KeepPanel>
+      <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} onMarketSelect={openMarketAsset} onEarningsSelect={openEarningsAsset} watchlistReady={watchlistReady} watchlistError={watchlistError} onRetryWatchlist={()=>setWatchlistRetry(n=>n+1)} tickerReady={marketData!==null&&marketDataKey===customStocks.join(',')}/></main></KeepPanel>
       <KeepPanel active={navTab === "brief"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo brief…</p>}><DailyBrief watchlist={customStocks} syncWatchlist={()=>persistWatchlist(customStocks)}/></Suspense></KeepPanel>
-      <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol} symbol={watchSymbol} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol+":"+(earningsDate??"watch")} symbol={watchSymbol} earningsDate={earningsDate} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "mercado"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo sesión de mercado…</p>}><MarketInstrumentDetail key={marketSymbol} symbol={marketSymbol} onBack={()=>setNavTab('feed')} onSelect={openMarketAsset}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo comparación…</p>}><UnifiedComparison /></Suspense></KeepPanel>
       <KeepPanel active={navTab === "ticker"}>

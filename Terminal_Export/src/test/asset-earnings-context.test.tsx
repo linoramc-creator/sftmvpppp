@@ -1,0 +1,21 @@
+import {act,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {beforeEach,expect,it,vi} from 'vitest';
+import AssetDetail from '../components/AssetDetail';
+const api=vi.hoisted(()=>vi.fn());
+vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api}));
+vi.mock('../components/AssetOverview',()=>({default:()=> <div>Resumen del activo conservado</div>}));
+vi.mock('../components/AssetSession',()=>({default:()=> <div>Sesión conservada</div>}));
+vi.mock('../components/charts/InstrumentPriceChart',()=>({InstrumentPriceChart:()=> <div>Velas conservadas</div>}));
+vi.mock('../components/AssetContext',()=>({default:()=> <div>Contexto conservado</div>}));
+vi.mock('../components/AssetInsightsPanel',()=>({default:()=> <div>Fundamentales conservados</div>}));
+vi.mock('../components/EarningsPreview',()=>({default:({symbol,eventDate,revision}:{symbol:string;eventDate:string;revision:number})=><div data-testid="earnings-preview" data-symbol={symbol} data-date={eventDate} data-revision={revision}>Previa de resultados</div>}));
+const props={stocks:['MSFT','AAPL'],onSelect:vi.fn(),onBack:vi.fn(),onAnalyze:vi.fn()};
+beforeEach(()=>{api.mockReset();api.mockImplementation(async(_url,init)=>{const body=JSON.parse(init.body);return {ok:true,json:async()=>({symbol:body.subject,name:body.subject,currency:'USD',news:[],newsWindowDays:1,fetchedAt:new Date().toISOString()})};});});
+it('adds the earnings preview above existing charts, fundamentals and news for an earnings selection',async()=>{
+ await act(async()=>{render(<AssetDetail {...props} symbol="MSFT" earningsDate="2026-10-28"/>);});
+ expect(screen.getByTestId('earnings-preview')).toHaveAttribute('data-symbol','MSFT');expect(screen.getByTestId('earnings-preview')).toHaveAttribute('data-date','2026-10-28');
+ for(const label of ['Resumen del activo conservado','Velas conservadas','Contexto conservado','Fundamentales conservados'])expect(screen.getByText(label)).toBeVisible();
+ await screen.findByText('Sesión conservada');expect(screen.getByRole('heading',{name:/Noticias del activo/})).toBeVisible();
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Actualizar ficha'})).toBeEnabled());await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Actualizar ficha'}));});expect(screen.getByTestId('earnings-preview')).toHaveAttribute('data-revision','1');
+});
+it('removes earnings context on a regular watchlist selection and leaves the rest of the detail intact',async()=>{const view=render(<AssetDetail {...props} symbol="MSFT" earningsDate="2026-10-28"/>);await act(async()=>{view.rerender(<AssetDetail {...props} symbol="AAPL"/>);});expect(screen.queryByTestId('earnings-preview')).toBeNull();expect(screen.getByText('Velas conservadas')).toBeVisible();});

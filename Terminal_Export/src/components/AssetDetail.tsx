@@ -3,6 +3,7 @@ import {InstrumentPriceChart} from './charts/InstrumentPriceChart';
 import AssetOverview from './AssetOverview';
 import AssetInsightsPanel from './AssetInsightsPanel';
 import AssetSession from './AssetSession';
+import EarningsPreview from './EarningsPreview';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowLeft,RefreshCw} from 'lucide-react';
 import {authenticatedFetch} from '@/lib/beta-api';
@@ -11,7 +12,7 @@ import type {AssetSnapshot} from '../../../supabase/functions/analyze-ticker/ass
 import type {InstrumentKind} from '../../../supabase/functions/analyze-ticker/asset-instrument';
 
 const memory=new Map<string,AssetSnapshot>();
-export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{symbol:string;stocks:string[];onSelect:(s:string)=>void;onBack:()=>void;onAnalyze:(s:string,kind?:InstrumentKind)=>void}){
+export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze,earningsDate}:{symbol:string;stocks:string[];onSelect:(s:string)=>void;onBack:()=>void;onAnalyze:(s:string,kind?:InstrumentKind)=>void;earningsDate?:string}){
   const [data,setData]=useState<AssetSnapshot|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[revision,setRevision]=useState(0);
   const appliedRevision=useRef(0);
   useEffect(()=>{
@@ -43,6 +44,7 @@ export default function AssetDetail({symbol,stocks,onSelect,onBack,onAnalyze}:{s
     </div>
     <AssetOverview symbol={symbol} data={data} busy={busy} onAnalyze={()=>onAnalyze(symbol,data?.instrument?.kind)}/>
     {data&&<AssetSession data={data}/>}
+    {earningsDate&&<EarningsPreview key={symbol+':'+earningsDate} symbol={symbol} eventDate={earningsDate} revision={revision}/>}
     {error&&<div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/5 px-5 py-4 text-sm text-rose-300">{error}<button type="button" disabled={busy} className="text-xs font-medium underline underline-offset-4" onClick={()=>setRevision(n=>n+1)}>Reintentar</button></div>}
     <InstrumentPriceChart key={symbol+'chart'} ticker={symbol}/>
     <AssetContext key={symbol+'context'} symbol={symbol}/>

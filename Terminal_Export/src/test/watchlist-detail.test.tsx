@@ -4,6 +4,7 @@ import {WatchlistCard} from '../components/WatchlistCard';
 import AssetDetail from '../components/AssetDetail';
 const api=vi.hoisted(()=>vi.fn());
 vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api}));
+vi.mock('../components/AuthGate',()=>({useProfile:()=>({id:'watchlist-detail-test'})}));
 vi.mock('../components/AssetAlerts',()=>({default:()=>null}));
 vi.mock('../components/AssetContext',()=>({default:()=>null}));
 vi.mock('../components/AssetInsightsPanel',()=>({default:()=>null}));

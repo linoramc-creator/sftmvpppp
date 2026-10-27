@@ -24,6 +24,7 @@ import {eodhdChart,eodhdQuote} from './eodhd-market.ts';
 import {mergeEodhdPriority} from './eodhd-client.ts';
 import {eodhdTreasury} from './eodhd-bonds.ts';
 import {issuerResearch} from './issuer-research.ts';
+import {earningsPreview} from './earnings-preview.ts';
 import {sectorActivity} from './sector-activity.ts';
 import {discoverTickerPeers,loadComparableCompanies,peerRowsForReport,sectorComparables} from './sector-comparables.ts';
 import { massiveContext } from './massive-news.ts';
@@ -3993,6 +3994,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       if(body.panel==='instrumentSearch')return panelJson(await resolveInstrument(body.query,{type:body.kind}));
       const deps = { summary: eYahooQuoteSummary };
       if(body.panel==='issuerResearch')return panelJson(await issuerResearch(String(body.subject).trim().toUpperCase()));
+      if(body.panel==='earningsPreview')return panelJson(await earningsPreview(String(body.subject).trim().toUpperCase(),body.eventDate,env));
       if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));
       if(body.panel === "regularQuote") return panelJson(await regularReportQuote(String(body.subject).trim().toUpperCase()));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
