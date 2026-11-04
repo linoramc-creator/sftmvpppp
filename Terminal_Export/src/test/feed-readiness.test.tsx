@@ -21,9 +21,9 @@ it('loads news immediately but waits for personal watchlist, its actual market r
  mounted.rerender(view(true,true));
  await waitFor(()=>expect(report).toHaveBeenLastCalledWith('entry-person-one',0,{status:'ready',detail:'Tu feed está preparado.'}));
  mounted.rerender(<TerminalEntryProvider value={{...entry,sessionId:'entry-person-two'}}><FeedView stocks={['ENTRY-B']} data={null} onChange={vi.fn()} onSelect={vi.fn()} watchlistReady tickerReady/></TerminalEntryProvider>);
- await waitFor(()=>expect(requests).toHaveLength(3));
+ await waitFor(()=>expect(requests.filter(request=>request.panel==='feedMarkets')).toHaveLength(2));
  const secondCalls=report.mock.calls.filter(([id])=>id==='entry-person-two');
  expect(secondCalls.some(([, ,state]:[string,number,FeedReadiness])=>state.status==='ready')).toBe(false);
- await act(async()=>requests[2].resolve({ok:false}));
+ await act(async()=>requests.filter(request=>request.panel==='feedMarkets')[1].resolve({ok:false}));
  await waitFor(()=>expect(report).toHaveBeenLastCalledWith('entry-person-two',0,{status:'error',detail:'No se han podido cargar los datos de mercado.'}));
 });

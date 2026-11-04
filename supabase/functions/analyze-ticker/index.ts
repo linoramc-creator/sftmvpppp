@@ -13,7 +13,7 @@ import { sharedFeed } from './feed-cache.ts';
 import { sectorFundamentalsContext } from './sector-fundamentals.ts';
 import {resolveInstrument} from './instrument-resolver.ts';
 import {createReportCompletion,observeReportCompletion,reportCompleted} from './report-completion.ts';
-import {relativeComparison,type RelativeDependencies} from './relative-comparison.ts';
+import {relativeComparison,relativeHistory,type RelativeDependencies} from './relative-comparison.ts';
 import {marketComparison} from './market-comparison.ts';
 import {marketPulse} from './market-pulse.ts';
 import {MARKET_REFERENCES} from './market-references.ts';
@@ -25,6 +25,10 @@ import {mergeEodhdPriority} from './eodhd-client.ts';
 import {eodhdTreasury} from './eodhd-bonds.ts';
 import {issuerResearch} from './issuer-research.ts';
 import {earningsPreview} from './earnings-preview.ts';
+import {loadStockResearchRadar} from './stock-research-radar.ts';
+import {sharedStockRadar} from './stock-radar-cache.ts';
+import {createStockRadarFallback} from './stock-radar-fallback.ts';
+import {radarFmpRead} from './stock-radar-providers.ts';
 import {sectorActivity} from './sector-activity.ts';
 import {discoverTickerPeers,loadComparableCompanies,peerRowsForReport,sectorComparables} from './sector-comparables.ts';
 import { massiveContext } from './massive-news.ts';
@@ -230,9 +234,14 @@ function yfCacheSet(key: string, data: unknown): void {
 
 let yfAuth: { cookie: string; crumb: string; ts: number } | null = null;
 const YF_AUTH_TTL = 25 * 60 * 1000;
+let yfAuthPending:Promise<{cookie:string;crumb:string}|null>|null=null;
 
 async function yfGetAuth(): Promise<{ cookie: string; crumb: string } | null> {
   if (yfAuth && Date.now() - yfAuth.ts < YF_AUTH_TTL) return yfAuth;
+  if(yfAuthPending)return yfAuthPending;
+  yfAuthPending=loadYfAuth().finally(()=>{yfAuthPending=null;});return yfAuthPending;
+}
+async function loadYfAuth():Promise<{cookie:string;crumb:string}|null>{
   try {
     const readCookies = (r: Response | null): string => {
       if (!r) return "";
@@ -3995,6 +4004,10 @@ Deno.serve((req) => secureRequest(req, async (body) => {
       const deps = { summary: eYahooQuoteSummary };
       if(body.panel==='issuerResearch')return panelJson(await issuerResearch(String(body.subject).trim().toUpperCase()));
       if(body.panel==='earningsPreview')return panelJson(await earningsPreview(String(body.subject).trim().toUpperCase(),body.eventDate,env));
+      if(body.panel==='stockResearchRadar'){
+        const result=await sharedStockRadar(()=>loadStockResearchRadar({fallback:createStockRadarFallback({summary:eYahooQuoteSummaryFallback,timeseries:yfFundamentalsTimeseries,history:relativeHistory,fmpRead:(path,query)=>radarFmpRead(env.FMP_KEY,path,query)})}));
+        return new Response(JSON.stringify(result.data),{status:result.status,headers:{...corsHeaders,'Content-Type':'application/json',...(result.status===202?{'Retry-After':'8'}:{})}});
+      }
       if(body.panel === "extendedHours") return panelJson(await extendedHours(String(body.subject).trim().toUpperCase(),env.MASSIVE_API_KEY,eYahooQuoteSummary));
       if(body.panel === "regularQuote") return panelJson(await regularReportQuote(String(body.subject).trim().toUpperCase()));
       if(body.panel === "assetContext") return panelJson(await assetContext(String(body.subject).trim().toUpperCase(),body.benchmark,env,eYahooQuoteSummary));
@@ -4020,7 +4033,7 @@ Deno.serve((req) => secureRequest(req, async (body) => {
         const symbols=body.symbols.map((s:string)=>s.trim().toUpperCase());
         return panelJson(body.panel==='marketComparison'?await marketComparison(symbols,body.range??'6m',body.includeAnalysis===true,env,relativeDeps):await relativeComparison(symbols as [string,string],body.includeAi===true,env,relativeDeps));
       }
-      if (body.panel === "feedMarkets") {const symbols=feedSymbols(body.subject)!,groups=normalizeFeedPreferences(body.feedGroups)!;return panelJson(await sharedFeed(await feedPreferencesKey(symbols,groups),()=>feedMarketsPanel(env,symbols,groups),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));}
+      if (body.panel === "feedMarkets") {const symbols=feedSymbols(body.subject)!,groups=normalizeFeedPreferences(body.feedGroups)!;return panelJson(await sharedFeed(await feedPreferencesKey(symbols,groups),()=>feedMarketsPanel(env,symbols,groups,false),{ttlMs:45000,maxStaleMs:90000,staleWhileRevalidate:false}));}
       if (body.panel === "feedNews") return panelJson(await sharedFeed("feed-news-v8",()=>marketFeedPanel(env,"news")));
       if (body.panel === "feed") return panelJson(await sharedFeed("feed-all-v11",()=>marketFeedPanel(env)));
       if (body.panel === "bonds") return panelJson(await bondsPanel(env, deps));

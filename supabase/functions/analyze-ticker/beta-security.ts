@@ -55,7 +55,7 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel==='correlation'&&body.range!==undefined&&!['1m','3m','6m','1y'].includes(body.range))throw new BetaError(400,'Ventana inválida.');
   const symbol = (v: unknown) => typeof v==='string'&&SYMBOL.test(v.trim().toUpperCase());
   if(body.ticker!==undefined&&!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');
-  if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>(body.accountAction==='researchSave'?120:80)))throw new BetaError(400,'Activo inválido.');
+  if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews','stockResearchRadar'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>(body.accountAction==='researchSave'?120:80)))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction){
     const research=researchRequestClass(body);if(research)return {request_class:research};
     if(body.accountAction==='saveFeedPreferences'&&(!body.groups||!normalizeFeedPreferences(body.groups)))throw new BetaError(400,'Configuración de mercado inválida.');
@@ -65,7 +65,11 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
     if(body.panel==='feedMarkets'&&(body.feedGroups===null||!normalizeFeedPreferences(body.feedGroups)))throw new BetaError(400,'Configuración de mercado inválida.');
-    if(!['feed','feedMarkets','feedNews','bonds','bondsCredit','bondsCreditNews','issuerResearch','earningsPreview','instrumentSearch','sectorActivity','sectorComparables','news','institutional','business','assetSnapshot','assetCandles','assetInsights','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','stockResearchRadar','bonds','bondsCredit','bondsCreditNews','issuerResearch','earningsPreview','instrumentSearch','sectorActivity','sectorComparables','news','institutional','business','assetSnapshot','assetCandles','assetInsights','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(body.panel==='stockResearchRadar'){
+      if(Object.keys(body).some(key=>!['panel','subject'].includes(key))||body.subject!==undefined&&body.subject!=='')throw new BetaError(400,'Consulta de radar inválida.');
+      return {request_class:'data'};
+    }
     if(body.panel==='earningsPreview'){
       if(!symbol(body.subject)||body.eventDate!==undefined&&(typeof body.eventDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(body.eventDate)||!Number.isFinite(Date.parse(body.eventDate))||new Date(body.eventDate).toISOString().slice(0,10)!==body.eventDate))throw new BetaError(400,'Publicación de resultados inválida.');
       return {request_class:'expensive'};

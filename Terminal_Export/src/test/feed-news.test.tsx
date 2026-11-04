@@ -8,6 +8,7 @@ const api=vi.hoisted(()=>vi.fn());
 vi.mock('@/lib/beta-api',()=>({authenticatedFetch:api,accountApi:async()=>({groups:(await import('../../../supabase/functions/analyze-ticker/feed-preferences')).defaultFeedPreferences()})}));
 vi.mock('@/components/AuthGate',()=>({useProfile:()=>({id:'feed-news-user'})}));
 const story:Article={title:'La empresa amplía su capacidad - Reuters',url:'https://www.reuters.com/business/example',source:'Reuters',date:'2026-10-15',image:'https://images.example.test/economy-factory.jpg',excerpt:'La empresa anunció una nueva fábrica. La inversión asciende a 100 millones.',keyPoints:['La empresa anunció una nueva fábrica.','La inversión asciende a 100 millones.']};
+const radarFixture=()=>({fetchedAt:'2026-11-03T08:00:00Z',asOf:'2026-11-03T08:00:00Z',horizonMonths:6,status:'partial',universe:{label:'Muestra de prueba',size:18,screened:18,coverage:'Selección acotada.'},methodology:{selection:'Cuentas verificadas',criteria:['Caja positiva']},coverageNotes:[],candidates:[{symbol:'MSFT',name:'Microsoft',sector:'Technology',asOf:'2026-11-02',category:'Calidad y crecimiento',evidenceCount:1,metrics:[],reasons:['La muestra mantiene caja positiva.'],risks:['La valoración requiere seguimiento.'],watchpoints:['Revisar resultados publicados.']}]});
 
 it('presents a cover and key points with one publisher link only at the end of each article',()=>{
  const {container}=render(<NewsCards articles={[story]}/>);
@@ -74,14 +75,15 @@ it.each(['javascript:alert(1)','data:text/html,<script>bad()</script>','file:///
  expect(container.querySelector('a')).toBeNull();expect(screen.getByRole('heading',{name:'La empresa amplía su capacidad'})).toBeVisible();
 });
 
-it('opens an earnings asset through the same selection handler as the watchlist',async()=>{
+it('replaces the earnings box with a research candidate using the same asset handler as the watchlist',async()=>{
  api.mockImplementation(async(_url:string,init:RequestInit)=>{
   const panel=JSON.parse(init.body as string).panel;
-  return {ok:true,json:async()=>panel==='feedMarkets'?{groups:[],treasury:[],earnings:[{symbol:'MSFT',date:'2026-10-20',session:'Después del cierre',eps:3.1}],fetchedAt:'2026-10-15T10:00:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-15T10:00:00Z'}};
+  return {ok:true,status:200,json:async()=>panel==='stockResearchRadar'?radarFixture():panel==='feedMarkets'?{groups:[],treasury:[],earnings:[{symbol:'MSFT',date:'2026-10-20',session:'Después del cierre',eps:3.1}],fetchedAt:'2026-10-15T10:00:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-15T10:00:00Z'}};
  });
  const select=vi.fn();
  render(<FeedView stocks={['AAPL']} data={null} onChange={vi.fn()} onSelect={select}/>);
- fireEvent.click(await screen.findByRole('button',{name:'Abrir ficha de MSFT · resultados 2026-10-20'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Abrir ficha de MSFT · Microsoft'}));
+ expect(screen.queryByText('RESULTADOS · PRÓXIMOS 7 DÍAS')).toBeNull();expect(screen.getByRole('heading',{name:'RADAR DE ACCIONES'})).toBeVisible();
  expect(select).toHaveBeenLastCalledWith('MSFT');
  fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de AAPL'}));
  expect(select).toHaveBeenLastCalledWith('AAPL');
@@ -94,11 +96,11 @@ it('preserves the selected earnings event and date for the dedicated preview whe
  expect(eventSelect).toHaveBeenCalledWith(event);expect(select).not.toHaveBeenCalled();
 });
 
-it('routes an earnings click with its date while watchlist clicks retain the regular detail route',async()=>{
- api.mockImplementation(async(_url:string,init:RequestInit)=>{const panel=JSON.parse(init.body as string).panel;return {ok:true,json:async()=>panel==='feedMarkets'?{groups:[],treasury:[],earnings:[{symbol:'MSFT',date:'2026-10-20',session:'Después del cierre',eps:3.1}],fetchedAt:'2026-10-15T10:00:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-15T10:00:00Z'}};});
+it('keeps research and watchlist clicks on the regular detail route without inventing an earnings date',async()=>{
+ api.mockImplementation(async(_url:string,init:RequestInit)=>{const panel=JSON.parse(init.body as string).panel;return {ok:true,status:200,json:async()=>panel==='stockResearchRadar'?radarFixture():panel==='feedMarkets'?{groups:[],treasury:[],earnings:[{symbol:'MSFT',date:'2026-10-20',session:'Después del cierre',eps:3.1}],fetchedAt:'2026-10-15T10:00:00Z'}:{headlines:[],geopolitics:[],fetchedAt:'2026-10-15T10:00:00Z'}};});
  const select=vi.fn(),earnings=vi.fn();render(<FeedView stocks={['AAPL']} data={null} onChange={vi.fn()} onSelect={select} onEarningsSelect={earnings}/>);
- fireEvent.click(await screen.findByRole('button',{name:'Abrir ficha de MSFT · resultados 2026-10-20'}));expect(earnings).toHaveBeenCalledWith('MSFT','2026-10-20');expect(select).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de AAPL'}));expect(select).toHaveBeenCalledWith('AAPL');expect(earnings).toHaveBeenCalledTimes(1);
+ fireEvent.click(await screen.findByRole('button',{name:'Abrir ficha de MSFT · Microsoft'}));expect(select).toHaveBeenCalledWith('MSFT');expect(earnings).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'Abrir ficha de AAPL'}));expect(select).toHaveBeenCalledWith('AAPL');expect(earnings).not.toHaveBeenCalled();
 });
 
 it('uses the same article cards and a single source footer for ticker and sector report news',async()=>{

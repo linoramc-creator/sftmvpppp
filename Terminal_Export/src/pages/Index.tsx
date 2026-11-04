@@ -558,7 +558,7 @@ const Index = () => {
   const isLive=true;
 
   return (
-    <div className="min-h-screen bg-background text-foreground font-mono">
+    <div data-terminal-palette={['feed','seguimiento','mercado'].includes(navTab)?'feed':'neutral'} className="min-h-screen bg-background text-foreground font-mono">
 
       {/* ── Header ─────────────────────────────────────────────────── */}
       <header className="border-b border-border bg-card">

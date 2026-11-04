@@ -52,6 +52,50 @@
   }
 }
 
+/* The feed and its asset views never receive this workspace palette. Retain
+   chart series and financial status colors; only interface accents and panel
+   surfaces become quieter. Focus keeps a distinct blue outline. */
+@layer components {
+  [data-terminal-palette="neutral"] {
+    --section-heading: 212 10% 80%;
+    --accent: 213 18% 71%;
+    --ring: 214 53% 65%;
+    --sidebar-primary: 212 10% 80%;
+    --sidebar-ring: 214 53% 65%;
+    --terminal-blue-50: 245 246 248;
+    --terminal-blue-100: 231 234 239;
+    --terminal-blue-200: 213 219 228;
+    --terminal-blue-300: 190 201 215;
+    --terminal-blue-400: 165 181 201;
+    --terminal-blue-500: 110 137 173;
+    --terminal-blue-600: 85 112 148;
+    --terminal-blue-700: 64 87 118;
+    --terminal-blue-800: 47 66 92;
+    --terminal-blue-900: 35 48 68;
+    --terminal-blue-950: 22 31 44;
+    --terminal-slate-800: 31 34 39;
+    --terminal-slate-900: 19 22 26;
+    --terminal-slate-950: 7 9 12;
+    --terminal-panel-surface: 13 15 18;
+  }
+
+  /* Older report panels use literal navy surfaces. Map those surfaces here,
+     rather than changing shared cards or applying a color filter to charts. */
+  [data-terminal-palette="neutral"] :is(
+    [class~="bg-[#0b1017]"],
+    [class~="bg-[#0b111a]"],
+    [class~="bg-[#0b111b]"],
+    [class~="bg-[#0b121c]"],
+    [class~="bg-[#0b121d]"],
+    [class~="bg-[#0b131f]"],
+    [class~="bg-[#0b1420]"],
+    [class~="bg-[#0c121b]"],
+    [class~="bg-[#0c131d]"]
+  ) {
+    background-color: rgb(var(--terminal-panel-surface));
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

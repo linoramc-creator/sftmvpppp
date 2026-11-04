@@ -209,14 +209,14 @@ export function curateFeed(articles: Article[], limit=9): Article[] {
     words.push(current); return true;
   }).sort(newsOrder).map(article => ({ ...article, excerpt: (article.excerpt ?? '').replace(/[#*_]/g, '').slice(0, 650) })),limit);
 }
-export async function feedMarketsPanel(env:Env,symbols:string[]=[],preferences:FeedPreferences=defaultFeedPreferences()):Promise<MarketFeed>{
+export async function feedMarketsPanel(env:Env,symbols:string[]=[],preferences:FeedPreferences=defaultFeedPreferences(),includeEarnings=true):Promise<MarketFeed>{
   const quote=(symbol:string,label:string,extended:boolean)=>symbol==='SGX-IODEX'?cached('iron-iodex-v1',3600000,()=>ironReferenceQuote()):cached(`feed-price-v4:${symbol}:${extended}`,45000,()=>feedSessionQuote(symbol,label,extended));
   const editable=(key:keyof FeedPreferences)=>({label:FEED_GROUP_LABELS[key],items:preferences[key].map(symbol=>[symbol,feedPreferenceLabel(key,symbol)] as [string,string])});
   const groupsToLoad=[editable('indices'),editable('commodities'),editable('currencies'),editable('etfs')];
-  return cached(await feedPreferencesKey(symbols,preferences),45000,async()=>{
+  return cached(await feedPreferencesKey(symbols,preferences)+(includeEarnings?'':':without-calendar'),45000,async()=>{
     const [groups,bonds,events,watchlist]=await Promise.all([
       Promise.all(groupsToLoad.map(async group=>({label:group.label,items:await Promise.all(group.items.map(async([symbol,label])=>{const result=await quote(symbol,label,group.label==='ETF PRINCIPALES'||symbol==='NQ=F');return {...result,label:label===symbol?result.label:label};}))}))),
-      cached('feedTreasury-v1',600000,()=>treasury(env.FRED_KEY)),cached('feedEarnings-v1',3600000,()=>earnings(env.FMP_KEY,env.FINNHUB_KEY)),
+      cached('feedTreasury-v1',600000,()=>treasury(env.FRED_KEY)),includeEarnings?cached('feedEarnings-v1',3600000,()=>earnings(env.FMP_KEY,env.FINNHUB_KEY)):Promise.resolve([]),
       Promise.all(symbols.map(symbol=>quote(symbol,symbol,!symbol.startsWith('^')&&!symbol.includes('=')&&!symbol.endsWith('-USD'))))
     ]);
     return {fetchedAt:new Date().toISOString(),groups,treasury:bonds,earnings:events,watchlist,headlines:[],geopolitics:[]};

@@ -19,6 +19,27 @@ export default {
         body: ['Inter', 'sans-serif'],
       },
       colors: {
+        // Existing blue utilities keep their exact original colors outside the
+        // neutral research workspace. Values are inherited, so shared feed
+        // components do not need different class names or presentation logic.
+        blue: {
+          50: "rgb(var(--terminal-blue-50, 239 246 255) / <alpha-value>)",
+          100: "rgb(var(--terminal-blue-100, 219 234 254) / <alpha-value>)",
+          200: "rgb(var(--terminal-blue-200, 191 219 254) / <alpha-value>)",
+          300: "rgb(var(--terminal-blue-300, 147 197 253) / <alpha-value>)",
+          400: "rgb(var(--terminal-blue-400, 96 165 250) / <alpha-value>)",
+          500: "rgb(var(--terminal-blue-500, 59 130 246) / <alpha-value>)",
+          600: "rgb(var(--terminal-blue-600, 37 99 235) / <alpha-value>)",
+          700: "rgb(var(--terminal-blue-700, 29 78 216) / <alpha-value>)",
+          800: "rgb(var(--terminal-blue-800, 30 64 175) / <alpha-value>)",
+          900: "rgb(var(--terminal-blue-900, 30 58 138) / <alpha-value>)",
+          950: "rgb(var(--terminal-blue-950, 23 37 84) / <alpha-value>)",
+        },
+        slate: {
+          800: "rgb(var(--terminal-slate-800, 30 41 59) / <alpha-value>)",
+          900: "rgb(var(--terminal-slate-900, 15 23 42) / <alpha-value>)",
+          950: "rgb(var(--terminal-slate-950, 2 6 23) / <alpha-value>)",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
