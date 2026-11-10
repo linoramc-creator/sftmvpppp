@@ -26,6 +26,7 @@ import {eodhdTreasury} from './eodhd-bonds.ts';
 import {issuerResearch} from './issuer-research.ts';
 import {earningsPreview} from './earnings-preview.ts';
 import {loadStockResearchRadar} from './stock-research-radar.ts';
+import {portfolioLabResponse} from './portfolio-lab.ts';
 import {sharedStockRadar} from './stock-radar-cache.ts';
 import {createStockRadarFallback} from './stock-radar-fallback.ts';
 import {radarFmpRead} from './stock-radar-providers.ts';
@@ -3987,8 +3988,9 @@ async function handleMacroCalendar(env: EnvKeys): Promise<Response> {
 // MAIN DISPATCHER
 // =====================================================
 
-Deno.serve((req) => secureRequest(req, async (body) => {
+Deno.serve((req) => secureRequest(req, async (body,user) => {
   try {
+    if(body.panel==='portfolioLab')return await portfolioLabResponse(body,user.id);
     const env: EnvKeys = {
       MASSIVE_API_KEY: Deno.env.get("MASSIVE_API_KEY") ?? "",
       GEMINI_API_KEY: (Deno.env.get("GEMINI_API_KEY") || Deno.env.get("Gemini") || Deno.env.get("GOOGLE_API_KEY")) ?? "",

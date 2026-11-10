@@ -4,6 +4,7 @@ import {profileDisplayName} from './profile-name.ts';
 import {PRIMARY_REPORT_MODEL} from './report-models.ts';
 import {createReportCompletion,observeReportCompletion,reportCompleted} from './report-completion.ts';
 import {handleResearchAction,researchRequestClass,ResearchError} from './research-library.ts';
+import {validatePortfolioRequest,PortfolioError as PortfolioRequestError} from './portfolio-request.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string; user_metadata?: Record<string, unknown> };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -43,7 +44,7 @@ export async function readBody(req: Request): Promise<Body> {
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   let body: unknown;try{body=JSON.parse(new TextDecoder().decode(bytes));}catch{throw new BetaError(400,'JSON inválido.');}
   if(!body||Array.isArray(body)||typeof body!=='object')throw new BetaError(400,'Petición inválida.');
-  const action=(body as Body).accountAction,maximum=action==='researchSave'?1010000:action==='researchMeta'?150000:action==='saveReport'?520000:4096;
+  const action=(body as Body).accountAction,maximum=action==='researchSave'?1010000:action==='researchMeta'?150000:action==='saveReport'?520000:(body as Body).panel==='portfolioLab'?16384:4096;
   if(size>maximum)throw new BetaError(413,'La petición es demasiado grande.');
   return body as Body;
 }
@@ -51,6 +52,7 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   // One operation per request: classification and dispatch must agree on cost.
   const operations=['accountAction','panel','marketData','macroCalendar','optionsAction','fundamentals','risk','etf','technicals'];
   if(operations.filter(key=>body[key]!==undefined&&body[key]!==false).length>1)throw new BetaError(400,'Solo se permite una operación por petición.');
+  if(body.panel==='portfolioLab'){validatePortfolioRequest(body);return {request_class:'data'};}
   if(body.panel==='assetContext'&&body.benchmark!==undefined&&!['','XLC','XLY','XLP','XLE','XLF','XLV','XLI','XLK','XLB','XLRE','XLU'].includes(body.benchmark))throw new BetaError(400,'Referencia inválida.');
   if(body.panel==='correlation'&&body.range!==undefined&&!['1m','3m','6m','1y'].includes(body.range))throw new BetaError(400,'Ventana inválida.');
   const symbol = (v: unknown) => typeof v==='string'&&SYMBOL.test(v.trim().toUpperCase());
@@ -234,7 +236,7 @@ function tracked(response: Response,id: string): Response {
     async cancel(reason){cancelled=true;const finished=settle('cancelled');try{await reader.cancel(reason);}finally{await finished;}}
   });return new Response(body,{status:response.status,headers:response.headers});
 }
-export async function secureRequest(req: Request,dispatch: (body:Body)=>Promise<Response>): Promise<Response> {
+export async function secureRequest(req: Request,dispatch: (body:Body,user:User)=>Promise<Response>): Promise<Response> {
   const origin=req.headers.get('origin');
   const headers={'Access-Control-Allow-Origin':origin&&ORIGINS.has(origin)?origin:SITE,'Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS','Vary':'Origin','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
   const wrap=(r:Response)=>{const h=new Headers(r.headers);for(const[k,v]of Object.entries(headers))h.set(k,v);return new Response(r.body,{status:r.status,headers:h});};
@@ -244,7 +246,9 @@ export async function secureRequest(req: Request,dispatch: (body:Body)=>Promise<
     if(req.method==='OPTIONS')return wrap(new Response(null,{status:204}));
     if(req.method!=='POST')throw new BetaError(405,'Método no permitido.');
     // Verify identity before parsing payloads or contacting paid data providers.
-    const user=await userFrom(req);const body=await readBody(req);const request=classify(body);
+    const user=await userFrom(req);const body=await readBody(req);
+    if(body.panel==='portfolioLab'&&(user.email.toLowerCase()!=='linoramc@gmail.com'||!await rpc('beta_is_admin',{uid:user.id})))throw new BetaError(403,'Este laboratorio es privado del administrador.');
+    const request=classify(body);
     eventId=await rpc('beta_reserve',{uid:user.id,request_class:request.request_class,report_kind:request.report_kind??null,report_subject:request.report_subject??null});
     if(body.panel==='feedMarkets'&&body.feedGroups!==undefined){
       const requested=normalizeFeedPreferences(body.feedGroups)!;
@@ -253,7 +257,7 @@ export async function secureRequest(req: Request,dispatch: (body:Body)=>Promise<
       if(feedPreferencesIdentity(requested)!==feedPreferencesIdentity(saved))throw new BetaError(409,'Tu configuración ha cambiado. Actualiza el feed para sincronizarla.');
       body.feedGroups=saved;
     }
-    const response=body.accountAction?await account(body,user):await dispatch(body);
+    const response=body.accountAction?await account(body,user):await dispatch(body,user);
     return wrap(eventId?tracked(response,eventId):response);
-  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
+  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError||error instanceof PortfolioRequestError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
 }
