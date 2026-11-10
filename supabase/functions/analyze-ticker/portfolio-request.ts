@@ -16,11 +16,12 @@ export function validatePortfolioRequest(body:Body):void{
  if(body.action==='list'){if(!keys(body,['panel','action']))fail();return;}
  if(body.action==='create'){if(!keys(body,['panel','action','name','initialCash','requestId'])||!clean(body.name,1,60)||!bounded(body.initialCash,100,10000000)||!uuid(body.requestId))fail();return;}
  if(!uuid(body.portfolioId))fail();
- if(body.action==='snapshot'){if(!keys(body,['panel','action','portfolioId']))fail();return;}
+ if(body.action==='snapshot'||body.action==='risk'){if(!keys(body,['panel','action','portfolioId']))fail();return;}
  if(body.action==='quote'){if(!keys(body,['panel','action','portfolioId','symbol'])||!portfolioSymbol(body.symbol))fail();return;}
  if(!uuid(body.requestId))fail();
+ if(body.action==='rename'){if(!keys(body,[...common,'name'])||!clean(body.name,1,60))fail();return;}
  if(body.action==='order'){
-  const o=body.order;if(!keys(body,[...common,'order'])||!object(o)||!keys(o,['symbol','side','type','quantity','limitPrice','stopPrice','timeInForce','extendedHours','note'])||!portfolioSymbol(o.symbol)||!['buy','sell'].includes(o.side)||!['market','limit','stop','stop-limit'].includes(o.type)||!bounded(o.quantity,.000001,1000000)||Math.abs(Math.round(o.quantity*1e6)/1e6-o.quantity)>1e-10||!['day','gtc'].includes(o.timeInForce)||typeof o.extendedHours!=='boolean'||o.note!==undefined&&!text(o.note,0,1000))fail();
+  const o=body.order;if(!keys(body,[...common,'order'])||!object(o)||!keys(o,['symbol','side','type','quantity','limitPrice','stopPrice','timeInForce','extendedHours','note'])||!portfolioSymbol(o.symbol)||!['buy','sell','short','cover'].includes(o.side)||!['market','limit','stop','stop-limit'].includes(o.type)||!bounded(o.quantity,.000001,1000000)||Math.abs(Math.round(o.quantity*1e6)/1e6-o.quantity)>1e-10||!['day','gtc'].includes(o.timeInForce)||typeof o.extendedHours!=='boolean'||o.note!==undefined&&!text(o.note,0,1000))fail();
   if(['limit','stop-limit'].includes(o.type)?!bounded(o.limitPrice,.000001,10000000):o.limitPrice!==undefined)fail();
   if(['stop','stop-limit'].includes(o.type)?!bounded(o.stopPrice,.000001,10000000):o.stopPrice!==undefined)fail();
   if(o.extendedHours&&!['limit','stop-limit'].includes(o.type))throw new PortfolioError('Para premarket y postmarket utiliza una orden limitada o stop-limit.');

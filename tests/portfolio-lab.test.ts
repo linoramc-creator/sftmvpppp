@@ -24,3 +24,26 @@ test('worker CAS retry retains owner even though get returns no userId, and skip
  assert.deepEqual(await runPortfolioWorker({store,market:async()=>({market,actions:[]}),now:()=>now}),{checked:1,updated:1,failed:0});assert.equal(writes,2);assert.ok(fixture.calls.filter(c=>c.operation==='save').every(c=>c.uid===uid));
  let requested=false;const idle={...base(),userId:uid};const none=await runPortfolioWorker({store:async()=>[idle],market:async()=>{requested=true;return {market,actions:[]};},now:()=>now});assert.equal(requested,false);assert.equal(none.checked,0);
 });
+
+test('a recently advanced snapshot reads persisted marks without providers or a write; stale state advances normally',async()=>{
+ const initial=base();initial.state.lastAdvancedAt=now-299999;const fixture=memory(initial);let reads=0;const deps={store:fixture.store,market:async()=>{reads++;return {market,actions:[]};},now:()=>now};
+ const fresh=await handlePortfolioLab({panel:'portfolioLab',action:'snapshot',portfolioId:pid},uid,deps);assert.equal(fresh.portfolio.version,1);assert.equal(reads,0);assert.deepEqual(fixture.calls.map(c=>c.operation),['get']);
+ fixture.read().state.lastAdvancedAt=now-300000;await handlePortfolioLab({panel:'portfolioLab',action:'snapshot',portfolioId:pid},uid,deps);assert.equal(reads,1);assert.equal(fixture.read().version,2);
+});
+
+test('risk reads only the authorized portfolio and freezes archived analytics at the original accounting cutoff',async()=>{
+ const initial=base();initial.archived=true;const fixture=memory(initial);let providers=0,analytics=0;
+ const result=await handlePortfolioLab({panel:'portfolioLab',action:'risk',portfolioId:pid},uid,{store:fixture.store,market:async()=>{providers++;return {market,actions:[]};},analytics:async(state,cutoff)=>{analytics++;assert.deepEqual(state,initial.state);assert.equal(cutoff,initial.state.updatedAt);return {asOf:new Date(cutoff).toISOString(),currency:'USD',portfolio:{sharpe:null,annualizedVolatilityPct:null,observations:0,from:null,to:null,riskFreeRatePct:0,status:'insufficient'},assets:[],notes:[]};},now:()=>now});
+ assert.equal(analytics,1);assert.equal(providers,0);assert.equal(result.analytics.asOf,new Date(initial.state.updatedAt).toISOString());assert.deepEqual(fixture.calls.map(c=>c.operation),['get']);
+ await assert.rejects(handlePortfolioLab({panel:'portfolioLab',action:'risk',portfolioId:pid},uid,{store:async()=>{throw new StoreError('FORBIDDEN','No access',403);},analytics:async()=>{throw Error('Must not calculate for a denied owner');}}),/No access/);
+});
+
+test('renaming retries a CAS without advancing accounting, downloading prices or adding a journal event',async()=>{
+ const initial=base(),fixture=memory(initial),original=structuredClone(initial.state);let attempts=0,providers=0;
+ const store=async(operation:string,owner?:string,id?:string,version?:number,payload?:any)=>{
+  if(operation==='rename'){assert.equal(owner,uid);assert.equal(payload.name,'Nueva estrategia');assert.equal(payload.requestId,cmd);if(attempts++===0){fixture.read().version++;throw new StoreError('CONFLICT','Concurrent update');}fixture.read().name=payload.name;fixture.read().version++;return structuredClone(fixture.read());}
+  return fixture.store(operation,owner,id,version,payload);
+ };
+ const response=await handlePortfolioLab({panel:'portfolioLab',action:'rename',portfolioId:pid,requestId:cmd,name:' Nueva estrategia '},uid,{store,market:async()=>{providers++;return {market,actions:[]};},now:()=>now});
+ assert.equal(response.portfolio.name,'Nueva estrategia');assert.equal(attempts,2);assert.equal(providers,0);assert.deepEqual(response.portfolio.state,original);assert.ok(!fixture.calls.some(c=>c.operation==='save'));
+});

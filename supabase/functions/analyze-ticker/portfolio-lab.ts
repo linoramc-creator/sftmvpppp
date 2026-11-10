@@ -1,9 +1,10 @@
 import {createPortfolioState,applyPortfolioCommand,advancePortfolio,applyCorporateActions,portfolioMetrics,PortfolioError as ModelError,type PortfolioRecord,type PortfolioState,type PortfolioMarket,type PortfolioQuote,type PortfolioCommand} from './portfolio-model.ts';
 import {loadPortfolioMarket,type PortfolioMarketResult} from './portfolio-market.ts';
 import {PortfolioError,validatePortfolioRequest} from './portfolio-request.ts';
+import {buildPortfolioAnalytics,type PortfolioAnalytics} from './portfolio-analytics.ts';
 type Row=Record<string,any>;
 type Store=(operation:string,uid?:string,pid?:string,version?:number,payload?:unknown)=>Promise<any>;
-export type PortfolioLabDependencies={store?:Store;market?:(symbols:string[],now:number)=>Promise<PortfolioMarketResult>;now?:()=>number};
+export type PortfolioLabDependencies={store?:Store;market?:(symbols:string[],now:number)=>Promise<PortfolioMarketResult>;analytics?:(state:PortfolioState,now:number)=>Promise<PortfolioAnalytics>;now?:()=>number};
 export class StoreError extends PortfolioError{code:string;constructor(code:string,message:string,status=409){super(message,status);this.code=code;}}
 const storeErrors:Record<string,[number,string]>={FORBIDDEN:[403,'Este laboratorio es privado del administrador.'],NOT_FOUND:[404,'No se ha encontrado la cartera.'],INVALID:[400,'La cartera contiene datos no válidos.'],CONFLICT:[409,'La cartera ha cambiado. Actualiza antes de continuar.'],ARCHIVED:[409,'Restaura la cartera antes de modificarla.'],ACTIVE_LIMIT:[409,'Puedes mantener hasta tres carteras de prueba activas.'],STORAGE_LIMIT:[409,'Has alcanzado el límite de carteras archivadas.']};
 async function serviceStore(operation:string,uid?:string,pid?:string,version?:number,payload?:unknown):Promise<any>{
@@ -34,6 +35,10 @@ export async function handlePortfolioLab(body:Row,uid:string,deps:PortfolioLabDe
  if(body.action==='list')return {portfolios:await store('list',uid)};
  if(body.action==='create'){const record:PortfolioRecord=await store('create',uid,undefined,undefined,{name:body.name.trim(),requestId:body.requestId,state:createPortfolioState(body.initialCash,now)});return result(record,emptyMarket,now);}
  let record:PortfolioRecord=await store('get',uid,body.portfolioId);
+ if(body.action==='risk')return {analytics:await (deps.analytics??buildPortfolioAnalytics)(record.state,record.archived?record.state.updatedAt:now)};
+ if(body.action==='rename'){
+  for(let attempt=0;attempt<3;attempt++)try{const renamed:PortfolioRecord=await store('rename',uid,record.id,record.version,{name:body.name.trim(),requestId:body.requestId});return result(renamed,archivedMarket(renamed),renamed.state.updatedAt);}catch(error){if(error instanceof StoreError&&error.code==='CONFLICT'&&attempt<2){record=await store('get',uid,record.id);continue;}throw error;}
+ }
  if(body.action==='quote'){
   if(record.archived)throw new PortfolioError('Restaura la cartera para preparar una operación.',409);
   const loaded=await load([body.symbol],now),quote=loaded.market.quotes.find(q=>q.symbol===body.symbol);if(!quote)throw new PortfolioError('No hay una cotización verificada para ese activo estadounidense en USD. Comprueba el ticker.',404);
@@ -41,6 +46,7 @@ export async function handlePortfolioLab(body:Row,uid:string,deps:PortfolioLabDe
  }
  if(body.action==='archive'&&!body.archived){const restored:PortfolioRecord=record.archived?await store('restore',uid,record.id,record.version):record;return result(restored,archivedMarket(restored),restored.state.updatedAt);}
  if(record.archived){if(body.action==='snapshot'||body.action==='archive')return result(record,archivedMarket(record),record.state.updatedAt);throw new PortfolioError('Restaura la cartera antes de modificarla.',409);}
+ if(body.action==='snapshot'&&typeof record.state.lastAdvancedAt==='number'&&now>=record.state.lastAdvancedAt&&now-record.state.lastAdvancedAt<(record.state.orders.some(activeOrder)?60000:300000))return result(record,archivedMarket(record),now);
  const requested=body.action==='order'?body.order.symbol:null,loaded=await load([...symbols(record.state),...(requested?[requested]:[])],now),market=loaded.market;
  for(let attempt=0;attempt<3;attempt++){
   try{

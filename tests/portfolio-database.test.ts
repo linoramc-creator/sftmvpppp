@@ -46,6 +46,7 @@ test('private portfolio PostgreSQL persistence enforces identity, bounded state,
  });
  const before=await legacySnapshot();
  await migrate('202611100001_portfolio_lab.sql');
+ await migrate('202611100003_portfolio_risk.sql');
  const rpc=async(operation:string,uid:string|null=admin,pid:string|null=null,version:number|null=null,payload:unknown=null)=>(await db.query('select public.beta_portfolio_store($1,$2::uuid,$3::uuid,$4::integer,$5::jsonb) result',[operation,uid,pid,version,payload===null?null:JSON.stringify(payload)])).rows[0].result as any;
  const create=(name:string,requestId=randomUUID(),state:any=initialState())=>rpc('create',admin,null,null,{name,state,requestId});
  const count=async()=>(await db.query('select count(*)::integer n from public.beta_paper_portfolios where user_id=$1',[admin])).rows[0].n;
@@ -56,6 +57,8 @@ test('private portfolio PostgreSQL persistence enforces identity, bounded state,
   for(const role of ['anon','authenticated','service_role']){
    await db.exec('set role '+role);
    for(const query of ['select * from public.beta_paper_portfolios','delete from public.beta_paper_portfolios','update public.beta_paper_portfolios set name=\'Forged\''])await assert.rejects(db.query(query),/permission denied/);
+   await assert.rejects(db.query('select * from public.beta_portfolio_rename_requests'),/permission denied/);
+   await assert.rejects(db.query("select beta_private.portfolio_store_v1('list',$1::uuid)",[admin]),/permission denied/);
    await assert.rejects(db.query('insert into public.beta_paper_portfolios default values'),/permission denied/);
    await assert.rejects(db.query('select beta_private.portfolio_state_valid($1::jsonb)',[JSON.stringify(initialState())]),/permission denied/);
    if(role!=='service_role'){
@@ -75,7 +78,7 @@ test('private portfolio PostgreSQL persistence enforces identity, bounded state,
  await t.test('creation validates names, UUID intent, state types, currency, cash and size before storing',async()=>{
   const state=initialState();
   const states:any[]=[null,{},[],{...state,schema:2},{...state,schema:'1'},{...state,schema:null},{...state,currency:'EUR'},{...state,currency:null},
-   {...state,initialCash:0},{...state,initialCash:10000001},{...state,initialCash:'10000'},{...state,cash:-1},{...state,cash:'NaN'},
+   {...state,initialCash:0},{...state,initialCash:10000001},{...state,initialCash:'10000'},{...state,cash:-1000000000000001},{...state,cash:'NaN'},
    {...state,cash:Number.POSITIVE_INFINITY},{...state,createdAt:now+.5},{...state,updatedAt:now-1},{...state,settings:null},{...state,orders:{}},
    {...state,positions:Array.from({length:21},()=>({symbol:'AAPL',quantity:1}))},{...state,positions:[{symbol:'AAPL',quantity:0}]},
    {...state,positions:[{symbol:'AAPL',quantity:'1'}]},{...state,positions:[{symbol:'../AAPL',quantity:1}]},
@@ -105,10 +108,10 @@ test('private portfolio PostgreSQL persistence enforces identity, bounded state,
 
  await t.test('ownership and compare-and-swap reject foreign records, stale writes and altered origin fields',async()=>{
   assert.deepEqual(await rpc('get',admin,first.id),first);
-  for(const op of ['list','get','create','save','archive','restore'])await assert.rejects(rpc(op,other,first.id,first.version,{name:'Foreign',state:initialState(),requestId:randomUUID()}),/BETA_PORTFOLIO_FORBIDDEN/);
+  for(const op of ['list','get','create','save','archive','restore','rename'])await assert.rejects(rpc(op,other,first.id,first.version,{name:'Foreign',state:initialState(),requestId:randomUUID()}),/BETA_PORTFOLIO_FORBIDDEN/);
   const foreignId=randomUUID();
   await db.query('insert into public.beta_paper_portfolios(id,user_id,creation_key,creation_hash,name,state) values($1,$2,$3,$4,$5,$6::jsonb)',[foreignId,other,randomUUID(),'a'.repeat(32),'Ajena',JSON.stringify(initialState())]);
-  for(const op of ['get','save','archive','restore'])await assert.rejects(rpc(op,admin,foreignId,1,{state:initialState()}),/BETA_PORTFOLIO_NOT_FOUND/);
+  for(const op of ['get','save','archive','restore','rename'])await assert.rejects(rpc(op,admin,foreignId,1,op==='rename'?{name:'Foreign',requestId:randomUUID()}:{state:initialState()}),/BETA_PORTFOLIO_NOT_FOUND/);
   await assert.rejects(rpc('get',null,first.id),/BETA_PORTFOLIO_FORBIDDEN/);
   await assert.rejects(rpc('save',admin,first.id,99,{state:first.state}),/BETA_PORTFOLIO_CONFLICT/);
   for(const state of [{...first.state,initialCash:10001},{...first.state,createdAt:now-1},{...first.state,updatedAt:now-1},{...first.state,currency:'EUR'}])await assert.rejects(rpc('save',admin,first.id,1,{state}),/BETA_PORTFOLIO_INVALID/);
@@ -142,13 +145,32 @@ test('private portfolio PostgreSQL persistence enforces identity, bounded state,
  });
 
  await t.test('each operation and due recheck current admin, revocation, confirmation and actual account email',async()=>{
-  const ordinary=[()=>rpc('list'),()=>rpc('get',admin,first.id),()=>create('No autorizada'),()=>rpc('save',admin,first.id,first.version,{state:first.state}),()=>rpc('archive',admin,first.id,first.version),()=>rpc('restore',admin,second.id,second.version)];
+  const ordinary=[()=>rpc('list'),()=>rpc('get',admin,first.id),()=>create('No autorizada'),()=>rpc('save',admin,first.id,first.version,{state:first.state}),()=>rpc('archive',admin,first.id,first.version),()=>rpc('restore',admin,second.id,second.version),()=>rpc('rename',admin,first.id,first.version,{name:'No autorizada',requestId:randomUUID()})];
   const denied=async()=>{for(const operation of ordinary)await assert.rejects(operation(),/BETA_PORTFOLIO_FORBIDDEN/);assert.deepEqual(await rpc('due',null),[]);};
   await db.query('update public.beta_profiles set revoked=true where id=$1',[admin]);await denied();await db.query('update public.beta_profiles set revoked=false where id=$1',[admin]);
   await db.query('update auth.users set email_confirmed_at=null where id=$1',[admin]);await denied();await db.query('update auth.users set email_confirmed_at=now() where id=$1',[admin]);
   await db.query('delete from beta_private.admin_users where user_id=$1',[admin]);await denied();await db.query('insert into beta_private.admin_users(user_id) values($1)',[admin]);
   await db.query('update auth.users set email=$2 where id=$1',[admin,'changed@example.com']);await denied();await db.query('update auth.users set email=$2 where id=$1',[admin,'linoramc@gmail.com']);
   assert.equal((await rpc('list')).length,await count());assert.equal((await rpc('due',null)).length,3);
+ });
+
+ await t.test('renaming is metadata-only, owner bound, versioned and permanently idempotent across later names',async()=>{
+  const requestId=randomUUID(),state=structuredClone(first.state),createdAt=first.createdAt,version=first.version;
+  const results=await Promise.all([rpc('rename',admin,first.id,version,{name:'Estrategia principal',requestId}),rpc('rename',admin,first.id,version,{name:'Estrategia principal',requestId})]);
+  first=results[0];assert.equal(first.version,version+1);assert.equal(results[1].version,first.version);assert.equal(first.name,'Estrategia principal');assert.equal(first.createdAt,createdAt);assert.deepEqual(first.state,state);
+  await assert.rejects(rpc('rename',admin,first.id,version,{name:'Nombre distinto',requestId}),/BETA_PORTFOLIO_CONFLICT/);
+  await assert.rejects(rpc('rename',admin,second.id,second.version,{name:'Estrategia principal',requestId}),/BETA_PORTFOLIO_CONFLICT/);
+  await assert.rejects(rpc('rename',admin,first.id,version,{name:'Versión obsoleta',requestId:randomUUID()}),/BETA_PORTFOLIO_CONFLICT/);
+  for(const payload of [{name:' ',requestId:randomUUID()},{name:'x'.repeat(61),requestId:randomUUID()},{name:'<script>',requestId:randomUUID()},{name:'Con\nSalto',requestId:randomUUID()},{name:'Sin UUID'},{name:'X',requestId:'bad'},{name:'X',requestId:randomUUID(),state}])await assert.rejects(rpc('rename',admin,first.id,first.version,payload),/BETA_PORTFOLIO_INVALID/);
+  first=await rpc('rename',admin,first.id,first.version,{name:'Nombre vigente',requestId:randomUUID()});
+  const replay=await rpc('rename',admin,first.id,version,{name:'Estrategia principal',requestId});assert.equal(replay.name,'Nombre vigente');assert.equal(replay.version,first.version);assert.deepEqual(replay.state,state);
+  const archivedState=structuredClone(second.state),archived=await rpc('rename',admin,second.id,second.version,{name:'Archivo renombrado',requestId:randomUUID()});second=archived;assert.equal(archived.archived,true);assert.deepEqual(archived.state,archivedState);
+ });
+
+ await t.test('signed short liabilities and forced-close debt persist without weakening shape or finite bounds',async()=>{
+  const signed={...first.state,cash:-250,updatedAt:first.state.updatedAt+1000,positions:[{symbol:'AAPL',name:'Apple',quantity:-2,averageCost:100,costBasis:-200,shortProceeds:200,realizedPnl:0,dividends:0}]};
+  first=await rpc('save',admin,first.id,first.version,{state:signed});assert.equal(first.state.cash,-250);assert.equal(first.state.positions[0].quantity,-2);
+  for(const positions of [[{...signed.positions[0],quantity:0}],[{...signed.positions[0],costBasis:200}],[{...signed.positions[0],shortProceeds:-1}]])await assert.rejects(rpc('save',admin,first.id,first.version,{state:{...signed,positions}}),/BETA_PORTFOLIO_INVALID/);
  });
 
  await t.test('fifty stored records is a hard owner cap; legacy reports, preferences and users are preserved',async()=>{
