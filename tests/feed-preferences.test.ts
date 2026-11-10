@@ -61,20 +61,21 @@ test('market requests cannot bypass saved preferences with a different forged se
  const response=await secureRequest(request({panel:'feedMarkets',subject:'AAPL',feedGroups:groups}),async()=>{dispatched=true;return Response.json({});});
  assert.equal(response.status,409);assert.equal(dispatched,false);await response.json();
 });
-test('new selections allow ten ETF and seven in other groups, while legacy custom selections retain their assets without writes',async t=>{
- const defaults=defaultFeedPreferences();for(const key of FEED_GROUP_KEYS)assert.equal(defaults[key].length,FEED_GROUP_LIMITS[key]);
+test('new selections allow seven per group while longer legacy selections have a seven-item view without rewriting storage',async t=>{
+ const defaults=defaultFeedPreferences();for(const key of FEED_GROUP_KEYS){assert.equal(FEED_GROUP_LIMITS[key],7);assert.equal(defaults[key].length,7);}
  const legacy={indices:['^FTSE','^N225'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EURUSD=X','JPY=X']};
- const expected={...legacy,commodities:defaults.commodities};assert.deepEqual(normalizeSavedFeedPreferences(legacy),expected);assert.equal(normalizeFeedPreferences(legacy),null);
+ const expected={...legacy,etfs:legacy.etfs.slice(0,7),commodities:defaults.commodities};assert.deepEqual(normalizeSavedFeedPreferences(legacy),expected);assert.equal(normalizeFeedPreferences(legacy),null);
  const {writes}=securityFixture(t,'INDEX',legacy),loaded=await secureRequest(request({accountAction:'getFeedPreferences'}),async()=>Response.json({}));
  assert.equal(loaded.status,200);assert.deepEqual((await loaded.json()).groups,expected);assert.equal(writes.length,0);
  for(const key of FEED_GROUP_KEYS){const tooMany={...defaults,[key]:[...defaults[key],key==='commodities'?'KC=F':key==='indices'?'^FTSE':key==='etfs'?'VTI':'EURJPY=X']};assert.equal(normalizeFeedPreferences(tooMany),null);assert.throws(()=>classify({accountAction:'saveFeedPreferences',groups:tooMany}));}
  const longer={...defaults,etfs:[...defaults.etfs,'VTI','VT']};assert.deepEqual(normalizeSavedFeedPreferences(longer)?.etfs,defaults.etfs);
 });
 
-test('ETF defaults and suggestions are unique while future seven-ETF selections stay explicitly personalized',async t=>{
+test('seven ETF defaults and broader suggestions remain unique while existing seven-ETF selections stay personalized',async t=>{
  const defaults=defaultFeedPreferences(),oldDefaults=defaults.etfs.slice(0,7),saved={...defaults,etfs:oldDefaults};
- assert.deepEqual(defaults.etfs,['SPY','QQQ','URTH','IWM','VEA','VWO','TLT','GLD','HYG','LQD']);
- assert.deepEqual(feedSuggestions('etfs','',[],10).map(([symbol])=>symbol),defaults.etfs);
+ assert.deepEqual(defaults.etfs,['SPY','QQQ','URTH','IWM','VEA','VWO','TLT']);
+ assert.deepEqual(feedSuggestions('etfs','',[],7).map(([symbol])=>symbol),defaults.etfs);
+ assert.ok(feedSuggestions('etfs','',[],24).length>7);
  assert.equal(new Set(FEED_SUGGESTIONS.etfs.map(([symbol])=>symbol)).size,FEED_SUGGESTIONS.etfs.length);
  assert.deepEqual(normalizeSavedFeedPreferences(saved)?.etfs,oldDefaults);
  assert.deepEqual(normalizeSavedFeedPreferences({...saved,etfs:[...oldDefaults].reverse()})?.etfs,[...oldDefaults].reverse());
@@ -117,7 +118,7 @@ test('FEF uses the dated SGX settlement path and stays unavailable when no verif
 test('spot metal defaults and input aliases stay distinct from futures and other currency pairs',()=>{
  const defaults=defaultFeedPreferences();
  assert.deepEqual(defaults.commodities,['XAUUSD=X','XAGUSD=X','CL=F','BZ=F','HG=F','NG=F','SGX-IODEX']);
- assert.equal(defaults.commodities.length,7);assert.equal(defaults.etfs.length,10);
+ assert.equal(defaults.commodities.length,7);assert.equal(defaults.etfs.length,7);
  for(const [input,expected]of [['XAUUSD','XAUUSD=X'],['XAU/USD','XAUUSD=X'],['XAGUSD','XAGUSD=X'],['XAG/USD','XAGUSD=X'],['GC','GC=F'],['SI','SI=F']] as const)assert.equal(normalizeFeedSymbol('commodities',input),expected);
  for(const input of ['NKY','IDXNKY'])assert.equal(normalizeFeedSymbol('indices',input),'^N225');
  for(const input of ['EURUSD=X','JPY=X','XPTUSD=X','XAUJPY=X'])assert.equal(normalizeFeedSymbol('commodities',input),null);
@@ -140,4 +141,11 @@ test('a legacy stored selection matches its seven-item view during authenticated
  const legacy={indices:['^FTSE'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EURUSD=X']},groups=normalizeSavedFeedPreferences(legacy)!;const {writes}=securityFixture(t,'INDEX',legacy);let dispatched=false;
  const response=await secureRequest(request({panel:'feedMarkets',subject:'',feedGroups:groups}),async body=>{dispatched=true;return Response.json(body.feedGroups);});
  assert.equal(response.status,200);assert.equal(dispatched,true);assert.equal(writes.length,0);assert.deepEqual(await response.json(),groups);
+});
+
+test('European and Chinese index aliases resolve to selectable canonical codes in the expanded catalog',()=>{
+ const cases=[['IBEX','^IBEX'],['IBEX 35','^IBEX'],['Euro Stoxx 50','^STOXX50E'],['DAX','^GDAXI'],['CAC40','^FCHI'],['FTSE100','^FTSE'],['SHCOMP','000001.SS'],['SHENZHEN','399001.SZ'],['CSI300','000300.SS'],['HSI','^HSI']] as const;
+ for(const [input,symbol]of cases){assert.equal(normalizeFeedSymbol('indices',input),symbol);assert.ok(FEED_SUGGESTIONS.indices.some(([candidate])=>candidate===symbol));assert.ok(feedSuggestions('indices',input,[],24).some(([candidate])=>candidate===symbol));}
+ assert.ok(feedSuggestions('indices','España',[],24).some(([symbol])=>symbol==='^IBEX'));
+ assert.deepEqual(feedSuggestions('indices','China',[],24).map(([symbol])=>symbol),['000001.SS','399001.SZ','000300.SS']);
 });

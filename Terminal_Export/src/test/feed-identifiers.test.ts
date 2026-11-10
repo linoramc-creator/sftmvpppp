@@ -5,7 +5,8 @@ import {treasuryIdentifier} from '../../../supabase/functions/analyze-ticker/tre
 it('shows conventional research symbols without changing the instrument or reversing native FX pairs',()=>{
  const aliases:Record<string,string>={'^GSPC':'SPX','^IXIC':'IXIC','^DJI':'DJI','^VIX':'VIX','^KS11':'KOSPI','^N225':'NKY','^NDX':'NDX','BZ=F':'BZ','GC=F':'GC','SI=F':'SI','CL=F':'CL','HG=F':'HG','NG=F':'NG','NQ=F':'NQ','EURUSD=X':'EURUSD','JPY=X':'USDJPY','CHF=X':'USDCHF','EUR=X':'USDEUR','GBP=X':'USDGBP','AUD=X':'USDAUD','BTC-USD':'BTCUSD','ETH-USD':'ETHUSD','XAUUSD=X':'XAUUSD','XAGUSD=X':'XAGUSD'};
  for(const [symbol,display] of Object.entries(aliases)){expect(feedTicker({symbol})).toBe(display);expect(feedTicker(symbol)).toBe(display);}
- for(const symbol of ['QQQ','SAP.DE','VWCE.DE','BRK.B','BRK-B','^UNKNOWN'])expect(feedTicker(symbol)).toBe(symbol);
+ expect(feedTicker('^IBEX')).toBe('IBEX35');
+ for(const symbol of ['QQQ','SAP.DE','VWCE.DE','BRK.B','BRK-B','000001.SS','399001.SZ','000300.SS','^UNKNOWN'])expect(feedTicker(symbol)).toBe(symbol);
  expect(feedTicker({symbol:'GC=F',displaySymbol:'XAUUSD'})).toBe('GC');
  expect(feedTicker({symbol:'QQQ',displaySymbol:'SPY'})).toBe('QQQ');
  for(const symbol of ['GC=F','CL=F','BZ=F','NQ=F'])expect(feedTickerContext(symbol)).toBe('Futuros');

@@ -5,6 +5,7 @@ import {instrumentInfo,sessionStats} from '../supabase/functions/analyze-ticker/
 import {chartRiskData} from '../supabase/functions/analyze-ticker/asset-risk.ts';
 import {hourlyToFourHours} from '../supabase/functions/analyze-ticker/asset-snapshot.ts';
 import {regularSessionEnd} from '../supabase/functions/analyze-ticker/market-session.ts';
+import {validateFeedAsset} from '../supabase/functions/analyze-ticker/feed-quotes.ts';
 
 test('Treasury curve includes the published 3-month, 6-month and 1-year series and preserves dates',()=>{
  assert.deepEqual(TREASURY_MATURITIES.map(p=>p.series),['DGS3MO','DGS6MO','DGS1','DGS2','DGS5','DGS10','DGS20']);
@@ -65,4 +66,21 @@ test('KOSPI keeps 15:00–15:30 KST partial and out of completed-session risk',(
  }
  assert.equal(sessionStats(meta,daily,instrumentInfo(meta,'^KS11'),actualEnd,'^KS11').partial,false);
  assert.equal(chartRiskData(chart,'^KS11',actualEnd).asOf,'2026-10-16');
+});
+
+test('European and Asian indices remain valid with their published identifiers and confirmed index metadata',async()=>{
+ for(const symbol of ['^IBEX','^STOXX50E','^GDAXI','^FCHI','^FTSE','000001.SS','399001.SZ','000300.SS','^HSI','^HSCE','^N225','^KS11']){
+  const result=await validateFeedAsset('indices',symbol,{read:async requested=>({chart:{result:[{meta:{symbol:requested,instrumentType:'INDEX',regularMarketPrice:100,shortName:'Published index'},timestamp:[1794294000],indicators:{quote:[{close:[100]}]}}]}})});
+  assert.equal(result?.symbol,symbol);assert.equal(instrumentInfo({instrumentType:'INDEX'},symbol).priceUnit,'pts');
+ }
+});
+
+test('feed validation requires an explicit matching symbol and correct instrument type',async()=>{
+ const chart=(meta:Record<string,unknown>)=>({chart:{result:[{meta:{regularMarketPrice:100,...meta}}]}});
+ for(const meta of [{instrumentType:'INDEX'},{symbol:null,instrumentType:'INDEX'},{symbol:'^FTSE',instrumentType:'INDEX'},{symbol:'^IBEX',instrumentType:'EQUITY'},{symbol:'^IBEX',instrumentType:'ETF'}])assert.equal(await validateFeedAsset('indices','IBEX',{read:async()=>chart(meta)}),null);
+ for(const symbol of ['SPY','QQQ'])assert.equal((await validateFeedAsset('etfs',symbol,{read:async()=>chart({symbol,instrumentType:'ETF'})}))?.symbol,symbol);
+ assert.equal(await validateFeedAsset('etfs','SPY',{read:async()=>chart({symbol:'QQQ',instrumentType:'ETF'})}),null);
+ assert.equal((await validateFeedAsset('currencies','EURUSD=X',{read:async()=>chart({symbol:'EURUSD=X',instrumentType:'CURRENCY'})}))?.symbol,'EURUSD=X');
+ assert.equal((await validateFeedAsset('currencies','JPY=X',{read:async()=>chart({symbol:'USDJPY=X',instrumentType:'CURRENCY'})}))?.symbol,'JPY=X');
+ assert.equal(await validateFeedAsset('currencies','JPY=X',{read:async()=>chart({symbol:'JPYUSD=X',instrumentType:'CURRENCY'})}),null);
 });

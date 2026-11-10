@@ -1,7 +1,7 @@
 type FeedIdentifier={symbol:string;displaySymbol?:string;contractLabel?:string};
 type IdentifierInput=string|FeedIdentifier;
 const rawSymbol=(value:IdentifierInput)=>typeof value==='string'?value:value.symbol;
-const INDEX_TICKERS:Record<string,string>={'^GSPC':'SPX','^IXIC':'IXIC','^DJI':'DJI','^VIX':'VIX','^KS11':'KOSPI','^N225':'NKY','^NDX':'NDX','^RUT':'RUT','^FTSE':'FTSE','^GDAXI':'DAX','^FCHI':'CAC40','^STOXX50E':'STOXX50E','^HSI':'HSI'};
+const INDEX_TICKERS:Record<string,string>={'^GSPC':'SPX','^IXIC':'IXIC','^DJI':'DJI','^VIX':'VIX','^KS11':'KOSPI','^N225':'NKY','^NDX':'NDX','^RUT':'RUT','^IBEX':'IBEX35','^FTSE':'FTSE','^GDAXI':'DAX','^FCHI':'CAC40','^STOXX50E':'STOXX50E','^HSI':'HSI'};
 const TREASURY_TICKERS:Record<string,string>={'0.25':'US03MY','0.5':'US06MY','1':'US01Y','2':'US02Y','5':'US05Y','10':'US10Y','20':'US20Y'};
 
 /** Keep the instrument that was actually priced. SGX's product code and dated

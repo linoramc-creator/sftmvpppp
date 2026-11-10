@@ -3,23 +3,23 @@ export const FEED_GROUP_LIMIT = 7;
 export const FEED_GROUP_KEYS = ['indices', 'etfs', 'currencies', 'commodities'] as const;
 export type FeedGroupKey = typeof FEED_GROUP_KEYS[number];
 export type FeedPreferences = Record<FeedGroupKey, string[]>;
-export const FEED_GROUP_LIMITS:Record<FeedGroupKey,number>={indices:FEED_GROUP_LIMIT,etfs:10,currencies:FEED_GROUP_LIMIT,commodities:FEED_GROUP_LIMIT};
+export const FEED_GROUP_LIMITS:Record<FeedGroupKey,number>={indices:FEED_GROUP_LIMIT,etfs:FEED_GROUP_LIMIT,currencies:FEED_GROUP_LIMIT,commodities:FEED_GROUP_LIMIT};
 export const FEED_GROUP_LABELS: Record<FeedGroupKey, string> = {indices:'ÍNDICES',etfs:'ETF PRINCIPALES',currencies:'DIVISAS Y ACTIVOS DIGITALES',commodities:'MATERIAS PRIMAS'};
 export const FEED_DEFAULT_ITEMS: Record<FeedGroupKey, [string,string][]> = {
  indices:[['^GSPC','S&P 500'],['^IXIC','Nasdaq Composite'],['NQ=F','Nasdaq 100 · Futuro'],['^DJI','Dow Jones'],['^KS11','KOSPI · Corea del Sur'],['^N225','Nikkei 225 · Japón'],['^VIX','Volatilidad']],
- etfs:[['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM'],['VEA','Desarrollados fuera de EE. UU. · VEA'],['VWO','Emergentes · VWO'],['TLT','Tesoro a largo plazo · TLT'],['GLD','Oro · GLD'],['HYG','Crédito high yield · HYG'],['LQD','Crédito investment grade · LQD']],
+ etfs:[['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM'],['VEA','Desarrollados fuera de EE. UU. · VEA'],['VWO','Emergentes · VWO'],['TLT','Tesoro a largo plazo · TLT']],
  currencies:[['EURUSD=X','EUR/USD'],['GBPUSD=X','GBP/USD'],['JPY=X','USD/JPY'],['CHF=X','USD/CHF'],['CAD=X','USD/CAD'],['CNY=X','USD/CNY'],['BTC-USD','Bitcoin']],
  commodities:[['XAUUSD=X','Oro · Spot'],['XAGUSD=X','Plata · Spot'],['CL=F','Petróleo WTI'],['BZ=F','Petróleo Brent'],['HG=F','Cobre'],['NG=F','Gas natural'],['SGX-IODEX','Hierro · IODEX']],
 };
 // Curated identifiers are suggestions, not entitlements or verified current
 // prices. Every addition still passes the server's live metadata validation.
 export const FEED_SUGGESTIONS:Record<FeedGroupKey,[string,string][]>={
- indices:[...FEED_DEFAULT_ITEMS.indices,['^NDX','Nasdaq 100'],['^FTSE','FTSE 100'],['^GDAXI','DAX'],['^FCHI','CAC 40'],['^STOXX50E','Euro Stoxx 50'],['^HSI','Hang Seng'],['^RUT','Russell 2000'],['ES=F','S&P 500 · Futuro']],
- etfs:[...FEED_DEFAULT_ITEMS.etfs,['VTI','Mercado de EE. UU. · VTI'],['VT','Renta variable global · VT'],['QQQM','Nasdaq 100 · QQQM'],['DIA','Dow Jones · DIA'],['AGG','Bonos agregados · AGG'],['XLK','Tecnología · XLK'],['XLE','Energía · XLE'],['XLV','Salud · XLV']],
- currencies:[...FEED_DEFAULT_ITEMS.currencies,['EURJPY=X','EUR/JPY'],['EURGBP=X','EUR/GBP'],['GBPJPY=X','GBP/JPY'],['AUDUSD=X','AUD/USD'],['NZDUSD=X','NZD/USD'],['MXN=X','USD/MXN'],['ETH-USD','Ethereum'],['SOL-USD','Solana']],
+ indices:[...FEED_DEFAULT_ITEMS.indices,['^IBEX','IBEX 35 · España'],['^STOXX50E','Euro Stoxx 50 · Eurozona'],['^GDAXI','DAX · Alemania'],['^FCHI','CAC 40 · Francia'],['^FTSE','FTSE 100 · Reino Unido'],['^HSI','Hang Seng · Hong Kong'],['000001.SS','Shanghai Composite · China'],['399001.SZ','Shenzhen Component · China'],['000300.SS','CSI 300 · China'],['^NDX','Nasdaq 100 · EE. UU.'],['^RUT','Russell 2000 · EE. UU.'],['ES=F','S&P 500 · Futuro']],
+ etfs:[...FEED_DEFAULT_ITEMS.etfs,['VOO','S&P 500 · VOO'],['VTI','Mercado de EE. UU. · VTI'],['VT','Renta variable global · VT'],['QQQM','Nasdaq 100 · QQQM'],['DIA','Dow Jones · DIA'],['EFA','Europa, Australia y Japón · EFA'],['EEM','Emergentes · EEM'],['GLD','Oro · GLD'],['AGG','Bonos agregados · AGG'],['BND','Bonos de EE. UU. · BND'],['HYG','Crédito high yield · HYG'],['LQD','Crédito investment grade · LQD'],['XLK','Tecnología · XLK'],['XLE','Energía · XLE'],['XLV','Salud · XLV'],['SMH','Semiconductores · SMH']],
+ currencies:[...FEED_DEFAULT_ITEMS.currencies,['EURJPY=X','EUR/JPY'],['EURGBP=X','EUR/GBP'],['EURCHF=X','EUR/CHF'],['GBPJPY=X','GBP/JPY'],['AUDUSD=X','AUD/USD'],['NZDUSD=X','NZD/USD'],['HKD=X','USD/HKD'],['SGD=X','USD/SGD'],['SEK=X','USD/SEK'],['NOK=X','USD/NOK'],['MXN=X','USD/MXN'],['BRL=X','USD/BRL'],['ETH-USD','Ethereum'],['SOL-USD','Solana']],
  commodities:[...FEED_DEFAULT_ITEMS.commodities,['GC=F','Oro · Futuro'],['SI=F','Plata · Futuro'],['PL=F','Platino'],['PA=F','Paladio'],['ALI=F','Aluminio'],['KC=F','Café'],['SB=F','Azúcar'],['CC=F','Cacao'],['CT=F','Algodón']],
 };
-const INDEX_ALIASES:Record<string,string>={SPX:'^GSPC',SP500:'^GSPC','S&P500':'^GSPC',NDX:'^NDX',IXIC:'^IXIC',NASDAQ:'^IXIC',DJI:'^DJI',DJIA:'^DJI',VIX:'^VIX',RUT:'^RUT',KOSPI:'^KS11',KS11:'^KS11',N225:'^N225',NKY:'^N225',IDXNKY:'^N225',NIKKEI:'^N225',FTSE:'^FTSE',DAX:'^GDAXI',CAC40:'^FCHI',STOXX50E:'^STOXX50E',FTSEMIB:'FTSEMIB.MI',NQ:'NQ=F',ES:'ES=F',YM:'YM=F',RTY:'RTY=F'};
+const INDEX_ALIASES:Record<string,string>={SPX:'^GSPC',SP500:'^GSPC','S&P500':'^GSPC',NDX:'^NDX',IXIC:'^IXIC',NASDAQ:'^IXIC',DJI:'^DJI',DJIA:'^DJI',VIX:'^VIX',RUT:'^RUT',KOSPI:'^KS11',KS11:'^KS11',N225:'^N225',NKY:'^N225',IDXNKY:'^N225',NIKKEI:'^N225',NIKKEI225:'^N225',IBEX:'^IBEX',IBEX35:'^IBEX',FTSE:'^FTSE',FTSE100:'^FTSE',DAX:'^GDAXI',GDAXI:'^GDAXI',CAC:'^FCHI',CAC40:'^FCHI',FCHI:'^FCHI',STOXX50E:'^STOXX50E',EUROSTOXX50:'^STOXX50E',SX5E:'^STOXX50E',FTSEMIB:'FTSEMIB.MI',HSI:'^HSI',HANGSENG:'^HSI',SSEC:'000001.SS',SHCOMP:'000001.SS',SHANGHAI:'000001.SS',SZI:'399001.SZ',SHENZHEN:'399001.SZ',CSI300:'000300.SS',NQ:'NQ=F',ES:'ES=F',YM:'YM=F',RTY:'RTY=F'};
 const COMMODITY_ALIASES:Record<string,string>={XAUUSD:'XAUUSD=X','XAU/USD':'XAUUSD=X',XAGUSD:'XAGUSD=X','XAG/USD':'XAGUSD=X',GC:'GC=F',SI:'SI=F',CL:'CL=F',BZ:'BZ=F',HG:'HG=F',NG:'NG=F',PL:'PL=F',PA:'PA=F',ALI:'ALI=F',KC:'KC=F',SB:'SB=F',CC:'CC=F',CT:'CT=F',FEF:'SGX-IODEX',IODEX:'SGX-IODEX',IRON:'SGX-IODEX'};
 const FX_CODES=new Set('USD EUR GBP JPY CHF CAD CNY CNH AUD NZD HKD SGD SEK NOK DKK MXN BRL ZAR INR KRW TRY PLN CZK HUF ILS SAR AED THB TWD'.split(' '));
 export function normalizeFeedSymbol(group:FeedGroupKey,value:unknown):string|null{
@@ -43,7 +43,7 @@ export function normalizeFeedSymbol(group:FeedGroupKey,value:unknown):string|nul
 }
 export function feedSuggestions(group:FeedGroupKey,query:string,selected:string[],limit=6):[string,string][]{
  const simplify=(text:string)=>text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''),needle=simplify(query),canonical=normalizeFeedSymbol(group,query);
- return FEED_SUGGESTIONS[group].filter(([symbol,label])=>!selected.includes(symbol)&&(!needle||symbol===canonical||simplify(symbol).includes(needle)||simplify(label).includes(needle))).slice(0,Math.max(0,Math.min(FEED_GROUP_LIMITS[group],limit)));
+ return FEED_SUGGESTIONS[group].filter(([symbol,label])=>!selected.includes(symbol)&&(!needle||symbol===canonical||simplify(symbol).includes(needle)||simplify(label).includes(needle))).slice(0,Math.max(0,Math.min(24,limit)));
 }
 export function defaultFeedPreferences():FeedPreferences{return Object.fromEntries(FEED_GROUP_KEYS.map(key=>[key,FEED_DEFAULT_ITEMS[key].map(([symbol])=>symbol)])) as FeedPreferences;}
 export function feedSymbolAllowed(key:FeedGroupKey,symbol:string):boolean{

@@ -72,7 +72,7 @@ export async function validateFeedAsset(group:FeedGroupKey,input:string,deps:{re
   const allowed=group==='indices'?['INDEX','INDICES','FUTURE']:group==='etfs'?['ETF']:group==='commodities'?(spotMetal(symbol)?['CURRENCY']:['FUTURE']):['CURRENCY','CRYPTOCURRENCY'];
   if(!allowed.includes(type)||!positive(meta.regularMarketPrice)&&!(data?.indicators?.quote?.[0]?.close??[]).some(positive))return null;
   if(spotMetal(symbol)&&meta.currency!=='USD')return null;
-  if(typeof meta.symbol==='string'&&normalizeFeedSymbol(group,meta.symbol)!==symbol)return null;
+  if(typeof meta.symbol!=='string'||normalizeFeedSymbol(group,meta.symbol)!==symbol)return null;
   const label=feedAssetLabel(symbol,meta);if(cacheable){if(verifiedAssets.size>=256)verifiedAssets.delete(verifiedAssets.keys().next().value!);verifiedAssets.set(key,{at:Date.now(),label});}return {symbol,label};
  })().catch(()=>null).finally(()=>{if(cacheable)verifyingAssets.delete(key);});if(cacheable)verifyingAssets.set(key,operation);return operation;
 }
