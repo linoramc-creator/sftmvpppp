@@ -19,3 +19,8 @@ entrypoint = "./functions/research-monitor/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/portfolio-worker/index.ts"
+
+[functions.monitoring-worker]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/monitoring-worker/index.ts"

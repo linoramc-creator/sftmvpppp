@@ -18,7 +18,7 @@ const rows=(v:unknown):Row[]=>Object.values(object(v)).filter(v=>v!==null&&typeo
 const number=(v:unknown):number|null=>typeof v==='number'&&Number.isFinite(v)?v:typeof v==='string'&&/^[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i.test(v.trim())&&Number.isFinite(Number(v))?Number(v):null;
 const count=(v:unknown)=>{const n=number(v);return n!==null&&Number.isInteger(n)&&n>=0?n:null;};
 const day=(v:unknown):string|null=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v?v:null;
-const calendarToday=(now:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
+const calendarToday=(now:number)=>{const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);return ['year','month','day'].map(type=>parts.find(part=>part.type===type)!.value).join('-');};
 const currency=(v:unknown):string|null=>typeof v==='string'&&/^[A-Z]{3}$/.test(v)?v:null;
 const text=(v:unknown,max=160)=>typeof v==='string'&&v.trim()?v.trim().replace(/[\u0000-\u001f\u007f]/g,' ').slice(0,max):null;
 const rate=(current:number|null,previous:number|null)=>current===null||previous===null||previous===0?null:(current-previous)/Math.abs(previous)*100;

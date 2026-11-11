@@ -5,6 +5,7 @@ import {PRIMARY_REPORT_MODEL} from './report-models.ts';
 import {createReportCompletion,observeReportCompletion,reportCompleted} from './report-completion.ts';
 import {handleResearchAction,researchRequestClass,ResearchError} from './research-library.ts';
 import {validatePortfolioRequest,PortfolioError as PortfolioRequestError} from './portfolio-request.ts';
+import {handleMonitoringAction,validateMonitoringRequest,MonitoringError} from './monitoring-api.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string; user_metadata?: Record<string, unknown> };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -29,6 +30,11 @@ async function service(path: string, init: RequestInit = {}) {
     if(message.includes('BETA_RESEARCH_ITEM_LIMIT'))throw new ResearchError(409,'Has alcanzado el límite de 100 análisis, incluida la papelera.');
     if(message.includes('BETA_RESEARCH_VERSION_LIMIT'))throw new ResearchError(409,'Has alcanzado el límite de 500 versiones guardadas.');
     if(message.includes('BETA_RESEARCH_INVALID')||message.includes('BETA_RESEARCH_IMMUTABLE'))throw new ResearchError(400,'Contenido de biblioteca inválido.');
+    if(message.includes('BETA_MONITOR_CONFLICT'))throw new MonitoringError('La alerta ha cambiado. Actualiza antes de guardar.',409);
+    if(message.includes('BETA_MONITOR_NOT_FOUND'))throw new MonitoringError('No se ha encontrado ese elemento de seguimiento.',404);
+    if(message.includes('BETA_MONITOR_LIMIT'))throw new MonitoringError('Has alcanzado el límite de alertas de seguimiento.',409);
+    if(message.includes('BETA_MONITOR_INVALID'))throw new MonitoringError('Configuración de seguimiento inválida.');
+    if(message.includes('BETA_MONITOR_FORBIDDEN'))throw new MonitoringError('No tienes permiso para esta operación.',403);
     throw new BetaError(503,'El servicio no está disponible temporalmente.');
   }
   const text = await response.text(); return text ? JSON.parse(text) : null;
@@ -59,6 +65,7 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.ticker!==undefined&&!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');
   if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews','stockResearchRadar'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>(body.accountAction==='researchSave'?120:80)))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction){
+    if(validateMonitoringRequest(body))return {request_class:'account'};
     const research=researchRequestClass(body);if(research)return {request_class:research};
     if(body.accountAction==='saveFeedPreferences'&&(!body.groups||!normalizeFeedPreferences(body.groups)))throw new BetaError(400,'Configuración de mercado inválida.');
     if(body.accountAction==='validateFeedAsset'&&(!FEED_GROUP_KEYS.includes(body.group)||!normalizeFeedSymbol(body.group,body.symbol)))throw new BetaError(400,'Activo inválido.');
@@ -130,6 +137,7 @@ async function userFrom(req: Request): Promise<User> {
 }
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
 async function account(body: Body,user: User): Promise<Response> {
+  const monitoring=await handleMonitoringAction(body,user.id,{store:(operation,uid,payload={})=>rpc('beta_monitor_store',{operation,uid,payload})});if(monitoring)return monitoring;
   const research=await handleResearchAction(body,user,{service,rpc,env});if(research)return research;
   switch(body.accountAction){
     case 'getFeedPreferences':{const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`);return json({groups:normalizeSavedFeedPreferences(rows[0]?.groups)});}
@@ -259,5 +267,5 @@ export async function secureRequest(req: Request,dispatch: (body:Body,user:User)
     }
     const response=body.accountAction?await account(body,user):await dispatch(body,user);
     return wrap(eventId?tracked(response,eventId):response);
-  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError||error instanceof PortfolioRequestError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
+  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError||error instanceof PortfolioRequestError||error instanceof MonitoringError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
 }

@@ -18,7 +18,7 @@ export type RegularReportQuote = {
 };
 
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
-const localDate = (time: number, zone: string) => new Intl.DateTimeFormat('en-CA', {timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit'}).format(time);
+const localDate = (time: number, zone: string) => {const parts=new Intl.DateTimeFormat('en-CA', {timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit'}).formatToParts(time);return ['year','month','day'].map(type=>parts.find(part=>part.type===type)!.value).join('-');};
 const iso = (time: number | null) => time === null ? null : new Date(time).toISOString();
 
 /** A daily candle's timestamp is its opening time, not a timestamp of its closing trade. */

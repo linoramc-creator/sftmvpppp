@@ -1,0 +1,21 @@
+/** Shared monitoring contract. Public payloads contain evidence, never credentials. */
+export const MONITOR_FIELDS=['price','changePct','pe','pb','marketCap','revenueGrowthPct','epsEstimate','earningsWithinDays'] as const;
+export type MonitorField=typeof MONITOR_FIELDS[number];
+export type MonitorCondition={field:MonitorField;op:'gt'|'gte'|'lt'|'lte';value:number;currency?:string;period?:string};
+export type MonitorMetric={value:number|null;asOf:string|null;source:string;url:string;unit:string;currency:string|null;period?:string|null;maxAgeHours:number;dateBasis?:'published'|'observed'};
+export type MonitorNews={id:string;title:string;date:string;source:string;url:string;excerpt:string;summary?:string;analysisKey?:string};
+export type MonitorCalendarEvent={id:string;symbol:string;kind:'earnings'|'dividend'|'publication';title:string;date:string;source:string;url:string;confirmed:boolean;asOf:string;details?:string};
+export type MonitorHolding={symbol:string;name:string;weightPct:number};
+export type MonitorSnapshot={schema:1;symbol:string;name:string;kind:'stock'|'etf'|'other';currency:string|null;collectedAt:string;metrics:Partial<Record<MonitorField,MonitorMetric>>;news:MonitorNews[];calendar:MonitorCalendarEvent[];holdings:{asOf:string|null;source:string;url:string;items:MonitorHolding[];coveragePct:number|null}|null;coverage:string[];fundamentalsAt:string|null;fundamentalsAttemptAt?:string|null};
+export type MonitorChange={key:string;symbol:string;kind:'price'|'news'|'publication'|'estimate'|'alert';title:string;detail:string;occurredAt:string;source:string;url:string;importance:'high'|'medium';before?:number|null;after?:number|null;unit?:string;currency?:string|null;analysisKey?:string};
+export type MonitorAlertStatus='idle'|'matched'|'unmatched'|'missing'|'stale'|'paused';
+export type MonitorEvaluation={status:MonitorAlertStatus;matched:boolean|null;reason:string;checkedAt:string;conditions:{condition:MonitorCondition;status:'met'|'unmet'|'missing'|'stale';value:number|null;asOf:string|null;source:string;url:string}[]};
+export type MonitorAlert={id:string;symbol:string;name:string;conditions:MonitorCondition[];enabled:boolean;revision:number;createdAt:string;updatedAt:string;lastMatched:boolean;lastNotifiedAt:string|null;evaluation:MonitorEvaluation|null};
+export type MonitorNotice=MonitorChange&{id:string;createdAt:string;readAt:string|null;alertId?:string|null};
+export type MonitorPosition={portfolioId:string;portfolioName:string;symbol:string;quantity:number;marketValue:number|null;currency:string;quoteAt:string|null;equity:number|null};
+export type MonitorContext={watchlist:string[];symbols:string[];positions:MonitorPosition[];snapshots:MonitorSnapshot[];coverage:string[]};
+export type MonitorExposure={symbol:string;directValue:number|null;indirectValue:number|null;currency:string|null;weightPct:number|null;direction:'long'|'short'|'mixed'|'watchlist';portfolios:string[];holdingsAsOf:string[];holdingsCoveragePct:number|null;complete:boolean;notes:string[]};
+export type MonitorAgendaItem=MonitorCalendarEvent&{exposure:MonitorExposure;indirectVia:string[]};
+export type MonitorOverview={baseline:string|null;visitAt:string;unread:number;notices:MonitorNotice[];alerts:MonitorAlert[];context:MonitorContext;agenda:MonitorAgendaItem[];lastCollectedAt:string|null;hasMore:boolean};
+export type MonitorAlertInput={id?:string;revision?:number;requestId?:string;symbol:string;name:string;conditions:MonitorCondition[];enabled:boolean};
+export type MonitorClaim={symbol:string;token:string;previous:MonitorSnapshot|null;alerts:MonitorAlert[]};
