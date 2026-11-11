@@ -35,6 +35,7 @@ import {sectorActivity} from './sector-activity.ts';
 import {discoverTickerPeers,loadComparableCompanies,peerRowsForReport,sectorComparables} from './sector-comparables.ts';
 import { massiveContext } from './massive-news.ts';
 import { secureRequest, readSharedReport, writeSharedReport } from "./beta-security.ts";
+import {analyticsFundamentals} from './analytics-providers.ts';
 import { researchPeers } from './business-research.ts';
 import { comparison, correlations } from './market-analytics.ts';
 import { bondsPanel, businessPanel, institutionalPanel, newsPanel, marketFeedPanel, feedMarketsPanel, curateNews, cached, fmpHolders } from "./panels.ts";
@@ -4113,4 +4114,4 @@ Deno.serve((req) => secureRequest(req, async (body,user) => {
     console.error("analyze fatal error:", msg, stack);
     return jsonError("No se ha podido completar el análisis. Inténtalo más tarde.", 500);
   }
-}));
+},{fundamentals:(symbol,from,to)=>analyticsFundamentals(symbol,from,to,{timeseries:yfFundamentalsTimeseries})}));

@@ -1,0 +1,31 @@
+import type {AnalyticsQuery,AnalyticsResult} from './analytics-api';
+
+function csvCell(value:unknown){const raw=value==null?'':String(value),safe=typeof value==='string'&&(/^[\s]*[=+\-@]/.test(raw)||/^[\t\r]/.test(raw))?`'${raw}`:raw;return `"${safe.replace(/"/g,'""')}"`;}
+/** Null stays empty; the status and fiscal columns retain the evidence gaps. */
+export function analyticsCsv(result:AnalyticsResult){
+ if(!result.export.table)throw new Error(result.export.reason||'La licencia de los datos no permite exportar la tabla.');
+ const headings=['Fecha',...result.series.flatMap(series=>[`${series.label} [${series.unit}${series.currency&&series.currency!==series.unit?' · '+series.currency:''}]`,`${series.label} · estado`,`${series.label} · período fiscal`,`${series.label} · publicación`,`${series.label} · fuente`])];
+ const rows=result.table.map(row=>[row.date,...result.series.flatMap(series=>{const point=series.points.find(item=>item.date===row.date),sourceIds=point?.sourceIds??(point?[point.sourceId]:[]),sourceUrls=result.sources.filter(item=>sourceIds.includes(item.id)).map(item=>item.url).join(' | ');return [row.values[series.id],point?.status??'missing',point?.fiscalPeriod??'',point?.filingDate??'',sourceUrls];})]);
+ return '\uFEFF'+[headings,...rows].map(row=>row.map(csvCell).join(',')).join('\r\n');
+}
+export function analyticsDefinition(query:AnalyticsQuery,execution?:AnalyticsResult){return JSON.stringify({application:'MensorTerminal',format:'mensor-analytics-query',version:1,query,...(execution?{execution:{generatedAt:execution.generatedAt,from:execution.from,to:execution.to,methodology:execution.methodology,warnings:execution.warnings,sources:execution.sources.map(({name,url,dataThrough,fetchedAt})=>({name,url,dataThrough,fetchedAt}))}}:{})},null,2);}
+const NS='http://www.w3.org/2000/svg';
+function textNode(value:string,x:number,y:number,size:number,fill='#cbd5e1'){const node=document.createElementNS(NS,'text');node.textContent=value;for(const [key,setting] of Object.entries({x,y,'font-size':size,fill,'font-family':'Arial, Helvetica, sans-serif'}))node.setAttribute(key,String(setting));return node;}
+/** Export the actual rendered plot; external assets and executable elements are excluded. */
+export function analyticsSvg(plot:SVGSVGElement,result:AnalyticsResult,colors:string[]){
+ if(!result.export.chart)throw new Error(result.export.reason||'La licencia de los datos no permite descargar este gráfico.');
+ const box=plot.viewBox?.baseVal,width=Math.max(420,box?.width||Number(plot.getAttribute('width'))||plot.getBoundingClientRect().width||960),height=box?.height||Number(plot.getAttribute('height'))||400;
+ const chartY=75+Math.max(1,Math.ceil(result.series.length/4))*16,totalHeight=chartY+height+65;
+ const root=document.createElementNS(NS,'svg');root.setAttribute('width',String(width));root.setAttribute('height',String(totalHeight));root.setAttribute('viewBox',`0 0 ${width} ${totalHeight}`);root.setAttribute('role','img');
+ const background=document.createElementNS(NS,'rect');background.setAttribute('width','100%');background.setAttribute('height','100%');background.setAttribute('fill','#0d0f12');root.append(background);
+ const title=document.createElementNS(NS,'title');title.textContent=result.title;root.append(title);
+ root.append(textNode(result.title.slice(0,90),24,30,17,'#f8fafc'),textNode(`${result.from} — ${result.to} · Datos publicados · ${result.query.frequency}`,24,50,10,'#94a3b8'));
+ result.series.forEach((series,index)=>{const x=24+(index%4)*(width-48)/4,y=70+Math.floor(index/4)*16;root.append(textNode(`● ${series.symbol} · ${series.unit}${series.currency&&series.currency!==series.unit?' '+series.currency:''}`,x,y,10,colors[index%colors.length]));});
+ const chart=plot.cloneNode(true) as SVGSVGElement;chart.removeAttribute('xmlns');chart.querySelectorAll('script,foreignObject,image').forEach(node=>node.remove());chart.querySelectorAll('*').forEach(node=>{for(const attr of [...node.attributes])if(/^on/i.test(attr.name)||/^(?:href|xlink:href)$/i.test(attr.name)&&!attr.value.startsWith('#'))node.removeAttribute(attr.name);});chart.setAttribute('x','0');chart.setAttribute('y',String(chartY));chart.setAttribute('width',String(width));chart.setAttribute('height',String(height));chart.setAttribute('font-family','Arial, Helvetica, sans-serif');root.append(chart);
+ const sourceText=result.sources.map(source=>source.name+(source.dataThrough?' · '+source.dataThrough:'')).join(' | ');root.append(textNode(`Fuentes: ${sourceText}`.slice(0,Math.floor(width/5.5)),24,chartY+height+24,9,'#94a3b8'));
+ const credit=textNode('MensorTerminal',width-24,chartY+height+48,11,'#cbd5e1');credit.setAttribute('text-anchor','end');root.append(credit);
+ const metadata=document.createElementNS(NS,'metadata');metadata.textContent=JSON.stringify({query:result.query,generatedAt:result.generatedAt,from:result.from,to:result.to,methodology:result.methodology,warnings:result.warnings,sources:result.sources.map(({name,url,dataThrough,fetchedAt})=>({name,url,dataThrough,fetchedAt}))});root.append(metadata);
+ return new XMLSerializer().serializeToString(root);
+}
+export function downloadAnalyticsBlob(blob:Blob,name:string){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1500);}
+export function downloadAnalyticsPng(svg:string,name:string):Promise<void>{return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>{try{const canvas=document.createElement('canvas');canvas.width=image.naturalWidth*2;canvas.height=image.naturalHeight*2;const context=canvas.getContext('2d');if(!context)throw new Error('Tu navegador no permite crear la imagen PNG.');context.drawImage(image,0,0,canvas.width,canvas.height);canvas.toBlob(blob=>{if(!blob){reject(new Error('No se ha podido exportar la imagen.'));return;}downloadAnalyticsBlob(blob,name);resolve();},'image/png');}catch(cause){reject(cause);}};image.onerror=()=>reject(new Error('No se ha podido exportar la imagen. Prueba el formato SVG.'));image.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);});}

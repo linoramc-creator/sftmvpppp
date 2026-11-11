@@ -30,7 +30,7 @@ import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
 
 const ResearchLibrary=lazy(()=>import('@/components/research/ResearchLibrary'));
-const MonitoringCenter=lazy(()=>import('@/components/MonitoringCenter'));
+const AnalyticsWorkspace=lazy(()=>import('@/components/AnalyticsWorkspace'));
 const AssetDetail = lazy(() => import("@/components/AssetDetail"));
 const UnifiedComparison = lazy(() => import("@/pages/UnifiedComparison"));
 const MarketInstrumentDetail = lazy(() => import("@/components/MarketInstrumentDetail"));
@@ -291,7 +291,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"feed" | "brief" | "portfolio" | "ticker" | "etf" | "sector" | "comparacion" | "mercado" | "seguimiento" | "monitor" | "bonos" | "guardados">("feed");
+  const [navTab, setNavTab] = useState<"feed" | "brief" | "portfolio" | "ticker" | "etf" | "sector" | "comparacion" | "mercado" | "seguimiento" | "analytics" | "bonos" | "guardados">("feed");
   const [monitorUnread,setMonitorUnread]=useState(0);
   useEffect(()=>{let active=true,visitSaved=false,visitPending=false;const visitId=monitoringVisitId(profile.id);const refresh=()=>{if(document.visibilityState==='hidden')return;if(!visitSaved&&!visitPending){visitPending=true;void accountApi('monitorVisit',{visitId}).then(()=>{visitSaved=true;}).catch(()=>{/* The same visit is retried after connection recovery. */}).finally(()=>{visitPending=false;});}accountApi<{unread:number}>('monitorStatus').then(data=>{if(active)setMonitorUnread(data.unread);}).catch(()=>{});};refresh();const timer=window.setInterval(refresh,300000);document.addEventListener('visibilitychange',refresh);return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',refresh);};},[profile.id]);
 
@@ -582,9 +582,9 @@ const Index = () => {
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
                 { label: "COMPARAR", key: "comparacion" },
+                { label: "ANALYTICS", key: "analytics" },
                 { label: "BONOS Y CRÉDITOS", key: "bonos" },
                 { label: "BIBLIOTECA", key: "guardados" },
-                { label: "SEGUIMIENTO", key: "monitor" },
                 ...(profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com'?[{label:'PORTFOLIO',key:'portfolio'} as const]:[]),
               ] as const).map(({ label, key }) => {
                 const active = navTab === key;
@@ -599,7 +599,7 @@ const Index = () => {
                     }`}
                   >
                     {label}
-                    {key==='monitor'&&monitorUnread>0&&<span className="ml-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[9px] text-white" aria-label={`${monitorUnread} avisos sin leer`}>{monitorUnread>99?'99+':monitorUnread}</span>}
+                    {key==='portfolio'&&monitorUnread>0&&<span className="ml-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[9px] text-white" aria-label={`${monitorUnread} avisos sin leer`}>{monitorUnread>99?'99+':monitorUnread}</span>}
                     {label === "BIBLIOTECA" && researchCount > 0 && (
                       <span className="ml-1.5 text-[9px] bg-white/10 text-white px-1.5 py-0.5">
                         {researchCount}
@@ -870,7 +870,7 @@ const Index = () => {
       </KeepPanel>
 
       <KeepPanel active={navTab === "guardados"}><Suspense fallback={<p className="p-6 text-sm text-slate-400">Abriendo biblioteca…</p>}><ResearchLibrary accountId={profile.id}/></Suspense></KeepPanel>
-      <KeepPanel active={navTab === 'monitor'}><Suspense fallback={<div role="status" aria-label="Abriendo seguimiento" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><MonitoringCenter accountId={profile.id} onSelect={openWatchAsset} onUnread={setMonitorUnread}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === 'analytics'}><Suspense fallback={<div role="status" aria-label="Abriendo Analytics" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><AnalyticsWorkspace key={profile.id} accountId={profile.id}/></Suspense></KeepPanel>
 
     </div>
   );

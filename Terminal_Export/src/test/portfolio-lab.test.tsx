@@ -4,8 +4,8 @@ import PortfolioLab,{portfolioFillsCsv} from '../components/PortfolioLab';
 import KeepPanel from '../components/KeepPanel';
 import {TerminalEntryProvider} from '../lib/terminal-entry';
 import {createPortfolioState,portfolioMetrics,type PortfolioFill,type PortfolioQuote,type PortfolioRecord} from '../../../supabase/functions/analyze-ticker/portfolio-model';
-const mocks=vi.hoisted(()=>({api:vi.fn(),profile:{id:'admin-a',email:'linoramc@gmail.com',isAdmin:true}}));
-vi.mock('@/lib/beta-api',()=>({authenticatedFetch:mocks.api}));
+const mocks=vi.hoisted(()=>({api:vi.fn(),monitor:vi.fn(),profile:{id:'admin-a',email:'linoramc@gmail.com',isAdmin:true}}));
+vi.mock('@/lib/beta-api',()=>({authenticatedFetch:mocks.api,accountApi:mocks.monitor}));
 vi.mock('../components/AuthGate',()=>({useProfile:()=>mocks.profile}));
 const at=Date.parse('2026-11-10T15:00:00Z');
 let record:PortfolioRecord;
@@ -55,3 +55,29 @@ it('resumes a deferred risk refresh immediately after a mutation releases its lo
 it('does not report or request private portfolio bootstrap for a non-admin even inside entry context',()=>{mocks.profile={id:'tester',email:'tester@example.test',isAdmin:false};const report=vi.fn();render(<TerminalEntryProvider value={{sessionId:'entry-a',attempt:0,portfolioRequired:true,report}}><PortfolioLab/></TerminalEntryProvider>);expect(mocks.api).not.toHaveBeenCalled();expect(report).not.toHaveBeenCalled();});
 
 it('labels old but verified valuation prices with their real date instead of implying live prices',async()=>{record.state.positions=[{symbol:'AAPL',name:'Apple Inc.',quantity:2,averageCost:100,costBasis:200,realizedPnl:0,dividends:0}];const implementation=mocks.api.getMockImplementation()!;mocks.api.mockImplementation((url:any,init:any)=>{if(JSON.parse(init.body).action!=='snapshot')return implementation(url,init);const value=snapshot();value.metrics.positions=value.metrics.positions.map(position=>({...position,quoteAt:at-7200000}));return Promise.resolve(ok(value));});await loaded();expect(screen.getByText(/Últimos precios disponibles ·/)).toBeVisible();expect(screen.queryByText('Sin datos')).toBeNull();fireEvent.click(screen.getByRole('tab',{name:'Posiciones'}));expect(screen.getByText('Apple Inc.')).toBeVisible();expect(screen.getByRole('cell',{name:new RegExp(new Date(at-7200000).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}))})).toBeInTheDocument();});
+
+beforeEach(()=>{mocks.monitor.mockReset();mocks.monitor.mockResolvedValue({baseline:null,visitAt:'2026-11-11T09:00:00Z',unread:0,notices:[],alerts:[],agenda:[],lastCollectedAt:null,hasMore:false,context:{watchlist:[],symbols:[],positions:[],snapshots:[],coverage:[]}});});
+
+it('integrates existing monitoring inside Portfolio without issuing trades or changing its state',async()=>{
+ await loaded();const prior=JSON.stringify(record.state),requests=actions().length;
+ fireEvent.click(screen.getByRole('tab',{name:'Seguimiento'}));
+ await screen.findByRole('heading',{name:'Noticias y próximos eventos'});
+ expect(mocks.monitor.mock.calls[0][0]).toBe('monitorOpen');
+ expect(screen.getByRole('tab',{name:'Noticias de posiciones'})).toBeVisible();
+ expect(screen.getByRole('tab',{name:'Lista de seguimiento'})).toBeVisible();
+ expect(screen.getByRole('tab',{name:'Próximos eventos'})).toBeVisible();
+ expect(screen.queryByRole('tab',{name:'Alertas'})).toBeNull();
+ expect(screen.queryByRole('heading',{name:'Nueva orden'})).toBeNull();
+ fireEvent.click(screen.getByRole('tab',{name:'Resumen'}));
+ expect(screen.getByRole('heading',{name:'Nueva orden'})).toBeVisible();
+ fireEvent.click(screen.getByRole('tab',{name:'Seguimiento'}));
+ expect(mocks.monitor.mock.calls.filter(call=>call[0]==='monitorOpen')).toHaveLength(1);
+ expect(actions()).toHaveLength(requests);expect(JSON.stringify(record.state)).toBe(prior);
+});
+
+it('keeps watchlist monitoring reachable inside an empty portfolio space without creating a portfolio',async()=>{
+ const implementation=mocks.api.getMockImplementation()!;mocks.api.mockImplementation((url:string,init:{body:string})=>JSON.parse(init.body).action==='list'?Promise.resolve(ok({portfolios:[]})):implementation(url,init));
+ render(<PortfolioLab/>);await screen.findByLabelText('Capital inicial USD');fireEvent.click(screen.getByRole('tab',{name:'Seguimiento'}));
+ await screen.findByRole('heading',{name:'Noticias y próximos eventos'});fireEvent.click(screen.getByRole('tab',{name:'Lista de seguimiento'}));
+ expect(screen.getByText(/Tu lista de seguimiento está vacía/)).toBeVisible();expect(actions().map(body=>body.action)).toEqual(['list']);
+});

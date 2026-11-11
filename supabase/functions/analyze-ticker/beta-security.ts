@@ -6,6 +6,8 @@ import {createReportCompletion,observeReportCompletion,reportCompleted} from './
 import {handleResearchAction,researchRequestClass,ResearchError} from './research-library.ts';
 import {validatePortfolioRequest,PortfolioError as PortfolioRequestError} from './portfolio-request.ts';
 import {handleMonitoringAction,validateMonitoringRequest,MonitoringError} from './monitoring-api.ts';
+import {handleAnalyticsAction,analyticsRequestClass,AnalyticsError} from './analytics-service.ts';
+import type {AnalyticsDependencies} from './analytics-types.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string; user_metadata?: Record<string, unknown> };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -18,6 +20,11 @@ async function service(path: string, init: RequestInit = {}) {
   const response = await fetch(`${env('SUPABASE_URL')}/rest/v1/${path}`, { ...init, headers: { apikey: env('SUPABASE_SERVICE_ROLE_KEY'), Authorization: `Bearer ${env('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type':'application/json', ...init.headers }, signal: AbortSignal.timeout(10000) });
   if (!response.ok) {
     const message = (await response.text()).slice(0,2000);
+    if(message.includes('BETA_ANALYTICS_NOT_FOUND'))throw new AnalyticsError('Consulta no encontrada.',404);
+    if(message.includes('BETA_ANALYTICS_CONFLICT'))throw new AnalyticsError('La consulta ha cambiado. Actualízala antes de guardar.',409);
+    if(message.includes('BETA_ANALYTICS_LIMIT'))throw new AnalyticsError('Puedes guardar hasta 100 consultas de Analytics.',409);
+    if(message.includes('BETA_ANALYTICS_FORBIDDEN'))throw new AnalyticsError('No tienes permiso para esta consulta.',403);
+    if(message.includes('BETA_ANALYTICS_INVALID'))throw new AnalyticsError('Definición de Analytics inválida.');
     if (message.includes('BETA_REVOKED')) throw new BetaError(403,'Tu acceso está revocado. Contacta con el administrador.');
     if (message.includes('BETA_BUSY')) throw new BetaError(429,'Ya tienes un informe en curso. Espera a que termine.');
     if (message.includes('BETA_STORAGE_LIMIT')) throw new BetaError(409,'Has alcanzado los 100 informes guardados. Elimina alguno antes de guardar otro.');
@@ -50,7 +57,7 @@ export async function readBody(req: Request): Promise<Body> {
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   let body: unknown;try{body=JSON.parse(new TextDecoder().decode(bytes));}catch{throw new BetaError(400,'JSON inválido.');}
   if(!body||Array.isArray(body)||typeof body!=='object')throw new BetaError(400,'Petición inválida.');
-  const action=(body as Body).accountAction,maximum=action==='researchSave'?1010000:action==='researchMeta'?150000:action==='saveReport'?520000:(body as Body).panel==='portfolioLab'?16384:4096;
+  const action=(body as Body).accountAction,maximum=action==='researchSave'?1010000:action==='researchMeta'?150000:action==='saveReport'?520000:(body as Body).panel==='portfolioLab'||typeof action==='string'&&action.startsWith('analytics')?16384:4096;
   if(size>maximum)throw new BetaError(413,'La petición es demasiado grande.');
   return body as Body;
 }
@@ -65,6 +72,8 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.ticker!==undefined&&!symbol(body.ticker))throw new BetaError(400,'Ticker inválido.');
   if(body.subject!==undefined&&!['bonds','bondsCredit','feed','feedMarkets','feedNews','stockResearchRadar'].includes(body.panel)&&(typeof body.subject!=='string'||body.subject.trim().length<1||body.subject.length>(body.accountAction==='researchSave'?120:80)))throw new BetaError(400,'Activo inválido.');
   if(body.accountAction){
+    const analytics=analyticsRequestClass(body);if(analytics)return {request_class:analytics};
+    if(['monitorSaveAlert','monitorPauseAlert'].includes(body.accountAction))throw new BetaError(410,'Las alertas de oportunidades se han retirado.');
     if(validateMonitoringRequest(body))return {request_class:'account'};
     const research=researchRequestClass(body);if(research)return {request_class:research};
     if(body.accountAction==='saveFeedPreferences'&&(!body.groups||!normalizeFeedPreferences(body.groups)))throw new BetaError(400,'Configuración de mercado inválida.');
@@ -136,7 +145,8 @@ async function userFrom(req: Request): Promise<User> {
   return user;
 }
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
-async function account(body: Body,user: User): Promise<Response> {
+async function account(body: Body,user: User,analyticsData?:Pick<AnalyticsDependencies,'fundamentals'>): Promise<Response> {
+  const analytics=await handleAnalyticsAction(body,user,{rpc,env,data:analyticsData});if(analytics)return analytics;
   const monitoring=await handleMonitoringAction(body,user.id,{store:(operation,uid,payload={})=>rpc('beta_monitor_store',{operation,uid,payload})});if(monitoring)return monitoring;
   const research=await handleResearchAction(body,user,{service,rpc,env});if(research)return research;
   switch(body.accountAction){
@@ -244,7 +254,7 @@ function tracked(response: Response,id: string): Response {
     async cancel(reason){cancelled=true;const finished=settle('cancelled');try{await reader.cancel(reason);}finally{await finished;}}
   });return new Response(body,{status:response.status,headers:response.headers});
 }
-export async function secureRequest(req: Request,dispatch: (body:Body,user:User)=>Promise<Response>): Promise<Response> {
+export async function secureRequest(req: Request,dispatch: (body:Body,user:User)=>Promise<Response>,analyticsData?:Pick<AnalyticsDependencies,'fundamentals'>): Promise<Response> {
   const origin=req.headers.get('origin');
   const headers={'Access-Control-Allow-Origin':origin&&ORIGINS.has(origin)?origin:SITE,'Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS','Vary':'Origin','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
   const wrap=(r:Response)=>{const h=new Headers(r.headers);for(const[k,v]of Object.entries(headers))h.set(k,v);return new Response(r.body,{status:r.status,headers:h});};
@@ -265,7 +275,7 @@ export async function secureRequest(req: Request,dispatch: (body:Body,user:User)
       if(feedPreferencesIdentity(requested)!==feedPreferencesIdentity(saved))throw new BetaError(409,'Tu configuración ha cambiado. Actualiza el feed para sincronizarla.');
       body.feedGroups=saved;
     }
-    const response=body.accountAction?await account(body,user):await dispatch(body,user);
+    const response=body.accountAction?await account(body,user,analyticsData):await dispatch(body,user);
     return wrap(eventId?tracked(response,eventId):response);
-  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError||error instanceof PortfolioRequestError||error instanceof MonitoringError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
+  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError||error instanceof PortfolioRequestError||error instanceof MonitoringError||error instanceof AnalyticsError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
 }
