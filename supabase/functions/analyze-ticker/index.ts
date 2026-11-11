@@ -12,6 +12,7 @@ import {assetInsights} from './asset-insights.ts';
 import { sharedFeed } from './feed-cache.ts';
 import { sectorFundamentalsContext } from './sector-fundamentals.ts';
 import {resolveInstrument} from './instrument-resolver.ts';
+import {quickInstrumentSearch} from './quick-instrument-search.ts';
 import {createReportCompletion,observeReportCompletion,reportCompleted} from './report-completion.ts';
 import {relativeComparison,relativeHistory,type RelativeDependencies} from './relative-comparison.ts';
 import {marketComparison} from './market-comparison.ts';
@@ -4002,7 +4003,7 @@ Deno.serve((req) => secureRequest(req, async (body,user) => {
     };
 
     if (typeof body.panel === "string") {
-      if(body.panel==='instrumentSearch')return panelJson(await resolveInstrument(body.query,{type:body.kind}));
+      if(body.panel==='instrumentSearch')return panelJson(await (body.scope==='quick'?quickInstrumentSearch(body.query):resolveInstrument(body.query,{type:body.kind})));
       const deps = { summary: eYahooQuoteSummary };
       if(body.panel==='issuerResearch')return panelJson(await issuerResearch(String(body.subject).trim().toUpperCase()));
       if(body.panel==='earningsPreview')return panelJson(await earningsPreview(String(body.subject).trim().toUpperCase(),body.eventDate,env));

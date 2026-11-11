@@ -14,6 +14,8 @@ it('opens a market context endpoint with dated metrics and sector ETF proxies, d
  const data=fixture(),back=vi.fn(),select=vi.fn();api.mockResolvedValue({ok:true,json:async()=>data});
  const {container}=render(<MarketInstrumentDetail symbol="^GSPC" onBack={back} onSelect={select}/>);
  await screen.findByRole('heading',{name:'S&P 500'});
+ expect(container.querySelector('main')).toHaveAttribute('data-terminal-palette','neutral');
+ expect(container.querySelector('main')).toHaveClass('market-instrument-detail');
  expect(JSON.parse(api.mock.calls.at(-1)![1].body)).toEqual({panel:'marketPulse',subject:'^GSPC'});
  expect(screen.getByRole('heading',{name:'^GSPC · Velas 4H'})).toBeVisible();
  expect(screen.getByRole('button',{name:'Histórico · 4H'})).toHaveAttribute('aria-pressed','true');

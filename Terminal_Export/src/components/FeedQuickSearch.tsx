@@ -1,0 +1,36 @@
+import {useCallback,useEffect,useId,useRef,useState,type FormEvent,type KeyboardEvent} from 'react';
+import {ArrowUpRight,Loader2,Search,X} from 'lucide-react';
+import {useInstrumentSearch} from './InstrumentSearch';
+import {usePanelActive} from './KeepPanel';
+import type {ResolvedInstrument} from '../../../supabase/functions/analyze-ticker/instrument-resolver';
+
+const labels:Record<string,string>={stock:'Acción',etf:'ETF',fund:'Fondo',index:'Índice',forex:'Divisas',crypto:'Activo digital',bond:'Bono',future:'Futuro continuo',commodity:'Materia prima'};
+function SearchPanel({onPick,onClose}:{onPick:(instrument:ResolvedInstrument)=>void;onClose:()=>void}){
+ const {resolve,cancel,...search}=useInstrumentSearch({scope:'quick'}),input=useRef<HTMLInputElement>(null),listId=useId(),[query,setQuery]=useState(''),[resolved,setResolved]=useState<ResolvedInstrument|null>(null),[highlighted,setHighlighted]=useState(-1);
+ const latest=useRef(query),generation=useRef(0),timer=useRef<number|null>(null),pending=useRef<{query:string;promise:Promise<ResolvedInstrument|null>}|null>(null),mounted=useRef(true),picked=useRef(false),pickRef=useRef(onPick);latest.current=query;pickRef.current=onPick;
+ const choose=useCallback((instrument:ResolvedInstrument)=>{if(picked.current)return;picked.current=true;pickRef.current(instrument);},[]);
+ useEffect(()=>{mounted.current=true;input.current?.focus();return()=>{mounted.current=false;if(timer.current!==null)window.clearTimeout(timer.current);};},[]);
+ const lookup=useCallback(async(explicit=false)=>{
+  if(timer.current!==null){window.clearTimeout(timer.current);timer.current=null;}
+  const value=latest.current.trim();if(!value)return;
+  const version=generation.current,task=pending.current?.query===value?pending.current:{query:value,promise:resolve(value)};pending.current=task;
+  const result=await task.promise;if(pending.current===task)pending.current=null;
+  if(!mounted.current||version!==generation.current||latest.current.trim()!==value)return;
+  setResolved(result);setHighlighted(-1);if(explicit&&result)choose(result);
+ },[resolve,choose]);
+ useEffect(()=>{if(!query.trim())return;timer.current=window.setTimeout(()=>void lookup(),350);return()=>{if(timer.current!==null)window.clearTimeout(timer.current);};},[query,lookup]);
+ const current=search.query===query.trim(),rows=(current&&search.candidates.length?search.candidates:resolved?[resolved]:[]).slice(0,20),busy=current&&search.busy,message=current?search.message:'';
+ function change(value:string){generation.current++;pending.current=null;cancel();setResolved(null);setHighlighted(-1);setQuery(value);}
+ function submit(event:FormEvent){event.preventDefault();if(highlighted>=0&&rows[highlighted])choose(rows[highlighted]);else if(rows.length===1)choose(rows[0]);else if(!rows.length)void lookup(true);}
+ function key(event:KeyboardEvent<HTMLInputElement>){if(event.key==='Escape'){event.preventDefault();onClose();return;}if((event.key==='ArrowDown'||event.key==='ArrowUp')&&rows.length){event.preventDefault();setHighlighted(previous=>event.key==='ArrowDown'?(previous+1)%rows.length:previous<0?rows.length-1:(previous-1+rows.length)%rows.length);}}
+ return <div role="dialog" aria-label="Búsqueda rápida de activos" className="absolute right-0 top-full z-40 mt-2 w-[min(34rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-700 bg-[#0b111a] shadow-xl"><form onSubmit={submit} className="flex items-center gap-2 border-b border-slate-800 p-3"><Search size={15} className="ml-1 shrink-0 text-slate-500"/><input ref={input} aria-label="Buscar activo en el feed" role="combobox" aria-autocomplete="list" aria-expanded={rows.length>0} aria-controls={listId} aria-activedescendant={highlighted>=0?`${listId}-${highlighted}`:undefined} maxLength={100} value={query} onChange={event=>change(event.target.value)} onKeyDown={key} placeholder="Nombre o ticker" className="min-w-0 flex-1 bg-transparent px-1 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-600"/><button type="button" onClick={onClose} aria-label="Cerrar búsqueda de activos" className="rounded p-2 text-slate-500 hover:text-slate-100 focus-visible:outline focus-visible:outline-slate-400"><X size={13}/></button></form>{busy&&<p role="status" className="flex items-center gap-2 px-4 py-4 text-[11px] text-slate-400"><Loader2 size={12} className="animate-spin"/>Buscando activo…</p>}{message&&<p role="status" className="px-4 py-3 text-[11px] leading-relaxed text-slate-400">{message}</p>}{rows.length>0&&<div role="listbox" id={listId} aria-label="Activos encontrados" className="max-h-[min(24rem,55vh)] overflow-y-auto p-2">{rows.map((item,index)=><button type="button" role="option" aria-selected={highlighted===index} id={`${listId}-${index}`} key={`${item.providerSymbol}:${item.symbol}`} onMouseEnter={()=>setHighlighted(index)} onClick={()=>choose(item)} className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left transition-colors focus-visible:outline focus-visible:outline-slate-400 ${highlighted===index?'bg-slate-800/80':'hover:bg-slate-800/50'}`}><span className="min-w-0"><span className="flex flex-wrap items-center gap-x-3 gap-y-1"><span className="text-xs font-medium text-slate-100">{item.symbol}</span><span className="text-[9px] text-slate-500">{item.type==='future'&&!item.symbol.endsWith('=F')?'Futuro':labels[item.type]??'Activo'} · {item.exchange}{item.currency?' · '+item.currency:''}</span></span><span className="mt-1.5 block text-[11px] leading-relaxed text-slate-400">{item.name}</span></span><ArrowUpRight size={12} className="shrink-0 text-slate-600"/></button>)}</div>}{!busy&&!message&&!rows.length&&<p className="px-4 py-4 text-[10px] leading-relaxed text-slate-500">Busca un activo para abrir su ficha de mercado.</p>}</div>;
+}
+
+export default function FeedQuickSearch({onSelect,onMarketSelect}:{onSelect:(symbol:string)=>void;onMarketSelect?:(symbol:string)=>void}){
+ const active=usePanelActive(),[open,setOpen]=useState(false),root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null);
+ const close=useCallback((restore=true)=>{setOpen(false);if(restore)trigger.current?.focus();},[]);
+ useEffect(()=>{if(!active)close(false);},[active,close]);
+ const pick=useCallback((instrument:ResolvedInstrument)=>{close(false);(onMarketSelect??onSelect)(instrument.symbol);},[close,onMarketSelect,onSelect]);
+ useEffect(()=>{if(!open)return;const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!root.current?.contains(event.target))close(false);};document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);},[open,close]);
+ return <div className="flex justify-end"><div ref={root} className="relative"><button ref={trigger} type="button" aria-label="Buscar activo" aria-expanded={open} aria-haspopup="dialog" onClick={()=>open?close():setOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-slate-700/70 px-3 py-2 text-[11px] text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-100 focus-visible:outline focus-visible:outline-slate-400"><Search size={13}/><span>Buscar activo</span></button>{open&&<SearchPanel onPick={pick} onClose={close}/>}</div></div>;
+}

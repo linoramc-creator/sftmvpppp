@@ -88,7 +88,7 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
       if(body.peers!==undefined&&(!Array.isArray(body.peers)||body.peers.length>8||body.peers.some((p:unknown)=>!p||typeof p!=='object'||Array.isArray(p)||!symbol((p as Body).symbol)||typeof (p as Body).name!=='string'||(p as Body).name.length>120||/[<>\p{Cc}\p{Cf}]/u.test((p as Body).name))))throw new BetaError(400,'Empresas comparables inválidas.');
       return {request_class:'data'};
     }
-    if(body.panel==='instrumentSearch'){if(typeof body.query!=='string'||body.query.trim().length<1||body.query.length>100||/[<>\p{Cc}\p{Cf}]|https?:|:\/\/|api[_-]?(?:key|token)\s*=/iu.test(body.query)||body.kind!==undefined&&!['stock','etf'].includes(body.kind))throw new BetaError(400,'Búsqueda inválida.');return {request_class:'data'};}
+    if(body.panel==='instrumentSearch'){if(typeof body.query!=='string'||body.query.trim().length<1||body.query.length>100||/[<>\p{Cc}\p{Cf}]|https?:|:\/\/|api[_-]?(?:key|token)\s*=/iu.test(body.query)||body.kind!==undefined&&!['stock','etf'].includes(body.kind)||body.scope!==undefined&&body.scope!=='quick'||body.scope==='quick'&&body.kind!==undefined)throw new BetaError(400,'Búsqueda inválida.');return {request_class:'data'};}
     if(body.panel==='issuerResearch'){if(!symbol(body.subject))throw new BetaError(400,'Ticker inválido.');return {request_class:'expensive'};}
     if(body.panel==='bondsCreditNews'){
       if(!['US','FR','DE','GB','private'].includes(body.subject))throw new BetaError(400,'Mercado de noticias inválido.');

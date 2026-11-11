@@ -11,6 +11,7 @@ it('shows conventional research symbols without changing the instrument or rever
  expect(feedTicker({symbol:'QQQ',displaySymbol:'SPY'})).toBe('QQQ');
  for(const symbol of ['GC=F','CL=F','BZ=F','NQ=F'])expect(feedTickerContext(symbol)).toBe('Futuros');
  for(const symbol of ['XAUUSD=X','XAGUSD=X'])expect(feedTickerContext(symbol)).toBe('Contado');
+ for(const [symbol,ticker] of [['WTI-SPOT','WTI'],['BRENT-SPOT','BRENT']]){expect(feedTicker(symbol)).toBe(ticker);expect(feedTickerContext(symbol)).toBe('Contado');}
  expect(feedTickerContext('EURUSD=X')).toBeNull();
 });
 it('distinguishes the SGX product and actual settlement month from a fictitious continuous contract',()=>{

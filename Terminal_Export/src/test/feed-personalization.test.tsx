@@ -86,7 +86,7 @@ it('presents SGX iron as FEF and uses its internal settlement identifier only in
  const value={...defaultFeedPreferences(),commodities:['GC=F','CL=F']},save=vi.fn().mockResolvedValue(undefined);api.mockResolvedValue({symbol:'SGX-IODEX',label:'Hierro · Nov-26'});
  render(<FeedGroupEditor group="commodities" preferences={value} labels={{}} onSave={save}/>);fireEvent.click(screen.getByRole('button',{name:'Personalizar materias primas'}));
  fireEvent.click(screen.getByRole('button',{name:'Elegir FEF'}));await screen.findByRole('button',{name:'Quitar FEF'});expect(screen.queryByText('SGX-IODEX')).toBeNull();expect(api).toHaveBeenCalledWith('validateFeedAsset',{group:'commodities',symbol:'SGX-IODEX'});
- fireEvent.click(screen.getByRole('button',{name:'Guardar'}));await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));expect(save.mock.calls[0][0].commodities).toEqual(['GC=F','CL=F','SGX-IODEX']);
+ fireEvent.click(screen.getByRole('button',{name:'Guardar'}));await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));expect(save.mock.calls[0][0].commodities).toEqual(['GC=F','WTI-SPOT','SGX-IODEX']);
 });
 it('cannot add a response for another ticker or revive an addition after the editor was closed',async()=>{
  let resolve:(value:any)=>void=()=>{};api.mockImplementation(()=>new Promise(done=>resolve=done));const value={...defaultFeedPreferences(),indices:['^GSPC']};

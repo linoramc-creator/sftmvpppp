@@ -52,7 +52,7 @@
   }
 }
 
-/* The feed and its asset views never receive this workspace palette. Retain
+/* The feed retains its original palette; detail views share the workspace. Retain
    chart series and financial status colors; only interface accents and panel
    surfaces become quieter. Focus keeps a distinct blue outline. */
 @layer components {
@@ -93,6 +93,14 @@
     [class~="bg-[#0c131d]"]
   ) {
     background-color: rgb(var(--terminal-panel-surface));
+  }
+
+  /* These tooltips carry inline navy backgrounds in shared chart components.
+     Scope the surface override to the quick market detail, leaving plotted
+     series, financial colors and the feed's own cards untouched. */
+  .market-instrument-detail .recharts-default-tooltip {
+    background-color: rgb(var(--terminal-panel-surface)) !important;
+    border-color: rgb(var(--terminal-slate-800)) !important;
   }
 }
 

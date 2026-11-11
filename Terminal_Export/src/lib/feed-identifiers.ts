@@ -9,6 +9,8 @@ const TREASURY_TICKERS:Record<string,string>={'0.25':'US03MY','0.5':'US06MY','1'
 export function feedTicker(value:IdentifierInput):string{
  const symbol=rawSymbol(value);
  if(symbol==='SGX-IODEX')return 'FEF';
+ if(symbol==='WTI-SPOT')return 'WTI';
+ if(symbol==='BRENT-SPOT')return 'BRENT';
  if(INDEX_TICKERS[symbol])return INDEX_TICKERS[symbol];
  if(/^[A-Z]{6}=X$/.test(symbol))return symbol.slice(0,-2);
  if(/^[A-Z]{3}=X$/.test(symbol))return 'USD'+symbol.slice(0,3);
@@ -21,6 +23,7 @@ export function feedTicker(value:IdentifierInput):string{
 export function feedTickerContext(value:IdentifierInput):string|null{
  const symbol=rawSymbol(value);
  if(symbol==='SGX-IODEX')return ['SGX',typeof value==='string'?null:value.contractLabel].filter(Boolean).join(' · ');
+ if(symbol==='WTI-SPOT'||symbol==='BRENT-SPOT')return 'Contado';
  if(/^(?:XAU|XAG)USD(?:=X)?$/.test(symbol))return 'Contado';
  if(/^[A-Z0-9]+(?:\.CME)?=F$/.test(symbol))return symbol.includes('.CME')?'Futuros · CME':'Futuros';
  return null;

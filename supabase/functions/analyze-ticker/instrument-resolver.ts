@@ -2,7 +2,7 @@ import {eodhdGet,eodhdSymbol,terminalInstrumentSymbol,EODHD_EXCHANGES} from './e
 export {terminalInstrumentSymbol} from './eodhd-client.ts';
 
 type Row=Record<string,any>;
-export type InstrumentType='stock'|'etf'|'fund'|'index'|'forex'|'crypto'|'bond';
+export type InstrumentType='stock'|'etf'|'fund'|'index'|'forex'|'crypto'|'bond'|'future'|'commodity';
 export type ResolvedInstrument={symbol:string;providerSymbol:string;name:string;exchange:string;type:InstrumentType;currency:string|null;isin:string|null;primary:boolean};
 export type InstrumentResolution={query:string;status:'resolved'|'ambiguous'|'not-found'|'invalid'|'unavailable';instrument:ResolvedInstrument|null;candidates:ResolvedInstrument[]};
 type SearchRequest=<T=unknown>(path:string,query?:Record<string,string|number|undefined>,options?:{ttlMs?:number;cost?:number;timeoutMs?:number})=>Promise<T|null>;

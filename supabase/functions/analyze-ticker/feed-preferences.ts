@@ -1,4 +1,5 @@
 import {spotMetal} from './spot-metals.ts';
+import {spotOil} from './spot-oil.ts';
 export const FEED_GROUP_LIMIT = 7;
 export const FEED_GROUP_KEYS = ['indices', 'etfs', 'currencies', 'commodities'] as const;
 export type FeedGroupKey = typeof FEED_GROUP_KEYS[number];
@@ -9,7 +10,7 @@ export const FEED_DEFAULT_ITEMS: Record<FeedGroupKey, [string,string][]> = {
  indices:[['^GSPC','S&P 500'],['^IXIC','Nasdaq Composite'],['NQ=F','Nasdaq 100 · Futuro'],['^DJI','Dow Jones'],['^KS11','KOSPI · Corea del Sur'],['^N225','Nikkei 225 · Japón'],['^VIX','Volatilidad']],
  etfs:[['SPY','S&P 500 · SPY'],['QQQ','Nasdaq 100 · QQQ'],['URTH','MSCI World · URTH'],['IWM','Russell 2000 · IWM'],['VEA','Desarrollados fuera de EE. UU. · VEA'],['VWO','Emergentes · VWO'],['TLT','Tesoro a largo plazo · TLT']],
  currencies:[['EURUSD=X','EUR/USD'],['GBPUSD=X','GBP/USD'],['JPY=X','USD/JPY'],['CHF=X','USD/CHF'],['CAD=X','USD/CAD'],['CNY=X','USD/CNY'],['BTC-USD','Bitcoin']],
- commodities:[['XAUUSD=X','Oro · Spot'],['XAGUSD=X','Plata · Spot'],['CL=F','Petróleo WTI'],['BZ=F','Petróleo Brent'],['HG=F','Cobre'],['NG=F','Gas natural'],['SGX-IODEX','Hierro · IODEX']],
+ commodities:[['XAUUSD=X','Oro · Spot'],['XAGUSD=X','Plata · Spot'],['WTI-SPOT','Petróleo WTI · Contado'],['BRENT-SPOT','Petróleo Brent · Contado'],['HG=F','Cobre'],['NG=F','Gas natural'],['SGX-IODEX','Hierro · IODEX']],
 };
 // Curated identifiers are suggestions, not entitlements or verified current
 // prices. Every addition still passes the server's live metadata validation.
@@ -20,7 +21,9 @@ export const FEED_SUGGESTIONS:Record<FeedGroupKey,[string,string][]>={
  commodities:[...FEED_DEFAULT_ITEMS.commodities,['GC=F','Oro · Futuro'],['SI=F','Plata · Futuro'],['PL=F','Platino'],['PA=F','Paladio'],['ALI=F','Aluminio'],['KC=F','Café'],['SB=F','Azúcar'],['CC=F','Cacao'],['CT=F','Algodón']],
 };
 const INDEX_ALIASES:Record<string,string>={SPX:'^GSPC',SP500:'^GSPC','S&P500':'^GSPC',NDX:'^NDX',IXIC:'^IXIC',NASDAQ:'^IXIC',DJI:'^DJI',DJIA:'^DJI',VIX:'^VIX',RUT:'^RUT',KOSPI:'^KS11',KS11:'^KS11',N225:'^N225',NKY:'^N225',IDXNKY:'^N225',NIKKEI:'^N225',NIKKEI225:'^N225',IBEX:'^IBEX',IBEX35:'^IBEX',FTSE:'^FTSE',FTSE100:'^FTSE',DAX:'^GDAXI',GDAXI:'^GDAXI',CAC:'^FCHI',CAC40:'^FCHI',FCHI:'^FCHI',STOXX50E:'^STOXX50E',EUROSTOXX50:'^STOXX50E',SX5E:'^STOXX50E',FTSEMIB:'FTSEMIB.MI',HSI:'^HSI',HANGSENG:'^HSI',SSEC:'000001.SS',SHCOMP:'000001.SS',SHANGHAI:'000001.SS',SZI:'399001.SZ',SHENZHEN:'399001.SZ',CSI300:'000300.SS',NQ:'NQ=F',ES:'ES=F',YM:'YM=F',RTY:'RTY=F'};
-const COMMODITY_ALIASES:Record<string,string>={XAUUSD:'XAUUSD=X','XAU/USD':'XAUUSD=X',XAGUSD:'XAGUSD=X','XAG/USD':'XAGUSD=X',GC:'GC=F',SI:'SI=F',CL:'CL=F',BZ:'BZ=F',HG:'HG=F',NG:'NG=F',PL:'PL=F',PA:'PA=F',ALI:'ALI=F',KC:'KC=F',SB:'SB=F',CC:'CC=F',CT:'CT=F',FEF:'SGX-IODEX',IODEX:'SGX-IODEX',IRON:'SGX-IODEX'};
+// Only feed commodity slots migrate the old oil futures selections to physical
+// spot references. General research/candles keep their genuine futures symbols.
+const COMMODITY_ALIASES:Record<string,string>={XAUUSD:'XAUUSD=X','XAU/USD':'XAUUSD=X',XAGUSD:'XAGUSD=X','XAG/USD':'XAGUSD=X',GC:'GC=F',SI:'SI=F',WTI:'WTI-SPOT',BRENT:'BRENT-SPOT',CL:'WTI-SPOT','CL=F':'WTI-SPOT',BZ:'BRENT-SPOT','BZ=F':'BRENT-SPOT',DCOILWTICO:'WTI-SPOT',DCOILBRENTEU:'BRENT-SPOT',HG:'HG=F',NG:'NG=F',PL:'PL=F',PA:'PA=F',ALI:'ALI=F',KC:'KC=F',SB:'SB=F',CC:'CC=F',CT:'CT=F',FEF:'SGX-IODEX',IODEX:'SGX-IODEX',IRON:'SGX-IODEX'};
 const FX_CODES=new Set('USD EUR GBP JPY CHF CAD CNY CNH AUD NZD HKD SGD SEK NOK DKK MXN BRL ZAR INR KRW TRY PLN CZK HUF ILS SAR AED THB TWD'.split(' '));
 export function normalizeFeedSymbol(group:FeedGroupKey,value:unknown):string|null{
  if(typeof value!=='string'||value.length>32||!FEED_GROUP_KEYS.includes(group)||/[\p{Cc}\p{Cf}]/u.test(value))return null;
@@ -48,7 +51,8 @@ export function feedSuggestions(group:FeedGroupKey,query:string,selected:string[
 export function defaultFeedPreferences():FeedPreferences{return Object.fromEntries(FEED_GROUP_KEYS.map(key=>[key,FEED_DEFAULT_ITEMS[key].map(([symbol])=>symbol)])) as FeedPreferences;}
 export function feedSymbolAllowed(key:FeedGroupKey,symbol:string):boolean{
  if(!/^[A-Z0-9^][A-Z0-9.^=-]{0,14}$/.test(symbol))return false;
- if(key==='commodities')return spotMetal(symbol)!==null||symbol==='SGX-IODEX'||/^[A-Z0-9]+(?:\.CME)?=F$/.test(symbol);
+ if(spotOil(symbol))return key==='commodities';
+ if(key==='commodities')return spotMetal(symbol)!==null||spotOil(symbol)!==null||symbol==='SGX-IODEX'||/^[A-Z0-9]+(?:\.CME)?=F$/.test(symbol);
  // Some published indices use exchange-suffixed symbols without a caret
  // (for example FTSEMIB.MI). Metadata validation decides their instrument type.
  if(key==='indices')return symbol.startsWith('^')||/^[A-Z0-9]+(?:\.CME)?=F$/.test(symbol)||!symbol.includes('=')&&!symbol.includes('-');
@@ -75,5 +79,5 @@ export function feedPreferenceLabel(key:FeedGroupKey,symbol:string):string{retur
 export function feedPreferencesIdentity(preferences:FeedPreferences):string{return FEED_GROUP_KEYS.map(key=>`${key}=${preferences[key].join(',')}`).join(';');}
 export async function feedPreferencesKey(symbols:string[],preferences:FeedPreferences):Promise<string>{
  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`${symbols.join(',')}|${feedPreferencesIdentity(preferences)}`));
- return 'feed-markets-v11:'+Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+ return 'feed-markets-v12:'+Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }

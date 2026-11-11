@@ -9,6 +9,7 @@ import {FEED_GROUP_KEYS,FEED_GROUP_LABELS} from '../../../supabase/functions/ana
 import type { MarketData } from "@/lib/analyze";
 import {NewsCards,TreasuryCard,FeedQuoteStamp,visibleNewsArticles} from './FeedCards';
 import StockResearchRadar from './StockResearchRadar';
+import FeedQuickSearch from './FeedQuickSearch';
 import { authenticatedFetch } from "@/lib/beta-api";
 import {useTerminalEntry,waitForVisibleFeedImages} from '@/lib/terminal-entry';
 import { useEffect, useState, useRef, useId, type ReactNode } from 'react';
@@ -141,6 +142,7 @@ export function FeedView({stocks,data:quotes,onChange,onSelect,onMarketSelect,on
   const data = preferences.ready&&market.loadedKey===marketKey&&market.data?market.data:{groups:[],treasury:[],earnings:[],fetchedAt:''};
   return <div ref={root} className="space-y-6">
     {preferences.error?<Status error={preferences.error} retry={preferences.retry}/>:(!data.fetchedAt||market.error)&&<Status {...market} retry={preferences.retry}/>}
+    <FeedQuickSearch key={profile.id} onSelect={onSelect} onMarketSelect={onMarketSelect}/>
     <div className="grid gap-4 xl:grid-cols-3">{data.groups.map(group => {const editable=FEED_GROUP_KEYS.find(key=>FEED_GROUP_LABELS[key]===group.label);return <Box key={group.label} title={group.label} action={editable?<FeedGroupEditor key={`${profile.id}:${editable}`} group={editable} preferences={preferences.groups} labels={Object.fromEntries(group.items.map(item=>[item.symbol,item.label]))} onSave={preferences.save}/>:undefined}><div className="space-y-2">{group.items.map(item=><FeedInstrument key={item.symbol} item={item} onSelect={editable&&editable!=='commodities'?onMarketSelect??onSelect:undefined}/>)}</div></Box>;})}<Box title="TESORO EE. UU. · CURVA Y RENDIMIENTOS"><TreasuryCard points={data.treasury??[]}/></Box><Box title="MI WATCHLIST"><WatchlistCard stocks={stocks} data={quotes} liveQuotes={preferences.ready&&market.loadedKey===marketKey?market.data?.watchlist:undefined} onChange={onChange} onSelect={onSelect}/></Box></div>
     <div className="grid xl:grid-cols-[minmax(0,1fr)_20rem] gap-4">
       <div className="space-y-4"><Box title="PORTADAS DEL DÍA">{state.data&&<div className="mb-3"><Stamp at={state.data.fetchedAt}/></div>}{state.data?<NewsCards articles={state.data.headlines}/>:<Status {...state}/>}</Box><Box title="GEOPOLÍTICA · ÚLTIMAS NOTICIAS">{state.data?<NewsCards articles={state.data.geopolitics??[]} geo/>:<Status {...state}/>}</Box></div>

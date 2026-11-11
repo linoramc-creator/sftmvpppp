@@ -14,7 +14,7 @@ test('normalizes bounded preferences without mutating default arrays or acceptin
 });
 test('market cache identifies the ordered public selection in a bounded key',async()=>{
  const defaults=defaultFeedPreferences(),first=await feedPreferencesKey(['AAPL'],defaults);
- assert.match(first,/^feed-markets-v11:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
+ assert.match(first,/^feed-markets-v12:[a-f0-9]{64}$/);assert.equal(first,await feedPreferencesKey(['AAPL'],defaultFeedPreferences()));
  assert.notEqual(first,await feedPreferencesKey(['MSFT'],defaults));
  assert.notEqual(first,await feedPreferencesKey(['AAPL'],{...defaults,indices:[...defaults.indices].reverse()}));
 });
@@ -117,7 +117,7 @@ test('FEF uses the dated SGX settlement path and stays unavailable when no verif
 
 test('spot metal defaults and input aliases stay distinct from futures and other currency pairs',()=>{
  const defaults=defaultFeedPreferences();
- assert.deepEqual(defaults.commodities,['XAUUSD=X','XAGUSD=X','CL=F','BZ=F','HG=F','NG=F','SGX-IODEX']);
+ assert.deepEqual(defaults.commodities,['XAUUSD=X','XAGUSD=X','WTI-SPOT','BRENT-SPOT','HG=F','NG=F','SGX-IODEX']);
  assert.equal(defaults.commodities.length,7);assert.equal(defaults.etfs.length,7);
  for(const [input,expected]of [['XAUUSD','XAUUSD=X'],['XAU/USD','XAUUSD=X'],['XAGUSD','XAGUSD=X'],['XAG/USD','XAGUSD=X'],['GC','GC=F'],['SI','SI=F']] as const)assert.equal(normalizeFeedSymbol('commodities',input),expected);
  for(const input of ['NKY','IDXNKY'])assert.equal(normalizeFeedSymbol('indices',input),'^N225');
@@ -125,7 +125,7 @@ test('spot metal defaults and input aliases stay distinct from futures and other
  assert.equal(normalizeFeedPreferences({...defaults,commodities:['XAUUSD','XAU/USD']}),null);
  assert.deepEqual(feedSuggestions('commodities','GC',[],7).map(([symbol])=>symbol),['GC=F']);
  assert.deepEqual(feedSuggestions('commodities','XAUUSD',[],7).map(([symbol])=>symbol),['XAUUSD=X']);
- const custom=['SI=F','GC=F','CL=F'];assert.deepEqual(normalizeSavedFeedPreferences({...defaults,commodities:custom})?.commodities,custom);
+ const custom=['SI=F','GC=F','CL=F'];assert.deepEqual(normalizeSavedFeedPreferences({...defaults,commodities:custom})?.commodities,['SI=F','GC=F','WTI-SPOT']);
 });
 
 test('commodity validation accepts only genuine USD spot metal identities and dated available spot data',async()=>{
@@ -141,6 +141,12 @@ test('a legacy stored selection matches its seven-item view during authenticated
  const legacy={indices:['^FTSE'],etfs:['VTI','QQQ','SPY','IWM','GLD','TLT','EFA','HYG'],currencies:['EURUSD=X']},groups=normalizeSavedFeedPreferences(legacy)!;const {writes}=securityFixture(t,'INDEX',legacy);let dispatched=false;
  const response=await secureRequest(request({panel:'feedMarkets',subject:'',feedGroups:groups}),async body=>{dispatched=true;return Response.json(body.feedGroups);});
  assert.equal(response.status,200);assert.equal(dispatched,true);assert.equal(writes.length,0);assert.deepEqual(await response.json(),groups);
+});
+
+test('stored oil futures in commodity slots load as spot without writes and match the authenticated feed request',async t=>{
+ const legacy={...defaultFeedPreferences(),commodities:['GC=F','BZ=F','CL=F','HG=F']},groups=normalizeSavedFeedPreferences(legacy)!;const {writes}=securityFixture(t,'INDEX',legacy);
+ const loaded=await secureRequest(request({accountAction:'getFeedPreferences'}),async()=>Response.json({}));assert.equal(loaded.status,200);assert.deepEqual((await loaded.json()).groups.commodities,['GC=F','BRENT-SPOT','WTI-SPOT','HG=F']);
+ let dispatched=false;const response=await secureRequest(request({panel:'feedMarkets',subject:'',feedGroups:groups}),async body=>{dispatched=true;return Response.json(body.feedGroups);});assert.equal(response.status,200);assert.equal(dispatched,true);assert.deepEqual((await response.json()).commodities,groups.commodities);assert.equal(writes.length,0);assert.deepEqual(legacy.commodities,['GC=F','BZ=F','CL=F','HG=F']);
 });
 
 test('European and Chinese index aliases resolve to selectable canonical codes in the expanded catalog',()=>{
