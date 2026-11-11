@@ -46,7 +46,7 @@ export async function handlePortfolioLab(body:Row,uid:string,deps:PortfolioLabDe
  }
  if(body.action==='archive'&&!body.archived){const restored:PortfolioRecord=record.archived?await store('restore',uid,record.id,record.version):record;return result(restored,archivedMarket(restored),restored.state.updatedAt);}
  if(record.archived){if(body.action==='snapshot'||body.action==='archive')return result(record,archivedMarket(record),record.state.updatedAt);throw new PortfolioError('Restaura la cartera antes de modificarla.',409);}
- if(body.action==='snapshot'&&typeof record.state.lastAdvancedAt==='number'&&now>=record.state.lastAdvancedAt&&now-record.state.lastAdvancedAt<(record.state.orders.some(activeOrder)?60000:300000))return result(record,archivedMarket(record),now);
+ if(body.action==='snapshot'&&typeof record.state.lastAdvancedAt==='number'&&now>=record.state.lastAdvancedAt){const persisted=result(record,archivedMarket(record),now),cooldown=persisted.metrics.coverage==='partial'?30000:record.state.orders.some(activeOrder)?60000:300000;if(now-record.state.lastAdvancedAt<cooldown)return persisted;}
  const requested=body.action==='order'?body.order.symbol:null,loaded=await load([...symbols(record.state),...(requested?[requested]:[])],now),market=loaded.market;
  for(let attempt=0;attempt<3;attempt++){
   try{

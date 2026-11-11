@@ -6,7 +6,7 @@ import { supabase, isPasswordRecovery } from '@/integrations/supabase/client';
 import { accountApi,type Profile } from '@/lib/beta-api';
 import { normalizeProfileName, profileDisplayName } from '../../../supabase/functions/analyze-ticker/profile-name';
 import TerminalWelcome from './TerminalWelcome';
-import {TerminalEntryProvider,type FeedReadiness} from '@/lib/terminal-entry';
+import {TerminalEntryProvider,type FeedReadiness,type TerminalEntryScope} from '@/lib/terminal-entry';
 import './auth-experience.css';
 const Context = createContext<Profile | null>(null);
 export const useProfile = () => useContext(Context)!;
@@ -17,7 +17,7 @@ export default function AuthGate({children}: {children:ReactNode}) {
   const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmation,setConfirmation]=useState('');
   const [name,setName]=useState('');
   const location=useLocation();
-  const [welcome,setWelcome]=useState<{id:string;profileId:string;name:string;attempt:number;startedAt:number;phase:'loading'|'ready'|'error'|'leaving';detail:string}|null>(null);
+  const [welcome,setWelcome]=useState<{id:string;profileId:string;name:string;attempt:number;startedAt:number;phase:'loading'|'ready'|'error'|'leaving';detail:string;portfolioRequired:boolean;gates:Partial<Record<TerminalEntryScope,FeedReadiness>>}|null>(null);
   const welcomedUsers=useRef(new Set<string>());
   const [register,setRegister]=useState(false),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0);
   const [settings,setSettings]=useState(isPasswordRecovery),[notice,setNotice]=useState('');
@@ -36,12 +36,20 @@ export default function AuthGate({children}: {children:ReactNode}) {
   useEffect(()=>{
     if(location.pathname!=='/'||!profile||error||recovery){setWelcome(null);return;}
     if(welcomedUsers.current.has(profile.id))return;
-    setWelcome(previous=>previous?.profileId===profile.id?previous:{id:crypto.randomUUID(),profileId:profile.id,name:normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email),attempt:0,startedAt:Date.now(),phase:'loading',detail:'Preparando tu espacio de mercado…'});
+    setWelcome(previous=>previous?.profileId===profile.id?previous:{id:crypto.randomUUID(),profileId:profile.id,name:normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email),attempt:0,startedAt:Date.now(),phase:'loading',detail:'Preparando tu espacio de mercado…',portfolioRequired:profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com',gates:{}});
   },[profile?.id,error,recovery,location.pathname]);
-  const reportReadiness=useCallback((id:string,attempt:number,state:FeedReadiness)=>{
-    setWelcome(previous=>!previous||previous.id!==id||previous.attempt!==attempt||previous.phase==='leaving'||previous.phase===state.status&&previous.detail===(state.detail??'')?previous:{...previous,phase:state.status,detail:state.detail??''});
+  const reportReadiness=useCallback((id:string,attempt:number,state:FeedReadiness,scope:TerminalEntryScope='feed')=>{
+    setWelcome(previous=>{
+      if(!previous||previous.id!==id||previous.attempt!==attempt||previous.phase==='leaving'||scope==='portfolio'&&!previous.portfolioRequired)return previous;
+      const prior=previous.gates[scope];if(prior?.status===state.status&&prior.detail===state.detail)return previous;
+      const gates={...previous.gates,[scope]:state},required:TerminalEntryScope[]=previous.portfolioRequired?['feed','portfolio']:['feed'];
+      const failed=required.find(key=>gates[key]?.status==='error'),pending=required.find(key=>gates[key]?.status!=='ready');
+      const phase=failed?'error':pending?'loading':'ready';
+      const detail=failed?(gates[failed]?.detail??'No se ha podido preparar tu espacio.'):pending?(gates[pending]?.detail??(pending==='portfolio'?'Preparando tu portfolio y sus métricas…':'Preparando tu feed…')):'Tu espacio de trabajo está preparado.';
+      return {...previous,gates,phase,detail};
+    });
   },[]);
-  const entryContext=useMemo(()=>welcome?{sessionId:welcome.id,attempt:welcome.attempt,report:reportReadiness}:null,[welcome?.id,welcome?.attempt,reportReadiness]);
+  const entryContext=useMemo(()=>welcome?{sessionId:welcome.id,attempt:welcome.attempt,portfolioRequired:welcome.portfolioRequired,report:reportReadiness}:null,[welcome?.id,welcome?.attempt,welcome?.portfolioRequired,reportReadiness]);
   useEffect(()=>{
     if(!welcome||welcome.phase==='leaving')return;
     const id=welcome.id,attempt=welcome.attempt;
@@ -86,7 +94,7 @@ export default function AuthGate({children}: {children:ReactNode}) {
       name={profile?(normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email)):session?profileDisplayName(session.user?.user_metadata,session.user?.email??''):''}
       phase={error?'error':welcome?.phase??'loading'}
       detail={error||(!ready?'Comprobando sesión…':!profile?'Comprobando el acceso a tu espacio…':welcome?.detail??'Preparando tu espacio de mercado…')}
-      onRetry={()=>{if(!profile||error){setRetry(n=>n+1);return;}setWelcome(previous=>previous?{...previous,attempt:previous.attempt+1,startedAt:Date.now(),phase:'loading',detail:'Volviendo a preparar tu feed…'}:previous);}}
+      onRetry={()=>{if(!profile||error){setRetry(n=>n+1);return;}setWelcome(previous=>previous?{...previous,attempt:previous.attempt+1,startedAt:Date.now(),phase:'loading',detail:'Volviendo a preparar tu espacio…',gates:{}}:previous);}}
       onContinue={profile&&!error?()=>setWelcome(previous=>previous?{...previous,phase:'leaving'}:previous):undefined}
       onSignOut={session?signOut:undefined}
     />}

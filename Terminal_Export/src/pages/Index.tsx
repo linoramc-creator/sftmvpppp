@@ -3,6 +3,7 @@ import {parseSections,renderElements,sectorTrends} from '@/components/research/R
 import ReportQuote from '@/components/ReportQuote';
 import {feedTicker,feedTickerContext,treasuryDisplayTicker} from '@/lib/feed-identifiers';
 import KeepPanel from '@/components/KeepPanel';
+import {useTerminalEntry} from '@/lib/terminal-entry';
 import { ReportLoading } from "@/components/ReportLoading";
 import { accountApi } from "@/lib/beta-api";
 import { useProfile } from "@/components/AuthGate";
@@ -248,6 +249,7 @@ function extractCurrentMetrics(content: string): { label: string; value: string 
 // ── Main component ─────────────────────────────────────────────────────
 
 const Index = () => {
+  const terminalEntry=useTerminalEntry();
   const profile = useProfile();
   const stockSearch=useInstrumentSearch(),fundSearch=useInstrumentSearch();
   const [saving,setSaving] = useState(false);
@@ -624,7 +626,7 @@ const Index = () => {
       <KeepPanel active={navTab === "bonos"}><Suspense fallback={<div role="status" className="mx-auto my-6 h-64 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse" aria-label="Cargando bonos y créditos"/>}><BondsCreditView /></Suspense></KeepPanel>
       <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} onMarketSelect={openMarketAsset} onEarningsSelect={openEarningsAsset} watchlistReady={watchlistReady} watchlistError={watchlistError} onRetryWatchlist={()=>setWatchlistRetry(n=>n+1)} tickerReady={marketData!==null&&marketDataKey===customStocks.join(',')}/></main></KeepPanel>
       <KeepPanel active={navTab === "brief"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo brief…</p>}><DailyBrief watchlist={customStocks} syncWatchlist={()=>persistWatchlist(customStocks)}/></Suspense></KeepPanel>
-      {profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com'&&<KeepPanel active={navTab === 'portfolio'}><Suspense fallback={<div role="status" aria-label="Abriendo laboratorio de portfolio" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><PortfolioLab onSelect={openWatchAsset}/></Suspense></KeepPanel>}
+      {profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com'&&<KeepPanel active={navTab === 'portfolio'} preload={!!terminalEntry?.portfolioRequired}><Suspense fallback={<div role="status" aria-label="Abriendo laboratorio de portfolio" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><PortfolioLab onSelect={openWatchAsset}/></Suspense></KeepPanel>}
       <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol+":"+(earningsDate??"watch")} symbol={watchSymbol} earningsDate={earningsDate} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "mercado"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo sesión de mercado…</p>}><MarketInstrumentDetail key={marketSymbol} symbol={marketSymbol} onBack={()=>setNavTab('feed')} onSelect={openMarketAsset}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo comparación…</p>}><UnifiedComparison /></Suspense></KeepPanel>

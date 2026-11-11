@@ -27,3 +27,21 @@ test('bad OHLC and missing volume never become fill-eligible candles or fabricat
 test('market collection coalesces duplicate symbols, always includes benchmark, and drops invalid identifiers before reads',async()=>{
  const calls:string[]=[];const loaded=await loadPortfolioMarket(['AAPL','AAPL','https://bad.test','SPY'],now,{read:async symbol=>{calls.push(symbol);return raw(symbol,symbol==='SPY'?'ETF':'EQUITY');},calendar:async()=>[]});assert.deepEqual(calls.sort(),['AAPL','SPY']);assert.equal(loaded.market.quotes.length,2);assert.equal(loaded.market.benchmark?.symbol,'SPY');
 });
+
+test('a nominal one-minute primary chart with invalid identity falls back to the verified original feed',async()=>{
+ for(const change of [{currency:'EUR'},{symbol:'OTHER'},{exchangeName:'PNK'},{exchangeTimezoneName:'Europe/London'}]){
+  let fallbacks=0;const loaded=await loadPortfolioMarket(['AAPL'],now,{calendar:async()=>[],primary:async url=>{const symbol=decodeURIComponent(new URL(url).pathname.split('/').at(-1)!);const value=raw(symbol,symbol==='SPY'?'ETF':'EQUITY');if(symbol==='AAPL')Object.assign(value.chart.result[0].meta,change);return value;},fetcher:async input=>{fallbacks++;const symbol=decodeURIComponent(new URL(String(input)).pathname.split('/').at(-1)!);return Response.json(raw(symbol,symbol==='SPY'?'ETF':'EQUITY'));}});
+  assert.equal(loaded.market.quotes.find(q=>q.symbol==='AAPL')?.price,105);assert.equal(loaded.market.quotes.find(q=>q.symbol==='AAPL')?.currency,'USD');assert.equal(fallbacks,1);
+ }
+});
+
+test('stale primary intraday observations do not suppress a newer fallback quote',async()=>{
+ let fallbacks=0;const loaded=await loadPortfolioMarket(['AAPL'],now,{calendar:async()=>[],primary:async url=>{const symbol=decodeURIComponent(new URL(url).pathname.split('/').at(-1)!),value=raw(symbol,symbol==='SPY'?'ETF':'EQUITY',[now-2*3600000]);value.chart.result[0].meta.regularMarketTime=(now-2*3600000)/1000;return value;},fetcher:async input=>{fallbacks++;const symbol=decodeURIComponent(new URL(String(input)).pathname.split('/').at(-1)!);return Response.json(raw(symbol,symbol==='SPY'?'ETF':'EQUITY'));}});
+ assert.equal(fallbacks,2);assert.ok(loaded.market.quotes.every(q=>q.at===now-60000&&q.tradable));
+});
+
+test('a newer genuine reference values a holding without replacing its old execution history or accepting future quotes',()=>{
+ const value=raw('AAPL','EQUITY',[now-2*3600000]);value.chart.result[0].meta.regularMarketTime=(now-30000)/1000;value.chart.result[0].meta.regularMarketPrice=107;
+ const out=normalizePortfolioMarket('AAPL',value,now)!;assert.equal(out.quote.at,now-30000);assert.equal(out.quote.price,107);assert.ok(out.quote.bars!.every(bar=>bar.time<=now-2*3600000));
+ value.chart.result[0].meta.regularMarketTime=(now+60000)/1000;const future=normalizePortfolioMarket('AAPL',value,now)!;assert.ok(future.quote.at<=now);assert.notEqual(future.quote.price,107);
+});

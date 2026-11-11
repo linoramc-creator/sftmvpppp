@@ -19,3 +19,10 @@ it('pauses nested panels when their containing route is hidden',()=>{
  rerender(<KeepPanel active><KeepPanel active><Activity/></KeepPanel></KeepPanel>);
  expect(screen.getByText('activo')).toBeVisible();
 });
+it('prepares a hidden panel during entry, pauses after entry and preserves its loaded state on the first visit',()=>{
+ const mount=vi.fn(),unmount=vi.fn();
+ function Prepared(){const [value,setValue]=useState('');const active=usePanelActive();useEffect(()=>{mount();setValue('Cartera preparada');return unmount;},[]);return <p>{value} · {active?'activo':'pausado'}</p>;}
+ const {rerender}=render(<KeepPanel active={false} preload><Prepared/></KeepPanel>);expect(mount).toHaveBeenCalledTimes(1);expect(screen.getByText('Cartera preparada · activo')).not.toBeVisible();
+ rerender(<KeepPanel active={false}><Prepared/></KeepPanel>);expect(screen.getByText('Cartera preparada · pausado')).not.toBeVisible();expect(unmount).not.toHaveBeenCalled();
+ rerender(<KeepPanel active><Prepared/></KeepPanel>);expect(screen.getByText('Cartera preparada · activo')).toBeVisible();expect(mount).toHaveBeenCalledTimes(1);
+});

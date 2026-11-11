@@ -31,6 +31,14 @@ test('a recently advanced snapshot reads persisted marks without providers or a 
  fixture.read().state.lastAdvancedAt=now-300000;await handlePortfolioLab({panel:'portfolioLab',action:'snapshot',portfolioId:pid},uid,deps);assert.equal(reads,1);assert.equal(fixture.read().version,2);
 });
 
+test('partial stored coverage recovers before the ordinary five-minute cache, with a thirty-second failure cooldown',async()=>{
+ for(const age of [29999,30000,60000]){
+  const initial=base();initial.state.positions=[{symbol:'AAPL',name:'Apple',quantity:1,averageCost:100,costBasis:100,realizedPnl:0,dividends:0}];initial.state.lastAdvancedAt=now-age;
+  const fixture=memory(initial);let reads=0;const response=await handlePortfolioLab({panel:'portfolioLab',action:'snapshot',portfolioId:pid},uid,{store:fixture.store,market:async()=>{reads++;return {market,actions:[]};},now:()=>now});
+  assert.equal(reads,age<30000?0:1);assert.equal(response.metrics.coverage,age<30000?'partial':'complete');assert.equal(fixture.read().version,age<30000?1:2);
+ }
+});
+
 test('risk reads only the authorized portfolio and freezes archived analytics at the original accounting cutoff',async()=>{
  const initial=base();initial.archived=true;const fixture=memory(initial);let providers=0,analytics=0;
  const result=await handlePortfolioLab({panel:'portfolioLab',action:'risk',portfolioId:pid},uid,{store:fixture.store,market:async()=>{providers++;return {market,actions:[]};},analytics:async(state,cutoff)=>{analytics++;assert.deepEqual(state,initial.state);assert.equal(cutoff,initial.state.updatedAt);return {asOf:new Date(cutoff).toISOString(),currency:'USD',portfolio:{sharpe:null,annualizedVolatilityPct:null,observations:0,from:null,to:null,riskFreeRatePct:0,status:'insufficient'},assets:[],notes:[]};},now:()=>now});

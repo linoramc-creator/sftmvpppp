@@ -33,9 +33,9 @@ test('a server timestamp after closing never upgrades a legacy, previous-day or 
 
 test('assets use a twenty-session log-volatility window and arithmetic Sharpe with genuine adjusted dates',()=>{
  const h=history(),risk=portfolioAssetRisk('AAPL',h,now),window=h.points.slice(-21),logs=window.slice(1).map((p,i)=>Math.log(p.value/window[i].value)),simple=window.slice(1).map((p,i)=>p.value/window[i].value-1);
- assert.equal(risk.observations,20);assert.equal(risk.from,window[0].date);assert.equal(risk.to,window.at(-1)!.date);assert.equal(risk.rolling.length,80);assert.ok(Math.abs(risk.annualizedVolatilityPct!-metrics(logs).sd*Math.sqrt(252)*100)<1e-10);assert.ok(Math.abs(risk.sharpe!-metrics(simple).sharpe)<1e-10);assert.equal(risk.adjustment,'total-return');
+ assert.equal(risk.status,'ready');assert.equal(risk.observations,20);assert.equal(risk.from,window[0].date);assert.equal(risk.to,window.at(-1)!.date);assert.equal(risk.rolling.length,80);assert.ok(Math.abs(risk.annualizedVolatilityPct!-metrics(logs).sd*Math.sqrt(252)*100)<1e-10);assert.ok(Math.abs(risk.sharpe!-metrics(simple).sharpe)<1e-10);assert.equal(risk.adjustment,'total-return');
  const gap={...h,points:h.points.filter((_,i)=>i!==95)},missing=portfolioAssetRisk('AAPL',gap,now);assert.equal(missing.annualizedVolatilityPct,null);assert.equal(missing.sharpe,null);assert.equal(missing.observations,3);
- assert.equal(portfolioAssetRisk('AAPL',history(20),now).sharpe,null);
+ assert.equal(portfolioAssetRisk('AAPL',history(20),now).sharpe,null);assert.equal(portfolioAssetRisk('AAPL',history(20),now).status,'insufficient');assert.equal(portfolioAssetRisk('AAPL',null,now).status,'unavailable');
  const mismatch=portfolioAssetRisk('AAPL',{...h,symbol:'MSFT'},now);assert.equal(mismatch.observations,0);
 });
 
@@ -57,4 +57,10 @@ test('loader prioritizes one complete source, coalesces five-minute requests and
 test('only held, previously verified USD stock/ETF symbols are loaded and there are never more than twenty',async()=>{
  const state=createPortfolioState(10000,now-DAY);state.positions=Array.from({length:22},(_,i)=>({symbol:'A'+String.fromCharCode(65+i),name:'Asset',quantity:i===0?-1:1,averageCost:100,costBasis:i===0?-100:100,realizedPnl:0,dividends:0}));state.marks=state.positions.slice(0,19).map(p=>({symbol:p.symbol,name:p.name,currency:'USD',kind:'stock',price:100,at:now-60000,session:'regular',delaySeconds:60,tradable:true}));
  const loaded:string[]=[];let running=0,peak=0;const result=await buildPortfolioAnalytics(state,now,{history:async symbol=>{loaded.push(symbol);running++;peak=Math.max(peak,running);await Promise.resolve();running--;return {...history(),symbol};}});assert.equal(result.assets.length,20);assert.equal(loaded.length,19);assert.ok(loaded.includes('AA'));assert.ok(peak<=4);assert.equal(result.assets.at(-1)?.annualizedVolatilityPct,null);assert.match(result.notes.join(' '),/identidad/);
+});
+
+test('stalled histories have one bounded overall deadline and never start the remaining asset queue after it expires',async()=>{
+ const state=createPortfolioState(10000,now-DAY);state.positions=Array.from({length:20},(_,i)=>({symbol:'A'+String.fromCharCode(65+i),name:'Asset',quantity:1,averageCost:100,costBasis:100,realizedPnl:0,dividends:0}));state.marks=state.positions.map(p=>({symbol:p.symbol,name:p.name,currency:'USD',kind:'stock',price:100,at:now-60000,session:'regular',delaySeconds:60,tradable:true}));
+ let calls=0;const start=performance.now(),result=await buildPortfolioAnalytics(state,now,{timeoutMs:20,history:async()=>{calls++;return new Promise<never>(()=>{});}});
+ assert.ok(performance.now()-start<1000);assert.equal(calls,4);assert.equal(result.assets.length,20);assert.ok(result.assets.every(a=>a.status==='unavailable'&&a.sharpe===null));assert.match(result.notes.join(' '),/plazo de consulta/);
 });

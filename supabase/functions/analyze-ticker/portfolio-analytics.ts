@@ -5,10 +5,10 @@ import {portfolioSymbol} from './portfolio-request.ts';
 
 type Point={date:string;value:number};
 export type PortfolioHistory={symbol:string;points:Point[];adjustment:'total-return'|'splits'};
-export type PortfolioAssetRisk={symbol:string;sharpe:number|null;annualizedVolatilityPct:number|null;rolling:{date:string;value:number}[];observations:number;from:string|null;to:string|null;adjustment:PortfolioHistory['adjustment']|null};
+export type PortfolioAssetRisk={symbol:string;status:'ready'|'insufficient'|'unavailable';sharpe:number|null;annualizedVolatilityPct:number|null;rolling:{date:string;value:number}[];observations:number;from:string|null;to:string|null;adjustment:PortfolioHistory['adjustment']|null};
 export type PortfolioAnalytics={asOf:string;currency:'USD';portfolio:{sharpe:number|null;annualizedVolatilityPct:number|null;observations:number;from:string|null;to:string|null;riskFreeRatePct:0;status:'ready'|'insufficient'};assets:PortfolioAssetRisk[];notes:string[]};
 export type PortfolioHistoryDependencies={primary?:(url:string)=>Promise<any>;massive?:(symbol:string,from:string,to:string)=>Promise<any>;fallback?:(url:string)=>Promise<any>};
-export type PortfolioAnalyticsDependencies={history?:(symbol:string,now:number)=>Promise<PortfolioHistory|null>};
+export type PortfolioAnalyticsDependencies={history?:(symbol:string,now:number)=>Promise<PortfolioHistory|null>;timeoutMs?:number};
 const DAY=86400000,ROOT_252=Math.sqrt(252),WINDOW=20;
 const finite=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
 const positive=(value:unknown):value is number=>finite(value)&&value>0;
@@ -91,7 +91,7 @@ function portfolioRisk(state:PortfolioState,now:number):PortfolioAnalytics['port
  return {sharpe:ready?sharpe(returns):null,annualizedVolatilityPct:sd===null?null:sd*ROOT_252*100,observations:returns.length,from:chain[0]?.date??null,to:chain.at(-1)?.date??null,riskFreeRatePct:0,status:ready?'ready':'insufficient'};
 }
 export function portfolioAssetRisk(symbol:string,history:PortfolioHistory|null,now:number):PortfolioAssetRisk{
- const empty:PortfolioAssetRisk={symbol,sharpe:null,annualizedVolatilityPct:null,rolling:[],observations:0,from:null,to:null,adjustment:history?.adjustment??null};
+ const empty:PortfolioAssetRisk={symbol,status:history&&history.symbol===symbol?'insufficient':'unavailable',sharpe:null,annualizedVolatilityPct:null,rolling:[],observations:0,from:null,to:null,adjustment:history?.adjustment??null};
  if(!history||history.symbol!==symbol)return empty;
  const since=new Date(now);since.setUTCMonth(since.getUTCMonth()-6);const cutoff=since.toISOString().slice(0,10),rolling:PortfolioAssetRisk['rolling']=[];
  let chain:Point[]=[];
@@ -101,12 +101,20 @@ export function portfolioAssetRisk(symbol:string,history:PortfolioHistory|null,n
   if(chain.length>=WINDOW+1&&row.date>=cutoff){const values=chain.slice(-(WINDOW+1)),logs=values.slice(1).map((p,i)=>Math.log(p.value/values[i].value)),sd=deviation(logs);if(sd!==null)rolling.push({date:row.date,value:sd*ROOT_252*100});}
  }
  const window=chain.slice(-(WINDOW+1)),returns=window.slice(1).map((p,i)=>p.value/window[i].value-1),logs=window.slice(1).map((p,i)=>Math.log(p.value/window[i].value)),sd=returns.length>=WINDOW?deviation(logs):null;
- return {...empty,sharpe:returns.length>=WINDOW?sharpe(returns):null,annualizedVolatilityPct:sd===null?null:sd*ROOT_252*100,rolling,observations:returns.length,from:window[0]?.date??null,to:window.at(-1)?.date??null};
+ return {...empty,status:returns.length>=WINDOW?'ready':'insufficient',sharpe:returns.length>=WINDOW?sharpe(returns):null,annualizedVolatilityPct:sd===null?null:sd*ROOT_252*100,rolling,observations:returns.length,from:window[0]?.date??null,to:window.at(-1)?.date??null};
 }
 export async function buildPortfolioAnalytics(state:PortfolioState,now=Date.now(),deps:PortfolioAnalyticsDependencies={}):Promise<PortfolioAnalytics>{
  const notes=['Sharpe con tipo libre de riesgo supuesto del 0 % anual; no se emplea una rentabilidad histórica anterior a la creación de la cartera.','Cartera: retornos simples de las últimas valoraciones observadas después del cierre regular de sesiones completas y consecutivas; mínimo 20 retornos diarios. No se interpolan sesiones ausentes.','Activos: volatilidad de 20 retornos logarítmicos diarios, desviación muestral y anualización de 252 sesiones; Sharpe sobre retornos simples de la misma ventana.'];
  const portfolio=portfolioRisk(state,now),symbols=[...new Set(state.positions.filter(p=>p.quantity!==0&&portfolioSymbol(p.symbol)).map(p=>p.symbol))].slice(0,20),assets:PortfolioAssetRisk[]=new Array(symbols.length);
- let cursor=0;await Promise.all(Array.from({length:Math.min(4,symbols.length)},async()=>{while(cursor<symbols.length){const i=cursor++,symbol=symbols[i],identity=state.marks?.find(q=>q.symbol===symbol&&q.currency==='USD'&&['stock','etf'].includes(q.kind));if(!identity){assets[i]=portfolioAssetRisk(symbol,null,now);notes.push(`${symbol}: falta una identidad de mercado verificada en el historial de la cartera.`);continue;}const history=await (deps.history??loadPortfolioHistory)(symbol,now).catch(()=>null);assets[i]=portfolioAssetRisk(symbol,history,now);if(!history)notes.push(`${symbol}: no hay una serie diaria ajustada verificable disponible.`);}}));
+ const deadline=performance.now()+Math.max(1,Math.min(30000,deps.timeoutMs??25000));let timedOut=false,cursor=0;
+ await Promise.all(Array.from({length:Math.min(4,symbols.length)},async()=>{while(cursor<symbols.length){
+  const i=cursor++,symbol=symbols[i],identity=state.marks?.find(q=>q.symbol===symbol&&q.currency==='USD'&&['stock','etf'].includes(q.kind));
+  if(!identity){assets[i]=portfolioAssetRisk(symbol,null,now);notes.push(`${symbol}: falta una identidad de mercado verificada en el historial de la cartera.`);continue;}
+  const remaining=deadline-performance.now();let history:PortfolioHistory|null=null;
+  if(!timedOut&&remaining>0){let timer:ReturnType<typeof setTimeout>|undefined;try{history=await Promise.race([(deps.history??loadPortfolioHistory)(symbol,now).catch(()=>null),new Promise<null>(resolve=>{timer=setTimeout(()=>{timedOut=true;resolve(null);},remaining);})]);}finally{if(timer!==undefined)clearTimeout(timer);}}else timedOut=true;
+  assets[i]=portfolioAssetRisk(symbol,history,now);if(!history)notes.push(`${symbol}: no hay una serie diaria ajustada verificable disponible.`);
+ }}));
+ if(timedOut)notes.push('Algunas series no han respondido dentro del plazo de consulta; se conservan las métricas disponibles y se puede reintentar.');
  if(portfolio.status==='insufficient')notes.push('La cartera aún no reúne 21 valoraciones de cierres consecutivos para calcular 20 retornos diarios.');
  if(state.snapshots.some(row=>!finite(row.valuationAt)))notes.push('Las valoraciones anteriores sin fecha de mercado verificable no se utilizan para calcular el riesgo diario de la cartera.');
  if(assets.some(a=>a.adjustment==='splits'))notes.push('Las series identificadas como ajuste por desdoblamientos no incorporan dividendos; no se mezclan con otra fuente dentro de la misma historia.');

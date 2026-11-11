@@ -1,7 +1,8 @@
 import {createContext,useContext} from 'react';
 
 export type FeedReadiness={status:'loading'|'ready'|'error';detail?:string};
-export type TerminalEntry={sessionId:string;attempt:number;report:(sessionId:string,attempt:number,state:FeedReadiness)=>void};
+export type TerminalEntryScope='feed'|'portfolio';
+export type TerminalEntry={sessionId:string;attempt:number;portfolioRequired?:boolean;report:(sessionId:string,attempt:number,state:FeedReadiness,scope?:TerminalEntryScope)=>void};
 const Context=createContext<TerminalEntry|null>(null);
 export const TerminalEntryProvider=Context.Provider;
 export const useTerminalEntry=()=>useContext(Context);
