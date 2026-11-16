@@ -6,7 +6,7 @@ import {ironReferenceQuote} from './iron-reference.ts';
 import {spotMetal} from './spot-metals.ts';
 import {spotMetalQuote} from './spot-metal-quotes.ts';
 import {spotOil} from './spot-oil.ts';
-import {spotOilQuote,SPOT_OIL_MAX_AGE_DAYS} from './spot-oil-quotes.ts';
+import {spotOilQuote,isSpotOilDateFresh} from './spot-oil-quotes.ts';
 export type FeedSession='pre'|'regular'|'post'|'closed';
 export type SessionQuote={symbol:string;label:string;displaySymbol?:string;contractLabel?:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close'|'daily-close';reference:'previous-close'|'regular-close'|null;referenceDate?:string|null;timezone?:string};
 const commodityUnits:Record<string,string>={'GC=F':'USD/oz t','SI=F':'USD/oz t','CL=F':'USD/barril','BZ=F':'USD/barril','HG=F':'USD/libra','NG=F':'USD/MMBtu','ZW=F':'¢/bushel','ZC=F':'¢/bushel'};
@@ -61,7 +61,7 @@ export async function validateFeedAsset(group:FeedGroupKey,input:string,deps:{re
  const operation=(async()=>{
   if(spotOil(symbol)){
    const value=await (deps.oil??spotOilQuote)(symbol),now=deps.now??Date.now(),stamp=value?.date?Date.parse(value.date+'T00:00Z'):NaN;
-   if(value?.symbol!==symbol||value.currency!=='USD'||value.unit!=='USD/barril'||typeof value.price!=='number'||!Number.isFinite(value.price)||!Number.isFinite(stamp)||new Date(stamp).toISOString().slice(0,10)!==value.date||stamp>now||now-stamp>SPOT_OIL_MAX_AGE_DAYS*86400000)return null;
+   if(value?.symbol!==symbol||value.currency!=='USD'||value.unit!=='USD/barril'||typeof value.price!=='number'||!Number.isFinite(value.price)||!Number.isFinite(stamp)||new Date(stamp).toISOString().slice(0,10)!==value.date||!isSpotOilDateFresh(value.date,now))return null;
    const label=spotOil(symbol)!.name;if(cacheable)verifiedAssets.set(key,{at:Date.now(),label});return {symbol,label};
   }
   if(spotMetal(symbol)&&!deps.read){

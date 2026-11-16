@@ -28,6 +28,8 @@ import { InstrumentPriceChart } from "@/components/charts/InstrumentPriceChart";
 import AssetInsightsPanel from "@/components/AssetInsightsPanel";
 import { MacroCalendarSubSection } from "@/components/MacroCalendarSubSection";
 import { fetchEtfData } from "@/lib/etf-api";
+import AnalyticsSuggestions from '@/components/AnalyticsSuggestions';
+import type {AnalyticsInitialRequest} from '@/lib/analytics-api';
 
 const ResearchLibrary=lazy(()=>import('@/components/research/ResearchLibrary'));
 const AnalyticsWorkspace=lazy(()=>import('@/components/AnalyticsWorkspace'));
@@ -292,6 +294,10 @@ const Index = () => {
 
   // Nav
   const [navTab, setNavTab] = useState<"feed" | "brief" | "portfolio" | "ticker" | "etf" | "sector" | "comparacion" | "mercado" | "seguimiento" | "analytics" | "bonos" | "guardados">("feed");
+  const [analyticsRequest,setAnalyticsRequest]=useState<AnalyticsInitialRequest|undefined>();
+  const openAnalytics=useCallback((request:AnalyticsInitialRequest)=>{if(request.accountId!==profile.id)return;setAnalyticsRequest(request);setNavTab('analytics');},[profile.id]);
+  const consumeAnalyticsRequest=useCallback((id:string)=>setAnalyticsRequest(previous=>previous?.id===id?undefined:previous),[]);
+  useEffect(()=>setAnalyticsRequest(undefined),[profile.id]);
   const [monitorUnread,setMonitorUnread]=useState(0);
   useEffect(()=>{let active=true,visitSaved=false,visitPending=false;const visitId=monitoringVisitId(profile.id);const refresh=()=>{if(document.visibilityState==='hidden')return;if(!visitSaved&&!visitPending){visitPending=true;void accountApi('monitorVisit',{visitId}).then(()=>{visitSaved=true;}).catch(()=>{/* The same visit is retried after connection recovery. */}).finally(()=>{visitPending=false;});}accountApi<{unread:number}>('monitorStatus').then(data=>{if(active)setMonitorUnread(data.unread);}).catch(()=>{});};refresh();const timer=window.setInterval(refresh,300000);document.addEventListener('visibilitychange',refresh);return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',refresh);};},[profile.id]);
 
@@ -633,9 +639,9 @@ const Index = () => {
       <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} onMarketSelect={openMarketAsset} onEarningsSelect={openEarningsAsset} watchlistReady={watchlistReady} watchlistError={watchlistError} onRetryWatchlist={()=>setWatchlistRetry(n=>n+1)} tickerReady={marketData!==null&&marketDataKey===customStocks.join(',')}/></main></KeepPanel>
       <KeepPanel active={navTab === "brief"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo brief…</p>}><DailyBrief watchlist={customStocks} syncWatchlist={()=>persistWatchlist(customStocks)}/></Suspense></KeepPanel>
       {profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com'&&<KeepPanel active={navTab === 'portfolio'} preload={!!terminalEntry?.portfolioRequired}><Suspense fallback={<div role="status" aria-label="Abriendo laboratorio de portfolio" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><PortfolioLab onSelect={openWatchAsset}/></Suspense></KeepPanel>}
-      <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol+":"+(earningsDate??"watch")} symbol={watchSymbol} earningsDate={earningsDate} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
-      <KeepPanel active={navTab === "mercado"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo sesión de mercado…</p>}><MarketInstrumentDetail key={marketSymbol} symbol={marketSymbol} onBack={()=>setNavTab('feed')} onSelect={openMarketAsset}/></Suspense></KeepPanel>
-      <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo comparación…</p>}><UnifiedComparison /></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol+":"+(earningsDate??"watch")} symbol={watchSymbol} earningsDate={earningsDate} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} accountId={profile.id} onAnalytics={openAnalytics} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "mercado"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo sesión de mercado…</p>}><MarketInstrumentDetail key={marketSymbol} symbol={marketSymbol} onBack={()=>setNavTab('feed')} onSelect={openMarketAsset} accountId={profile.id} onAnalytics={openAnalytics}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo comparación…</p>}><UnifiedComparison accountId={profile.id} onAnalytics={openAnalytics}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "ticker"}>
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-16 lg:flex lg:gap-6">
           <div className="flex-1 min-w-0">
@@ -716,6 +722,7 @@ const Index = () => {
               onSelectSection={setActiveSection}
             />
           )}
+          {activeAnalysis&&activeTicker&&!tickerIsEtf&&!isLoading&&<AnalyticsSuggestions accountId={profile.id} context={{symbol:activeTicker,kind:'stock'}} onSelect={openAnalytics} title="Analytics · Amplía este análisis"/>}
           </div>
 
           {/* Right column — index charts */}
@@ -799,6 +806,7 @@ const Index = () => {
               onSelectSection={setEtfActiveSection}
             />
           )}
+          {etfAnalysis&&currentEtf&&!etfNotFund&&!isEtfLoading&&<AnalyticsSuggestions accountId={profile.id} context={{symbol:currentEtf,kind:'etf'}} onSelect={openAnalytics} title="Analytics · Amplía este análisis"/>}
           </div>
 
           {/* Right column — index charts */}
@@ -860,6 +868,7 @@ const Index = () => {
               onToggle={toggleSectorSection}
             />
           )}
+          {sectorAnalysis&&currentSector&&!isSectorLoading&&<AnalyticsSuggestions accountId={profile.id} context={{sector:currentSector,kind:'sector'}} onSelect={openAnalytics} title="Analytics · Amplía este sector"/>}
           </div>
 
           {/* Right column — index charts */}
@@ -869,8 +878,8 @@ const Index = () => {
         </div>
       </KeepPanel>
 
-      <KeepPanel active={navTab === "guardados"}><Suspense fallback={<p className="p-6 text-sm text-slate-400">Abriendo biblioteca…</p>}><ResearchLibrary accountId={profile.id}/></Suspense></KeepPanel>
-      <KeepPanel active={navTab === 'analytics'}><Suspense fallback={<div role="status" aria-label="Abriendo Analytics" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><AnalyticsWorkspace key={profile.id} accountId={profile.id}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === "guardados"}><Suspense fallback={<p className="p-6 text-sm text-slate-400">Abriendo biblioteca…</p>}><ResearchLibrary accountId={profile.id} onAnalytics={openAnalytics}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === 'analytics'}><Suspense fallback={<div role="status" aria-label="Abriendo Analytics" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><AnalyticsWorkspace key={profile.id} accountId={profile.id} initialRequest={analyticsRequest} onRequestConsumed={consumeAnalyticsRequest}/></Suspense></KeepPanel>
 
     </div>
   );

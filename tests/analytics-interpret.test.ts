@@ -24,10 +24,10 @@ test('synonyms support English MagnificentSeven, Spanish siete magníficas and e
   const qoq=await interpretAnalytics('Crecimiento intertrimestral de ingresos de Microsoft','',{now});assert.equal(qoq.query.operation,'growth_qoq');
 });
 test('declared forecast and total return requests cannot be silently replaced by reported data or price',async()=>{
-  for(const prompt of ['Compara la rentabilidad total de MSFT y AAPL','Grafica las previsiones de ingresos de Microsoft','Grafica Microsoft con dividendos reinvertidos'])await assert.rejects(()=>interpretAnalytics(prompt,'',{now}),e=>e instanceof AnalyticsValidationError&&e.code==='unsupported');
+  for(const prompt of ['Compara la rentabilidad total de MSFT y AAPL','Grafica las previsiones de ingresos de Microsoft','Grafica Microsoft con dividendos reinvertidos']){const out=await interpretAnalytics(prompt,'',{now});assert.equal(out.query,null);assert.equal(out.status,'unsupported');assert.ok(out.alternatives?.length);assert.ok(out.notices.some(note=>note.includes('No se ha sustituido')));}
 });
 test('PER, EBITDA ratios and unrecognized ratio requests do not fall back to price or debtlevel',async()=>{
-  for(const prompt of ['Compara PER de MSFT y AAPL','Ratio deuda/EBITDA de Microsoft','Ratio de Microsoft y Apple'])await assert.rejects(()=>interpretAnalytics(prompt,'',{now}),e=>e instanceof AnalyticsValidationError&&e.code==='unsupported');
+  for(const prompt of ['Compara PER de MSFT y AAPL','Ratio deuda/EBITDA de Microsoft','Ratio de Microsoft y Apple']){const out=await interpretAnalytics(prompt,'',{now});assert.equal(out.query,null);assert.equal(out.status,'unsupported');assert.ok(out.alternatives?.length);assert.ok(out.alternatives?.every(idea=>idea.query.metric!=='price'));}
 });
 test('explicit three-year/six-month periods are honored as fixed editable dates, never replaced by2years',async()=>{
   const a=await interpretAnalytics('Compara Microsoft y Apple los últimos tres años','',{now});assert.deepEqual(a.query.period,{range:'custom',from:'2023-11-11',to:'2026-11-11'});
@@ -53,9 +53,29 @@ test('a mixed known/unknown company name is interpreted without silently droppin
   assert.equal(calls,1);assert.deepEqual(out.query.assets,['MSFT','IBE.MC']);
 });
 test('unsupported or failed model output leaves controls usable and never generates a substitute metric',async()=>{
-  await assert.rejects(()=>interpretAnalytics('Research especial de Iberdrola','',{now,generate:async()=>({unsupported:true,reason:'No data'})}),e=>e instanceof AnalyticsValidationError&&e.code==='unsupported');
-  await assert.rejects(()=>interpretAnalytics('Research especial de Iberdrola','',{now,generate:async()=>{throw new Error('provider secret');}}),e=>e instanceof AnalyticsValidationError&&!e.message.includes('secret'));
+  const unsupported=await interpretAnalytics('Research especial de Iberdrola','',{now,generate:async()=>({unsupported:true,reason:'No data'})});assert.equal(unsupported.query,null);assert.equal(unsupported.status,'unsupported');assert.ok(unsupported.alternatives?.length);
+  const failure=await interpretAnalytics('Research especial de Iberdrola','',{now,generate:async()=>{throw new Error('provider secret');}});assert.equal(failure.query,null);assert.equal(failure.status,'unavailable');assert.ok(!JSON.stringify(failure).includes('secret'));assert.ok(failure.alternatives?.length);
 });
 test('arbitrary code, URLs, leaked credential input and oversized prompts never reach an interpreter',async()=>{
   let calls=0;for(const prompt of ['select * from users','api_key=secret MSFT','https://evil.example/secret MSFT','x'.repeat(1700)])await assert.rejects(()=>interpretAnalytics(prompt,'',{now,generate:async()=>{calls++;return null;}}),AnalyticsValidationError);assert.equal(calls,0);
+});
+test('unsupported PER preserves recognized assets and requested period only on a separately selected compatible margin',async()=>{
+ const out=await interpretAnalytics('Compara PER de Microsoft y Google durante tres años en EUR','',{now});assert.equal(out.query,null);assert.deepEqual(out.alternatives?.[0].query.assets,['MSFT','GOOGL']);assert.equal(out.alternatives?.[0].query.metric,'freeCashFlow');assert.equal(out.alternatives?.[0].query.denominator,'revenue');assert.deepEqual(out.alternatives?.[0].query.period,{range:'custom',from:'2023-11-11',to:'2026-11-11'});assert.equal(out.alternatives?.[0].query.currency,'EUR');assert.ok(out.alternatives?.every(idea=>!idea.label.includes('PER')));
+});
+test('unsupported candlestick does not silently become a line and missing symbols are disclosed with independent themes',async()=>{
+ const candle=await interpretAnalytics('Velas japonesas de Microsoft','',{now});assert.equal(candle.query,null);assert.equal(candle.status,'unsupported');assert.ok(candle.alternatives?.[0].query.chart==='line');
+ const missing=await interpretAnalytics('Compara el PER durante dos años','',{now});assert.equal(missing.query,null);assert.ok(missing.alternatives?.every(idea=>idea.reason.includes('No se identificaron')));assert.ok(missing.alternatives?.every(idea=>!idea.query.assets.includes('PER')));
+});
+test('valuation abbreviations never become phantom asset classes in alternatives',async()=>{
+ const out=await interpretAnalytics('Grafica P/E de Microsoft y Apple','',{now});assert.equal(out.query,null);assert.deepEqual(out.alternatives?.[0].query.assets,['AAPL','MSFT']);
+});
+test('period limit alternatives preserve price assets and metrics instead of offering fundamentals for an index',async()=>{
+ for(const period of ['20 años','200 meses']){const out=await interpretAnalytics('Compara Microsoft y S&P 500 los últimos '+period+' en EUR','',{now});assert.equal(out.query,null);assert.equal(out.status,'unsupported');assert.equal(out.alternatives?.length,1);const alternative=out.alternatives![0];assert.deepEqual(alternative.query.assets,['MSFT','^GSPC']);assert.equal(alternative.query.metric,'price');assert.equal(alternative.query.operation,'base100');assert.equal(alternative.query.period.range,'5y');assert.equal(alternative.query.currency,'EUR');assert.match(alternative.reason,/periodo más corto/);}
+ const fundamental=await interpretAnalytics('Crecimiento trimestral de ingresos de las Big 7 durante 20 años','',{now});assert.equal(fundamental.query,null);assert.equal(fundamental.alternatives?.[0].query.metric,'revenue');assert.equal(fundamental.alternatives?.[0].query.operation,'growth_yoy');assert.equal(fundamental.alternatives?.[0].query.frequency,'quarterly');
+});
+test('model cannot silently change AI CapEx or another explicitly requested metric for an unfamiliar company',async()=>{
+ const query={version:1,assets:['IBE.MC'],metric:'capex',operation:'level',period:{range:'2y'},frequency:'quarterly',currency:'original',chart:'line',dataKind:'reported'};
+ const capex=await interpretAnalytics('Evolución del CapEx en IA de Iberdrola','',{now,generate:async()=>({query})});assert.equal(capex.query,null);assert.equal(capex.status,'unsupported');assert.equal(capex.alternatives?.[0].query.metric,'capex');assert.match(capex.alternatives?.[0].reason??'',/incluye inversión ajena a IA/);assert.match(capex.alternatives?.[0].label??'',/por separado/);
+ const revenue=await interpretAnalytics('Ingresos de Iberdrola','',{now,generate:async()=>({query:{...query,metric:'netIncome'}})});assert.equal(revenue.query,null);assert.equal(revenue.alternatives?.[0].query.metric,'revenue');assert.deepEqual(revenue.alternatives?.[0].query.assets,['IBE.MC']);
+ const validRatio=await interpretAnalytics('Caja sobre deuda de Iberdrola','',{now,generate:async()=>({query:{...query,metric:'cash',operation:'ratio',denominator:'totalDebt'}})});assert.equal(validRatio.query?.metric,'cash');assert.equal(validRatio.query?.denominator,'totalDebt');
 });

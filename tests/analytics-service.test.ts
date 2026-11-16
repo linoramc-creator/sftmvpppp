@@ -53,8 +53,30 @@ test('portfolio Analytics is owner scoped, read only, preserves stale and unknow
 });
 
 test('anonymous Analytics never reaches model, storage or market data',async()=>{
- let called=false;const response=await secureRequest(new Request('https://example.test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountAction:'analyticsRun',query})}),async()=>{called=true;return Response.json({});});
- assert.equal(response.status,401);assert.equal(called,false);
+ let called=false;for(const body of [{accountAction:'analyticsRun',query},{accountAction:'analyticsIdeas',context:{symbol:'MSFT',kind:'stock'}}]){const response=await secureRequest(new Request('https://example.test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),async()=>{called=true;return Response.json({});});assert.equal(response.status,401);}assert.equal(called,false);
+});
+
+test('context ideas are authenticated metadata only and never trigger storage, AI or provider work',async()=>{
+ const forbidden=async()=>{throw new Error('No paid or storage calls permitted');};
+ const deps={rpc:forbidden,env:()=>{throw new Error('No secrets needed');},interpret:forbidden,execute:forbidden};
+ assert.equal(classify({accountAction:'analyticsIdeas',context:{symbol:'GOOG',kind:'equity'}}).request_class,'account');
+ const result=await (await handleAnalyticsAction({accountAction:'analyticsIdeas',context:{symbol:'GOOG',kind:'equity'}},user,deps))!.json();
+ assert.equal(result.catalogVersion,1);assert.equal(result.ideas.length,4);assert.ok(result.ideas.every((idea:any)=>idea.query.assets[0]==='GOOGL'&&idea.coverage.status==='catalog'));
+ for(const kind of ['etf','index','forex']){const value=await (await handleAnalyticsAction({accountAction:'analyticsIdeas',context:{symbol:'SPY',kind}},user,deps))!.json();assert.ok(value.ideas.every((idea:any)=>idea.query.metric==='price'));}
+ for(const body of [{accountAction:'analyticsIdeas',user_id:other},{accountAction:'analyticsIdeas',context:{symbol:'MSFT',uid:other}},{accountAction:'analyticsIdeas',context:{symbol:'https://evil.example'}},{accountAction:'analyticsIdeas',context:{kind:'sql'}}])await assert.rejects(handleAnalyticsAction(body,user,deps));
+});
+
+test('unsupported interpretation returns separate choices and never executes them automatically',async()=>{
+ let executed=0;const interpretation={query:null,status:'unsupported' as const,request:'PER de Microsoft',defaults:[],notices:['PER sin cobertura'],alternatives:[],interpretedBy:'rules' as const,model:null};
+ const response=await handleAnalyticsAction({accountAction:'analyticsInterpret',prompt:'PER de Microsoft'},user,{rpc:async()=>null,env:()=>'',interpret:async()=>interpretation,execute:async()=>{executed++;return mockResult;}});
+ assert.deepEqual(await response!.json(),interpretation);assert.equal(executed,0);
+});
+
+test('missing fundamentals produce a different explicit price alternative without duplicate entries',async()=>{
+ const fundamentalQuery={...query,assets:['MSFT'],metric:'revenue',operation:'level',frequency:'quarterly',chart:'bar'} as AnalyticsQuery;
+ const missing={...mockResult,query:fundamentalQuery,alternatives:[]};
+ const deps={rpc:async()=>null,env:()=>'',execute:async()=>missing};
+ for(let i=0;i<2;i++){const result=await (await handleAnalyticsAction({accountAction:'analyticsRun',query:fundamentalQuery},user,deps))!.json();assert.equal(result.status,'unavailable');assert.equal(result.alternatives.length,1);assert.equal(result.alternatives[0].query.metric,'price');assert.match(result.alternatives[0].reason,/diferente/);assert.equal(result.series.length,0);}
 });
 
 test('access failures and model outages retain their distinct HTTP statuses',async()=>{

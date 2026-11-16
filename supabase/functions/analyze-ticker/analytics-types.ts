@@ -34,7 +34,18 @@ export type AnalyticsResult = {
   alternatives:{label:string;reason:string;query:AnalyticsQuery}[];
   export:{chart:boolean;table:boolean;reason:string};
 };
-export type AnalyticsInterpretation = { query:AnalyticsQuery; defaults:string[]; notices:string[]; interpretedBy:'rules'|'model'; model:string|null };
+export type AnalyticsSuggestion = {
+  id:string;
+  label:string;
+  reason:string;
+  query:AnalyticsQuery;
+  kind:'alternative'|'theme'|'context';
+  coverage:{status:'catalog'|'available'|'partial'|'unavailable';checkedAt?:string;availableAssets?:string[];missingAssets?:string[];notice?:string};
+};
+/** A recognized but unavailable request has no executable original query.
+ * Alternatives always require a separate user selection. Optional new fields
+ * keep previously stored interpretations and older clients readable. */
+export type AnalyticsInterpretation = { query:AnalyticsQuery|null; defaults:string[]; notices:string[]; interpretedBy:'rules'|'model'; model:string|null; status?:'ready'|'unsupported'|'unavailable'; request?:string; alternatives?:AnalyticsSuggestion[] };
 export type AnalyticsPriceInput = {symbol:string;currency:string|null;points:{date:string;value:number}[];source:AnalyticsSource;adjustment:'split-adjusted-price'|'unadjusted-price';notes?:string[]};
 export type AnalyticsFundamentalInput = {symbol:string;rows:{date:string;currency:string|null;filingDate:string|null;periodType:'3M'|'YTD'|'12M'|'instant';values:Partial<Record<AnalyticsMetric,number|null>>;valueSourceIds?:Partial<Record<AnalyticsMetric,string>>}[];source:AnalyticsSource;sources?:AnalyticsSource[];notes?:string[]};
 export type AnalyticsPortfolioInput = {id:string;currency:string;asOf:string;positions:{symbol:string;marketValue:number|null;currency:string;quantity:number;priceAt:string|null}[];equity:number|null;cash:number|null;notes:string[]};

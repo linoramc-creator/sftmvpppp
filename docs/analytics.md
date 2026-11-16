@@ -10,6 +10,14 @@ Analytics interpreta una petición en una definición JSON versionada y ejecuta 
 
 Los parámetros quedan visibles y editables: activos, métrica, operación, fechas, frecuencia, moneda y representación. La petición natural se interpreta una vez; actualizar una definición guardada o cambiar el gráfico y los colores no llama al modelo. Una modificación pendiente no cambia silenciosamente el gráfico calculado ni sus descargas. Se pueden guardar hasta cien consultas activas por cuenta, con revisión para detectar conflictos y clave idempotente para no duplicar un guardado reintentado.
 
+## Ideas y alternativas
+
+Las peticiones no compatibles devuelven su limitación y alternativas independientes, sin ejecutar automáticamente una métrica distinta. Si falta el fundamental solicitado, el resultado vacío conserva su definición y ofrece un gráfico de precios separado. CapEx de IA conserva su alternativa explícita de CapEx total. Los fallos temporales de interpretación no impiden utilizar controles o consultas estructuradas.
+
+`analyticsIdeas` devuelve definiciones validadas sin consultar datos ni llamar al modelo: inversión de las Big 7, conversión en caja, márgenes, semiconductores y mercados regionales. Son temas de investigación, no una afirmación de popularidad o señales de compra. La cobertura se comprueba al ejecutarlos; no se presenta la compatibilidad con el catálogo como disponibilidad de datos. ETF, índices y divisas reciben ideas de precios, sin atribuirles estados financieros de una empresa. Los representantes sectoriales y alternativas al petróleo físico se identifican expresamente.
+
+Los informes de acciones, ETF, sectores, comparaciones, versiones guardadas y fichas rápidas incluyen sugerencias contextuales al final. Elegir una abre Analytics con parámetros editables y una única ejecución, sin interpretar de nuevo con IA ni modificar el informe original. La transferencia es temporal, asociada a la cuenta activa y se descarta al cambiar de usuario.
+
 ## Datos y cálculos
 
 Se reutiliza EODHD como primera opción y los transportes existentes de cotizaciones y estados financieros. EDGAR aporta una alternativa pública para emisores con CIK verificado, incluidas las Big 7; no presupone cobertura universal. Massive se comprobó como fuente adicional: los estados financieros consultados devolvieron 403 con el plan actual y no se presentan como cobertura disponible.

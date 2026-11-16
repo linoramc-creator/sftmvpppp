@@ -3,6 +3,8 @@ import {AlertCircle,ArrowUpRight,Bookmark,ChartNoAxesCombined,Check,ChevronRight
 import {Bar,BarChart,CartesianGrid,Cell,Legend,Line,LineChart,ReferenceLine,ResponsiveContainer,Tooltip,XAxis,YAxis} from 'recharts';
 import {accountApi,authenticatedFetch} from '@/lib/beta-api';
 import {NewsCards} from '@/components/FeedCards';
+import AnalyticsSuggestions from '@/components/AnalyticsSuggestions';
+import type {AnalyticsInitialRequest} from '@/lib/analytics-api';
 import type {ComparisonAsset,ComparisonChartRow,ComparisonPair,ComparisonRange,MarketComparison} from '../../../supabase/functions/analyze-ticker/market-comparison';
 
 const ENDPOINT=`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`;
@@ -122,7 +124,7 @@ function Analysis({data,busy,onAnalyze}:{data:MarketComparison;busy:boolean;onAn
  </Panel>;
 }
 
-export default function UnifiedComparison(){
+export default function UnifiedComparison({accountId,onAnalytics}:{accountId?:string;onAnalytics?:(request:AnalyticsInitialRequest)=>void}={}){
  const [input,setInput]=useState(''),[range,setRange]=useState<ComparisonRange>('3m'),[data,setData]=useState<MarketComparison|null>(null),[phase,setPhase]=useState<'load'|'analysis'|null>(null),[error,setError]=useState('');
  const [performanceView,setPerformanceView]=useState<'returns'|'drawdowns'>('returns'),[saving,setSaving]=useState(false),[savedKey,setSavedKey]=useState(''),[saveError,setSaveError]=useState('');
  const saveLock=useRef(false),saveRequest=useRef<{key:string;id:string}|null>(null);
@@ -194,5 +196,6 @@ export default function UnifiedComparison(){
    <Valuation assets={data.assets}/><MonthlyActivity assets={data.assets}/><HoldingsHistory assets={data.assets}/><AvailablePositioning assets={data.assets}/><Coverage assets={data.assets}/><FactorTable data={data}/>
    <Analysis data={data} busy={busy} onAnalyze={()=>void load(true)}/>
   </div>}
+  {data&&accountId&&onAnalytics&&<AnalyticsSuggestions accountId={accountId} context={{symbol:data.symbols[0]}} onSelect={onAnalytics} title="Analytics · Continúa el análisis"/>}
  </main>;
 }

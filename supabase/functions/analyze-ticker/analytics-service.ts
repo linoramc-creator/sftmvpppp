@@ -1,5 +1,6 @@
 import {executeAnalytics,validateAnalyticsQuery,AnalyticsValidationError} from './analytics-engine.ts';
 import {interpretAnalytics} from './analytics-interpret.ts';
+import {analyticsIdeas,validateAnalyticsIdeasContext,analyticsResultAlternatives} from './analytics-recommendations.ts';
 import {portfolioMetrics,type PortfolioState} from './portfolio-model.ts';
 import type {AnalyticsDependencies,AnalyticsQuery,AnalyticsResult,AnalyticsInterpretation,AnalyticsPortfolioInput} from './analytics-types.ts';
 
@@ -16,17 +17,21 @@ export type AnalyticsServiceDependencies={
 };
 export class AnalyticsError extends Error{status:number;constructor(message:string,status=400){super(message);this.status=status;}}
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ACTIONS=['analyticsInterpret','analyticsRun','analyticsList','analyticsSave','analyticsDelete'] as const;
+const ACTIONS=['analyticsInterpret','analyticsRun','analyticsIdeas','analyticsList','analyticsSave','analyticsDelete'] as const;
 const invalid=(message='Consulta de Analytics inválida.'):never=>{throw new AnalyticsError(message);};
 const id=(value:unknown)=>typeof value==='string'&&UUID.test(value)?value:invalid('Identificador de Analytics inválido.');
 export function analyticsRequestClass(body:Body):'account'|'expensive'|'data'|null{
  if(typeof body.accountAction!=='string'||!body.accountAction.startsWith('analytics'))return null;
  if(!ACTIONS.includes(body.accountAction as typeof ACTIONS[number]))invalid();
- const fields:Record<string,string[]>={analyticsInterpret:['prompt'],analyticsRun:['query'],analyticsList:[],analyticsSave:['id','revision','name','query','requestId'],analyticsDelete:['id','revision']};
+ const fields:Record<string,string[]>={analyticsInterpret:['prompt'],analyticsRun:['query'],analyticsIdeas:['context'],analyticsList:[],analyticsSave:['id','revision','name','query','requestId'],analyticsDelete:['id','revision']};
  if(Object.keys(body).some(key=>key!=='accountAction'&&!fields[body.accountAction as string].includes(key)))invalid();
  if(body.accountAction==='analyticsInterpret'){
   if(typeof body.prompt!=='string'||body.prompt.trim().length<4||body.prompt.length>1600||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\p{Cf}<>]/u.test(body.prompt))invalid('Escribe una petición de entre 4 y 1.600 caracteres.');
   return 'expensive';
+ }
+ if(body.accountAction==='analyticsIdeas'){
+  try{validateAnalyticsIdeasContext(body.context);}catch(error){if(error instanceof AnalyticsValidationError)throw new AnalyticsError(error.message);throw error;}
+  return 'account';
  }
  if(body.accountAction==='analyticsRun'||body.accountAction==='analyticsSave'){
   try{validateAnalyticsQuery(body.query);}catch(error){if(error instanceof AnalyticsValidationError)throw new AnalyticsError(error.message);throw error;}
@@ -56,11 +61,14 @@ export async function handleAnalyticsAction(body:Body,user:User,deps:AnalyticsSe
  if(!analyticsRequestClass(body))return null;
  const store=(operation:string,payload:Body={})=>deps.rpc('beta_analytics_store',{operation,uid:user.id,payload});
  try{
+  if(body.accountAction==='analyticsIdeas')return Response.json({ideas:analyticsIdeas(validateAnalyticsIdeasContext(body.context)),catalogVersion:1});
   if(body.accountAction==='analyticsList')return Response.json({items:await store('list')});
   if(body.accountAction==='analyticsDelete'){await store('delete',{id:body.id,revision:body.revision});return Response.json({ok:true});}
   if(body.accountAction==='analyticsSave')return Response.json(await store('save',{name:(body.name as string).trim(),query:validateAnalyticsQuery(body.query),...(body.id?{id:body.id,revision:body.revision}:{}),...(body.requestId?{requestId:body.requestId}:{})}));
   if(body.accountAction==='analyticsInterpret')return Response.json(await (deps.interpret??interpretAnalytics)((body.prompt as string).trim(),deps.env('GEMINI_API_KEY')||deps.env('Gemini')||deps.env('GOOGLE_API_KEY')));
   const query=validateAnalyticsQuery(body.query),result=await (deps.execute??executeAnalytics)(query,{...deps.data,now:(deps.now??Date.now)(),portfolio:pid=>analyticsPortfolio(user.id,user.email,pid,deps)});
+  const known=new Set(result.alternatives.map(item=>JSON.stringify(item.query)));
+  for(const idea of analyticsResultAlternatives(result))if(!known.has(JSON.stringify(idea.query))){known.add(JSON.stringify(idea.query));result.alternatives.push(idea);}
   return Response.json(result);
  }catch(error){
   if(error instanceof AnalyticsError)throw error;

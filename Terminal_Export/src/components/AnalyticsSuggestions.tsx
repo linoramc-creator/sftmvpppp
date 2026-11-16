@@ -1,0 +1,31 @@
+import {useEffect,useRef,useState} from 'react';
+import {ArrowUpRight,BarChart3,Loader2,RefreshCw} from 'lucide-react';
+import {analyticsIdeas,type AnalyticsIdeasContext,type AnalyticsInitialRequest,type AnalyticsSuggestion} from '@/lib/analytics-api';
+import {usePanelActive} from './KeepPanel';
+
+const coverageLabel={catalog:'Cobertura por comprobar',available:'Datos verificados',partial:'Cobertura parcial',unavailable:'Sin cobertura actual'};
+const operationLabel={level:'Valores publicados',base100:'Base 100',growth_yoy:'Crecimiento interanual',growth_qoq:'Crecimiento trimestral',ratio:'Ratio'};
+const periodLabel={'1y':'1 año','2y':'2 años','5y':'5 años',custom:'Fechas concretas'};
+
+/** The coverage badge never presents catalog eligibility as verified provider data. */
+export function AnalyticsSuggestionCards({ideas,onSelect,busy=false,compact=false}:{ideas:AnalyticsSuggestion[];onSelect:(idea:AnalyticsSuggestion)=>void;busy?:boolean;compact?:boolean}){
+ const columns=ideas.length===1?'grid-cols-1':ideas.length===2||ideas.length===4?'sm:grid-cols-2':compact?'md:grid-cols-3':'sm:grid-cols-2 xl:grid-cols-3';
+ return <div className={'grid gap-3 '+columns}>{ideas.map(idea=><article key={idea.id} className="flex min-w-0 flex-col rounded-lg border border-slate-800 bg-black/10 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><span className="text-[9px] tracking-wide text-slate-500">{idea.kind==='alternative'?'ALTERNATIVA':'ANÁLISIS'}</span><span className={'text-[9px] '+(idea.coverage.status==='partial'||idea.coverage.status==='unavailable'?'text-amber-100/65':'text-slate-500')}>{coverageLabel[idea.coverage.status]}</span></div><h3 className="font-body text-xs font-medium leading-relaxed text-slate-200">{idea.label}</h3><p className="mt-2 text-[11px] leading-relaxed text-slate-500">{idea.reason}</p><p className="mt-3 text-[9px] leading-relaxed text-slate-600">{idea.query.assets.join(' · ')||'Portfolio existente'}<br/>{operationLabel[idea.query.operation]} · {periodLabel[idea.query.period.range]}</p>{idea.coverage.missingAssets?.length?<p className="mt-2 text-[9px] text-amber-100/60">Sin datos: {idea.coverage.missingAssets.join(', ')}</p>:null}<button type="button" disabled={busy||idea.coverage.status==='unavailable'} onClick={()=>onSelect(idea)} className="mt-4 inline-flex items-center justify-between gap-2 rounded border border-slate-700/70 px-3 py-2 text-left text-[10px] text-slate-300 transition-colors hover:border-slate-500 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300/60 disabled:cursor-not-allowed disabled:opacity-35" aria-label={'Ver gráfico: '+idea.label}>Ver gráfico<ArrowUpRight size={12}/></button></article>)}</div>;
+}
+
+export default function AnalyticsSuggestions({accountId,context,onSelect,title='Analytics',compact=true}:{accountId:string;context?:AnalyticsIdeasContext;onSelect:(request:AnalyticsInitialRequest)=>void;title?:string;compact?:boolean}){
+ const active=usePanelActive(),symbol=context?.symbol,kind=context?.kind,sector=context?.sector;
+ const cache=useRef<{key:string;ideas:AnalyticsSuggestion[];until:number}|null>(null);
+ const [ideas,setIdeas]=useState<AnalyticsSuggestion[]>([]),[loading,setLoading]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
+ useEffect(()=>{
+  setIdeas([]);setError('');setLoading(false);
+  if(!accountId||!active)return;
+  const key=JSON.stringify([accountId,symbol,kind,sector]),hit=cache.current;
+  if(hit?.key===key&&hit.until>Date.now()){setIdeas(hit.ideas);return;}
+  const controller=new AbortController();setLoading(true);
+  analyticsIdeas({...(symbol?{symbol}:{}),...(kind?{kind}:{}),...(sector?{sector}:{})},controller.signal).then(data=>{if(!controller.signal.aborted){cache.current={key,ideas:data.ideas,until:Date.now()+15*60000};setIdeas(data.ideas);}}).catch(cause=>{if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:'No se han podido cargar las ideas de análisis.');}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
+  return()=>controller.abort();
+ },[accountId,active,symbol,kind,sector,retry]);
+ if(!accountId)return null;
+ return <section data-terminal-palette="neutral" className="rounded-xl border border-slate-800 bg-[#0d0f12] p-4 font-body sm:p-5" aria-label={title}><div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="flex items-center gap-2 font-body text-sm font-medium text-slate-100"><BarChart3 size={14} className="text-slate-400"/>{title}</h2><p className="mt-2 text-[10px] leading-relaxed text-slate-500">{context?'Continúa el análisis con una definición editable.':'Comparaciones y temas de mercado para explorar con datos.'}</p></div>{loading&&<Loader2 size={14} className="shrink-0 animate-spin text-slate-500" aria-label="Cargando ideas de análisis"/>}</div>{error?<p role="status" className="text-[11px] leading-relaxed text-slate-500">{error}<button onClick={()=>{cache.current=null;setRetry(value=>value+1);}} className="ml-3 inline-flex items-center gap-1 underline"><RefreshCw size={10}/>Reintentar</button></p>:ideas.length?<AnalyticsSuggestionCards ideas={ideas} compact={compact} onSelect={idea=>onSelect({id:crypto.randomUUID(),accountId,query:idea.query,title:idea.label})}/>:!loading?<p className="text-[11px] leading-relaxed text-slate-500">No hay una comparación compatible para este activo en el catálogo actual.</p>:null}</section>;
+}
