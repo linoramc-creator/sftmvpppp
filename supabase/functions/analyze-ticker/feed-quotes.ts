@@ -7,6 +7,7 @@ import {spotMetal} from './spot-metals.ts';
 import {spotMetalQuote} from './spot-metal-quotes.ts';
 import {spotOil} from './spot-oil.ts';
 import {spotOilQuote,isSpotOilDateFresh} from './spot-oil-quotes.ts';
+import {isOilFuture,oilFutureRaw,oilContractLabel} from './oil-futures.ts';
 export type FeedSession='pre'|'regular'|'post'|'closed';
 export type SessionQuote={symbol:string;label:string;displaySymbol?:string;contractLabel?:string;price:number|null;change:number|null;date:string|null;currency:string;unit?:string;session:FeedSession;at:string|null;delaySeconds:number|null;priceKind:'quote'|'minute-close'|'daily-close';reference:'previous-close'|'regular-close'|null;referenceDate?:string|null;timezone?:string};
 const commodityUnits:Record<string,string>={'GC=F':'USD/oz t','SI=F':'USD/oz t','CL=F':'USD/barril','BZ=F':'USD/barril','HG=F':'USD/libra','NG=F':'USD/MMBtu','ZW=F':'¢/bushel','ZC=F':'¢/bushel'};
@@ -42,7 +43,7 @@ export function normalizeFeedQuote(symbol:string,label:string,raw:any,intraday:a
  return {...result,price:last.close,change:reference?(last.close/reference-1)*100:null,date:dateAt(last.start),currency:typeof m.currency==='string'?m.currency:result.currency,session:active,at:new Date(last.end).toISOString(),delaySeconds:Math.max(0,Math.floor((now-last.end)/1000)),priceKind:'minute-close',reference:referenceKind};
 }
 async function chart(symbol:string,minute:boolean){return marketJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=${minute?'1m':'1d'}${minute?'&includePrePost=true':''}`,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'error'},{timeoutMs:8000,acceptPrimary:raw=>{const meta=raw?.chart?.result?.[0]?.meta;return minute||positive(meta?.regularMarketTime)&&positive(meta?.regularMarketPrice);}});}
-export async function feedSessionQuote(symbol:string,label:string,extended=false){if(spotMetal(symbol))return (await spotMetalQuote(symbol,label))!;if(spotOil(symbol))return (await spotOilQuote(symbol,label))!;const [daily,intraday]=await Promise.all([chart(symbol,false),extended?chart(symbol,true):null]);return normalizeFeedQuote(symbol,label,daily,intraday);}
+export async function feedSessionQuote(symbol:string,label:string,extended=false){if(spotMetal(symbol))return (await spotMetalQuote(symbol,label))!;if(spotOil(symbol))return (await spotOilQuote(symbol,label))!;if(isOilFuture(symbol)){const raw=await oilFutureRaw(symbol);return {...normalizeFeedQuote(symbol,label,raw),unit:'USD/barril',currency:'USD',contractLabel:oilContractLabel(symbol,raw)};}const [daily,intraday]=await Promise.all([chart(symbol,false),extended?chart(symbol,true):null]);return normalizeFeedQuote(symbol,label,daily,intraday);}
 function feedAssetLabel(symbol:string,meta:any):string{
  if(symbol.endsWith('=X')){const pair=symbol.slice(0,-2);return pair.length===6?`${pair.slice(0,3)}/${pair.slice(3)}`:`USD/${pair}`;}
  const name=typeof meta?.shortName==='string'?meta.shortName:typeof meta?.longName==='string'?meta.longName:symbol;

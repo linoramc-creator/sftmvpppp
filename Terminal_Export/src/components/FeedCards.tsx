@@ -44,7 +44,8 @@ export function FeedQuoteStamp({quote}:{quote:FeedQuote}){
  const timezone=quote.timezone??'America/New_York',zoneLabel=({'America/New_York':'ET','Asia/Tokyo':'JST','Asia/Seoul':'KST','America/Chicago':'CT'} as Record<string,string>)[timezone]??timezone;
  const clock=Number.isFinite(time)?new Date(time).toLocaleString('es-ES',{timeZone:timezone,...(quote.session==='closed'?{day:'2-digit',month:'2-digit'}:{}),hour:'2-digit',minute:'2-digit'})+' '+zoneLabel:quote.date??'Sin hora disponible';
  const reference=quote.reference==='regular-close'?'Variación respecto al cierre regular de esa sesión.':'Variación respecto al cierre regular anterior cuando está disponible.';
- return <span className="block text-[10px] text-muted-foreground" title={`Actualización cada 60 segundos. ${age===null?'No hay una hora verificada.':`Último dato hace ${Math.floor(age/60)} min.`} ${reference}`}>{quote.price===null?'Sin cotización':`${labels[quote.session]??''}${quote.session?' · ':''}${clock}${quote.session!=='closed'&&age!==null&&age>180?` · hace ${Math.floor(age/60)} min`:''}`}</span>;
+  const oil=quote.symbol==='CL=F'||quote.symbol==='BZ=F';
+  return <span className="block text-[10px] text-muted-foreground" title={`Consulta cada ${oil?'5 minutos':'60 segundos'}. ${oil?'Referencia negociada de futuros, no precio físico al contado. El retraso contratado por el proveedor no está informado. ':''}${age===null?'No hay una hora verificada.':`Último dato hace ${Math.floor(age/60)} min.`} ${reference}`}>{quote.price===null?'Sin cotización':`${labels[quote.session]??''}${quote.session?' · ':''}${clock}${(oil||quote.session!=='closed'&&age!==null&&age>180)&&age!==null?` · hace ${Math.floor(age/60)} min`:''}`}</span>;
 }
 export function NewsCover({article,compact=false}:{article:Article;compact?:boolean}){
   const [failed,setFailed]=useState(false);

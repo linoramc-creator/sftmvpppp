@@ -22,6 +22,7 @@ export function feedTicker(value:IdentifierInput):string{
 }
 export function feedTickerContext(value:IdentifierInput):string|null{
  const symbol=rawSymbol(value);
+ if(symbol==='CL=F'||symbol==='BZ=F')return typeof value==='string'?'Futuro continuo':value.contractLabel??'Futuro continuo · vencimiento no informado';
  if(symbol==='SGX-IODEX')return ['SGX',typeof value==='string'?null:value.contractLabel].filter(Boolean).join(' · ');
  if(symbol==='WTI-SPOT'||symbol==='BRENT-SPOT')return 'Contado';
  if(/^(?:XAU|XAG)USD(?:=X)?$/.test(symbol))return 'Contado';

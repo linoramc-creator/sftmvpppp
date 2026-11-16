@@ -61,28 +61,16 @@ it('uses a bounded loading timeout with explicit recovery rather than opening a 
  signedIn();vi.useFakeTimers();await act(async()=>{render(<MemoryRouter><AuthGate><p>Pending feed</p></AuthGate></MemoryRouter>);});
  await act(async()=>vi.advanceTimersByTime(90000));expect(screen.getByRole('dialog')).toHaveTextContent('La carga está tardando');expect(screen.getByRole('button',{name:'Reintentar'})).toBeEnabled();
 });
-it('keeps the pinned administrator behind the greeting until both feed and portfolio are ready',async()=>{
+it('opens the administrator workspace after the complete feed without the retired portfolio gate',async()=>{
  signedIn();vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'linoramc@gmail.com',displayName:'María',isAdmin:true})}));vi.useFakeTimers();let channel:TerminalEntry|null=null;
- function Workspace(){channel=useTerminalEntry();return <button>Portfolio disponible</button>;}
+ function Workspace(){channel=useTerminalEntry();return <button>Workspace disponible</button>;}
  await act(async()=>{render(<MemoryRouter><AuthGate><Workspace/></AuthGate></MemoryRouter>);});
- expect(channel!.portfolioRequired).toBe(true);
- await act(async()=>channel!.report(channel!.sessionId,channel!.attempt,{status:'ready'},'feed'));
- await act(async()=>vi.advanceTimersByTime(6000));expect(screen.getByRole('dialog')).toHaveTextContent('Preparando tu portfolio');expect(screen.queryByRole('button',{name:'Portfolio disponible'})).toBeNull();
- await act(async()=>channel!.report(channel!.sessionId,channel!.attempt,{status:'ready'},'portfolio'));
- await act(async()=>vi.advanceTimersByTime(0));await act(async()=>vi.advanceTimersByTime(380));expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('button',{name:'Portfolio disponible'})).toBeEnabled();
-});
-it('retains a portfolio failure when feed finishes and resets every gate on an explicit retry',async()=>{
- signedIn();vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'linoramc@gmail.com',isAdmin:true})}));vi.useFakeTimers();let channel:TerminalEntry|null=null;
- function Workspace(){channel=useTerminalEntry();return <p>Workspace</p>;}
- await act(async()=>{render(<MemoryRouter><AuthGate><Workspace/></AuthGate></MemoryRouter>);});const old=channel!;
- await act(async()=>old.report(old.sessionId,old.attempt,{status:'error',detail:'No se pudo preparar la cartera.'},'portfolio'));
- await act(async()=>old.report(old.sessionId,old.attempt,{status:'ready'},'feed'));
- expect(screen.getByRole('dialog')).toHaveTextContent('No se pudo preparar la cartera.');fireEvent.click(screen.getByRole('button',{name:'Reintentar'}));
- await act(async()=>old.report(old.sessionId,old.attempt,{status:'ready'},'portfolio'));
- await act(async()=>channel!.report(channel!.sessionId,channel!.attempt,{status:'ready'},'portfolio'));
+ expect(channel!.portfolioRequired).toBe(false);
+ await act(async()=>channel!.report(channel!.sessionId,channel!.attempt,{status:'error',detail:'Retired module'},'portfolio'));
+ expect(screen.getByRole('dialog')).not.toHaveTextContent('Retired module');
  await act(async()=>vi.advanceTimersByTime(6000));expect(screen.getByRole('dialog')).toBeInTheDocument();
  await act(async()=>channel!.report(channel!.sessionId,channel!.attempt,{status:'ready'},'feed'));
- await act(async()=>vi.advanceTimersByTime(0));await act(async()=>vi.advanceTimersByTime(380));expect(screen.queryByRole('dialog')).toBeNull();
+ await act(async()=>vi.advanceTimersByTime(0));await act(async()=>vi.advanceTimersByTime(380));expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('button',{name:'Workspace disponible'})).toBeEnabled();
 });
 it('does not require or accept a private portfolio gate for a different account',async()=>{
  signedIn();vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'other@example.test',isAdmin:true})}));vi.useFakeTimers();let channel:TerminalEntry|null=null;

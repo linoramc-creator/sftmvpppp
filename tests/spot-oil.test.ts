@@ -100,21 +100,15 @@ test('crossing the business-day freshness boundary invalidates an otherwise unex
  at+=10*60000;assert.equal((await read('WTI-SPOT'))?.price,null);assert.equal(calls,4);
 });
 
-test('only commodity selections migrate old oil identifiers and preserve saved order without a storage rewrite',()=>{
- const defaults=defaultFeedPreferences();assert.ok(defaults.commodities.includes('WTI-SPOT'));assert.ok(defaults.commodities.includes('BRENT-SPOT'));assert.ok(!defaults.commodities.includes('CL=F'));assert.equal(defaults.commodities.length,7);
- for(const alias of ['WTI','CL','CL=F','DCOILWTICO','wti-spot'])assert.equal(normalizeFeedSymbol('commodities',alias),'WTI-SPOT');
- for(const alias of ['BRENT','BZ','BZ=F','DCOILBRENTEU','brent-spot'])assert.equal(normalizeFeedSymbol('commodities',alias),'BRENT-SPOT');
- assert.equal(normalizeFeedSymbol('indices','CL=F'),'CL=F');assert.equal(normalizeFeedSymbol('indices','BZ=F'),'BZ=F');assert.equal(normalizeFeedSymbol('etfs','WTI-SPOT'),null);assert.equal(normalizeFeedSymbol('currencies','BRENT-SPOT'),null);
- const stored={...defaults,commodities:['BZ=F','XAUUSD=X','CL=F','HG=F']},original=structuredClone(stored),expected=['BRENT-SPOT','XAUUSD=X','WTI-SPOT','HG=F'];
- assert.deepEqual(normalizeSavedFeedPreferences(stored)?.commodities,expected);assert.deepEqual(normalizeFeedPreferences(stored)?.commodities,expected);assert.deepEqual(stored,original);
- assert.deepEqual(normalizeSavedFeedPreferences({...defaults,commodities:['WTI','CL=F','BZ=F']})?.commodities,['WTI-SPOT','BRENT-SPOT']);assert.equal(normalizeFeedPreferences({...defaults,commodities:['WTI','CL=F']}),null);
- assert.deepEqual(feedSuggestions('commodities','WTI',[],7).map(([symbol])=>symbol),['WTI-SPOT']);assert.deepEqual(feedSuggestions('commodities','BZ=F',[],7).map(([symbol])=>symbol),['BRENT-SPOT']);
-});
-
-test('spot validation uses actual dated USD per barrel references without requesting a futures chart',async()=>{
- let charts=0;const value=close();const deps={now,read:async()=>{charts++;throw new Error('No future chart allowed');},oil:async()=>value};
- assert.deepEqual(await validateFeedAsset('commodities','CL=F',deps),{symbol:'WTI-SPOT',label:'Petróleo WTI · Contado'});assert.equal(charts,0);
- for(const patch of [{symbol:'CL=F'},{symbol:'BRENT-SPOT'},{currency:'EUR'},{unit:'USD/galón'},{price:null},{date:'2026-11-17'},{date:'2026-11-03'},{date:'2026-11-10'}])assert.equal(await validateFeedAsset('commodities','WTI',{...deps,oil:async()=>({...value,...patch})}),null);
+test('oil commodity slots migrate saved physical references to authorized traded futures without rewriting storage',()=>{
+ const defaults=defaultFeedPreferences();assert.ok(defaults.commodities.includes('CL=F'));assert.ok(defaults.commodities.includes('BZ=F'));assert.equal(defaults.commodities.length,7);
+ for(const alias of ['WTI','CL','CL=F','DCOILWTICO','wti-spot'])assert.equal(normalizeFeedSymbol('commodities',alias),'CL=F');
+ for(const alias of ['BRENT','BZ','BZ=F','DCOILBRENTEU','brent-spot'])assert.equal(normalizeFeedSymbol('commodities',alias),'BZ=F');
+ assert.equal(normalizeFeedSymbol('etfs','WTI-SPOT'),null);assert.equal(normalizeFeedSymbol('currencies','BRENT-SPOT'),null);
+ const stored={...defaults,commodities:['BRENT-SPOT','XAUUSD=X','WTI-SPOT','HG=F']},original=structuredClone(stored),expected=['BZ=F','XAUUSD=X','CL=F','HG=F'];
+ assert.deepEqual(normalizeSavedFeedPreferences(stored)?.commodities,expected);assert.deepEqual(stored,original);
+ assert.deepEqual(normalizeSavedFeedPreferences({...defaults,commodities:['WTI','CL=F','BZ=F']})?.commodities,['CL=F','BZ=F']);assert.equal(normalizeFeedPreferences({...defaults,commodities:['WTI','CL=F']}),null);
+ assert.deepEqual(feedSuggestions('commodities','WTI',[],7).map(([symbol])=>symbol),['CL=F']);
 });
 
 test('feed routes canonical oil only to official spot publications and retains their actual observation date',async t=>{

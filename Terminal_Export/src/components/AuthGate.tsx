@@ -36,7 +36,7 @@ export default function AuthGate({children}: {children:ReactNode}) {
   useEffect(()=>{
     if(location.pathname!=='/'||!profile||error||recovery){setWelcome(null);return;}
     if(welcomedUsers.current.has(profile.id))return;
-    setWelcome(previous=>previous?.profileId===profile.id?previous:{id:crypto.randomUUID(),profileId:profile.id,name:normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email),attempt:0,startedAt:Date.now(),phase:'loading',detail:'Preparando tu espacio de mercado…',portfolioRequired:profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com',gates:{}});
+    setWelcome(previous=>previous?.profileId===profile.id?previous:{id:crypto.randomUUID(),profileId:profile.id,name:normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email),attempt:0,startedAt:Date.now(),phase:'loading',detail:'Preparando tu espacio de mercado…',portfolioRequired:false,gates:{}});
   },[profile?.id,error,recovery,location.pathname]);
   const reportReadiness=useCallback((id:string,attempt:number,state:FeedReadiness,scope:TerminalEntryScope='feed')=>{
     setWelcome(previous=>{

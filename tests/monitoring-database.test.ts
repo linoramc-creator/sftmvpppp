@@ -99,4 +99,15 @@ test('isolated PostgreSQL monitoring owns receipts and rules, leases work, and p
   const schedule=(await db.query("select * from cron.jobs where name='terminal-monitoring'")).rows[0];assert.equal(schedule.schedule,'*/5 * * * *');await db.exec('select public.beta_run_monitor_schedule()');const request=(await db.query('select url,headers,body from net.calls')).rows[0];assert.ok(request.url.endsWith('/monitoring-worker'));assert.equal(request.headers['x-monitor-job'],'test-only-server-secret-never-published');assert.deepEqual(request.body,{operation:'run'});
   assert.deepEqual((await db.query('select * from public.beta_paper_portfolios order by id')).rows,original);
  });
+ await t.test('Seguimiento restores new owner-bound rules while historical alerts remain paused and ledger stays intact',async()=>{
+  await migrate('202611110002_analytics.sql');
+  assert.equal((await db.query('select count(*)::integer n from public.beta_monitor_alerts where enabled')).rows[0].n,0);
+  await assert.rejects(rpc('save_alert',reader,rule('AAPL','Before activation')),/BETA_MONITOR_ALERTS_DISABLED/);
+  await migrate('202611160002_following.sql');
+  assert.equal((await db.query('select count(*)::integer n from public.beta_monitor_alerts where enabled')).rows[0].n,0);
+  const restored=await rpc('save_alert',reader,rule('AAPL','New Seguimiento condition'));
+  assert.equal(restored.enabled,true);
+  await assert.rejects(rpc('pause_alert',third,{id:restored.id,revision:restored.revision,enabled:false}),/BETA_MONITOR_NOT_FOUND/);
+  assert.deepEqual((await db.query('select * from public.beta_paper_portfolios order by id')).rows,original);
+ });
 });

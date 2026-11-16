@@ -3,7 +3,6 @@ import {parseSections,renderElements,sectorTrends} from '@/components/research/R
 import ReportQuote from '@/components/ReportQuote';
 import {feedTicker,feedTickerContext,treasuryDisplayTicker} from '@/lib/feed-identifiers';
 import KeepPanel from '@/components/KeepPanel';
-import {useTerminalEntry} from '@/lib/terminal-entry';
 import { ReportLoading } from "@/components/ReportLoading";
 import { accountApi } from "@/lib/beta-api";
 import {monitoringVisitId} from '@/lib/monitoring-api';
@@ -32,7 +31,8 @@ import AnalyticsSuggestions from '@/components/AnalyticsSuggestions';
 import type {AnalyticsInitialRequest} from '@/lib/analytics-api';
 
 const ResearchLibrary=lazy(()=>import('@/components/research/ResearchLibrary'));
-const AnalyticsWorkspace=lazy(()=>import('@/components/AnalyticsWorkspace'));
+const MensorLabWorkspace=lazy(()=>import('@/components/MensorLabWorkspace'));
+const MonitoringCenter=lazy(()=>import('@/components/MonitoringCenter'));
 const AssetDetail = lazy(() => import("@/components/AssetDetail"));
 const UnifiedComparison = lazy(() => import("@/pages/UnifiedComparison"));
 const MarketInstrumentDetail = lazy(() => import("@/components/MarketInstrumentDetail"));
@@ -62,7 +62,7 @@ function reportFromRow(row: any): SavedReport {
 }
 
 const DailyBrief = lazy(() => import('@/components/DailyBrief'));
-const PortfolioLab = lazy(() => import('@/components/PortfolioLab'));
+
 
 // ── Section configs ────────────────────────────────────────────────────
 
@@ -253,7 +253,6 @@ function extractCurrentMetrics(content: string): { label: string; value: string 
 // ── Main component ─────────────────────────────────────────────────────
 
 const Index = () => {
-  const terminalEntry=useTerminalEntry();
   const profile = useProfile();
   const stockSearch=useInstrumentSearch(),fundSearch=useInstrumentSearch();
   const [saving,setSaving] = useState(false);
@@ -293,7 +292,7 @@ const Index = () => {
   const [sectorExpanded, setSectorExpanded]   = useState<Record<string, boolean>>({});
 
   // Nav
-  const [navTab, setNavTab] = useState<"feed" | "brief" | "portfolio" | "ticker" | "etf" | "sector" | "comparacion" | "mercado" | "seguimiento" | "analytics" | "bonos" | "guardados">("feed");
+  const [navTab, setNavTab] = useState<"feed" | "brief" | "monitor" | "ticker" | "etf" | "sector" | "comparacion" | "mercado" | "seguimiento" | "analytics" | "bonos" | "guardados">("feed");
   const [analyticsRequest,setAnalyticsRequest]=useState<AnalyticsInitialRequest|undefined>();
   const openAnalytics=useCallback((request:AnalyticsInitialRequest)=>{if(request.accountId!==profile.id)return;setAnalyticsRequest(request);setNavTab('analytics');},[profile.id]);
   const consumeAnalyticsRequest=useCallback((id:string)=>setAnalyticsRequest(previous=>previous?.id===id?undefined:previous),[]);
@@ -588,10 +587,10 @@ const Index = () => {
                 { label: "ETF",       key: "etf"       },
                 { label: "SECTOR",    key: "sector"    },
                 { label: "COMPARAR", key: "comparacion" },
-                { label: "ANALYTICS", key: "analytics" },
+                { label: "MENSORLAB", key: "analytics" },
+                { label: "SEGUIMIENTO", key: "monitor" },
                 { label: "BONOS Y CRÉDITOS", key: "bonos" },
                 { label: "BIBLIOTECA", key: "guardados" },
-                ...(profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com'?[{label:'PORTFOLIO',key:'portfolio'} as const]:[]),
               ] as const).map(({ label, key }) => {
                 const active = navTab === key;
                 return (
@@ -605,7 +604,7 @@ const Index = () => {
                     }`}
                   >
                     {label}
-                    {key==='portfolio'&&monitorUnread>0&&<span className="ml-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[9px] text-white" aria-label={`${monitorUnread} avisos sin leer`}>{monitorUnread>99?'99+':monitorUnread}</span>}
+                    {key==='monitor'&&monitorUnread>0&&<span className="ml-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[9px] text-white" aria-label={`${monitorUnread} avisos sin leer`}>{monitorUnread>99?'99+':monitorUnread}</span>}
                     {label === "BIBLIOTECA" && researchCount > 0 && (
                       <span className="ml-1.5 text-[9px] bg-white/10 text-white px-1.5 py-0.5">
                         {researchCount}
@@ -638,7 +637,7 @@ const Index = () => {
       <KeepPanel active={navTab === "bonos"}><Suspense fallback={<div role="status" className="mx-auto my-6 h-64 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse" aria-label="Cargando bonos y créditos"/>}><BondsCreditView /></Suspense></KeepPanel>
       <KeepPanel active={navTab === "feed"}><main className="max-w-7xl mx-auto px-4 py-6"><FeedView stocks={customStocks} data={marketData} onChange={saveCustomStocks} onSelect={openWatchAsset} onMarketSelect={openMarketAsset} onEarningsSelect={openEarningsAsset} watchlistReady={watchlistReady} watchlistError={watchlistError} onRetryWatchlist={()=>setWatchlistRetry(n=>n+1)} tickerReady={marketData!==null&&marketDataKey===customStocks.join(',')}/></main></KeepPanel>
       <KeepPanel active={navTab === "brief"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo brief…</p>}><DailyBrief watchlist={customStocks} syncWatchlist={()=>persistWatchlist(customStocks)}/></Suspense></KeepPanel>
-      {profile.isAdmin&&profile.email.toLowerCase()==='linoramc@gmail.com'&&<KeepPanel active={navTab === 'portfolio'} preload={!!terminalEntry?.portfolioRequired}><Suspense fallback={<div role="status" aria-label="Abriendo laboratorio de portfolio" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><PortfolioLab onSelect={openWatchAsset}/></Suspense></KeepPanel>}
+      <KeepPanel active={navTab === 'monitor'}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo seguimiento…</p>}><MonitoringCenter accountId={profile.id} standalone onSelect={openWatchAsset} onUnread={setMonitorUnread} onWatchlistChange={async symbols=>{await persistWatchlist(symbols);watchlistEdited.current=true;setCustomStocks(symbols);try{localStorage.setItem(`terminal_stocks_v2:${profile.id}`,JSON.stringify(symbols));}catch{/* Server remains the source of truth when local storage is unavailable. */}}}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "seguimiento"}><Suspense fallback={<p className="p-6 text-sm">Cargando ficha…</p>}><AssetDetail key={watchSymbol+":"+(earningsDate??"watch")} symbol={watchSymbol} earningsDate={earningsDate} stocks={customStocks} onSelect={openWatchAsset} onBack={()=>setNavTab("feed")} accountId={profile.id} onAnalytics={openAnalytics} onAnalyze={(symbol,kind)=>{if(kind==='etf'){analyzeAsEtf(symbol);return;}setTicker(symbol);setNavTab("ticker");}}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "mercado"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo sesión de mercado…</p>}><MarketInstrumentDetail key={marketSymbol} symbol={marketSymbol} onBack={()=>setNavTab('feed')} onSelect={openMarketAsset} accountId={profile.id} onAnalytics={openAnalytics}/></Suspense></KeepPanel>
       <KeepPanel active={navTab === "comparacion"}><Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Abriendo comparación…</p>}><UnifiedComparison accountId={profile.id} onAnalytics={openAnalytics}/></Suspense></KeepPanel>
@@ -879,7 +878,7 @@ const Index = () => {
       </KeepPanel>
 
       <KeepPanel active={navTab === "guardados"}><Suspense fallback={<p className="p-6 text-sm text-slate-400">Abriendo biblioteca…</p>}><ResearchLibrary accountId={profile.id} onAnalytics={openAnalytics}/></Suspense></KeepPanel>
-      <KeepPanel active={navTab === 'analytics'}><Suspense fallback={<div role="status" aria-label="Abriendo Analytics" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><AnalyticsWorkspace key={profile.id} accountId={profile.id} initialRequest={analyticsRequest} onRequestConsumed={consumeAnalyticsRequest}/></Suspense></KeepPanel>
+      <KeepPanel active={navTab === 'analytics'}><Suspense fallback={<div role="status" aria-label="Abriendo MensorLab" className="mx-auto my-6 h-72 max-w-7xl rounded-xl border border-border bg-card motion-safe:animate-pulse"/>}><MensorLabWorkspace key={profile.id} accountId={profile.id} initialRequest={analyticsRequest} onRequestConsumed={consumeAnalyticsRequest}/></Suspense></KeepPanel>
 
     </div>
   );

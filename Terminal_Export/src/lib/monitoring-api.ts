@@ -1,6 +1,6 @@
 import {accountApi} from './beta-api';
-import type {MonitorOverview} from '../../../supabase/functions/analyze-ticker/monitoring-types';
-export type {MonitorAlert,MonitorCondition,MonitorContext,MonitorField,MonitorNotice,MonitorOverview,MonitorAgendaItem,MonitorSnapshot} from '../../../supabase/functions/analyze-ticker/monitoring-types';
+import type {MonitorAlert,MonitorAlertInput,MonitorOverview} from '../../../supabase/functions/analyze-ticker/monitoring-types';
+export type {MonitorAlert,MonitorAlertInput,MonitorCondition,MonitorContext,MonitorField,MonitorNotice,MonitorOverview,MonitorAgendaItem,MonitorSnapshot,MonitorMetric} from '../../../supabase/functions/analyze-ticker/monitoring-types';
 
 export function monitoringSourceUrl(value:string|null|undefined){try{const url=new URL(value??'');return ['https:','http:'].includes(url.protocol)?url.href:null;}catch{return null;}}
 
@@ -19,3 +19,6 @@ export function monitoringVisitId(accountId:string){
 export const monitoringOpen=(visitId:string,signal?:AbortSignal)=>accountApi<MonitorOverview>('monitorOpen',{visitId},{signal});
 export const monitoringList=(visitId:string,options:{before?:string;unreadOnly?:boolean}={},signal?:AbortSignal)=>accountApi<MonitorOverview>('monitorList',{visitId,...options},{signal});
 export const monitoringRead=(ids:string[],signal?:AbortSignal)=>accountApi<{ok:true}>('monitorRead',{ids},{signal});
+export const monitoringSaveAlert=(input:MonitorAlertInput,signal?:AbortSignal)=>accountApi<MonitorAlert>('monitorSaveAlert',{...input},{signal});
+export const monitoringPauseAlert=(input:Pick<MonitorAlert,'id'|'revision'|'enabled'>,signal?:AbortSignal)=>accountApi<MonitorAlert>('monitorPauseAlert',{...input},{signal});
+export const monitoringDeleteAlert=(input:Pick<MonitorAlert,'id'|'revision'>,signal?:AbortSignal)=>accountApi<{ok:true}>('monitorDeleteAlert',{...input},{signal});

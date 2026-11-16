@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {BetaError,classify,readBody,secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
+import {MensorLabError} from '../supabase/functions/analyze-ticker/mensorlab-service.ts';
 const post=(body:unknown)=>new Request('https://example.test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 test('all supported analysis routes are classified without a paid-work bypass',()=>{
  assert.deepEqual(classify({ticker:'AAPL'}),{request_class:'report',report_kind:'ticker',report_subject:'AAPL'});
@@ -29,6 +30,15 @@ test('anonymous, foreign origin and non-POST calls never reach provider code',as
 test('mixed operations cannot bypass expensive request budgets',()=>{
  for(const body of [{macroCalendar:true,etf:true,ticker:'SPY'},{panel:'business',subject:'AAPL',marketData:true},{accountAction:'profile',panel:'feed'},{fundamentals:true,optionsAction:'chain',ticker:'AAPL'},{panel:'correlation',symbols:['SPY','QQQ'],range:'max'}])assert.throws(()=>classify(body),BetaError);
  assert.equal(classify({panel:'institutional',subject:'AAPL'}).request_class,'expensive');
+});
+test('MensorLab is charged as bounded data work and rejects mixed or arbitrary operations',async()=>{
+ const definition={version:1,studies:[{id:'one',name:'Reference',kind:'comparison',query:{version:1,assets:['MSFT','^GSPC'],metric:'price',operation:'base100',period:{range:'1y'},frequency:'daily',currency:'USD',chart:'line',dataKind:'reported'},benchmark:'^GSPC'}]};
+ assert.equal(classify({accountAction:'labRun',definition}).request_class,'data');
+ assert.equal(classify({accountAction:'labList'}).request_class,'account');
+ for(const body of [{accountAction:'labSQL',sql:'delete from auth.users'},{accountAction:'labList',user_id:'someone'},{accountAction:'labRun',definition:{...definition,code:'process.env'}},{accountAction:'labRun',definition:{...definition,studies:definition.studies.map(s=>({...s,query:{...s.query,operation:'eval'}}))}}])assert.throws(()=>classify(body),MensorLabError);
+ assert.throws(()=>classify({accountAction:'labRun',definition,panel:'feedMarkets'}),BetaError);
+ await assert.rejects(readBody(post({accountAction:'labRun',definition,oversized:'x'.repeat(33000)})),e=>(e as BetaError).status===413);
+ let paid=0;assert.equal((await secureRequest(post({accountAction:'labRun',definition}),async()=>{paid++;return Response.json({});})).status,401);assert.equal(paid,0);
 });
 
 test('relative comparisons require exactly two distinct normalized valid assets',()=>{

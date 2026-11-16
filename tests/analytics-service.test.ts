@@ -19,7 +19,8 @@ test('Analytics allowlists actions, properties, operations, prompts and budget c
  assert.equal(classify({accountAction:'analyticsRun',query}).request_class,'data');
  assert.equal(classify({accountAction:'analyticsSave',name:'Comparación',query,requestId:randomUUID()}).request_class,'account');
  for(const body of [{accountAction:'analyticsExecuteSQL',sql:'select 1'},{accountAction:'analyticsRun',query,user_id:other},{accountAction:'analyticsRun',query:{...query,operation:'eval'}},{accountAction:'analyticsRun',query:{...query,sql:'select 1'}},{accountAction:'analyticsSave',name:'x',query},{accountAction:'analyticsInterpret',prompt:'x'.repeat(2001)},{accountAction:'analyticsInterpret',prompt:'<script>'},{accountAction:'analyticsRun',query,marketData:true}])assert.throws(()=>classify(body));
- for(const accountAction of ['monitorSaveAlert','monitorPauseAlert'])assert.throws(()=>classify({accountAction}),error=>(error as AnalyticsError).status===410);
+ // Seguimiento now validates new rules rather than retiring these routes.
+ assert.equal(classify({accountAction:'monitorSaveAlert',requestId:randomUUID(),symbol:'AAPL',name:'Seguimiento',conditions:[{field:'price',op:'gt',value:100,currency:'USD'}],enabled:true}).request_class,'account');
 });
 
 test('saved Analytics CRUD always forwards authenticated owner and never accepts result evidence',async()=>{

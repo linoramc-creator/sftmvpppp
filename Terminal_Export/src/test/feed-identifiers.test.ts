@@ -9,7 +9,8 @@ it('shows conventional research symbols without changing the instrument or rever
  for(const symbol of ['QQQ','SAP.DE','VWCE.DE','BRK.B','BRK-B','000001.SS','399001.SZ','000300.SS','^UNKNOWN'])expect(feedTicker(symbol)).toBe(symbol);
  expect(feedTicker({symbol:'GC=F',displaySymbol:'XAUUSD'})).toBe('GC');
  expect(feedTicker({symbol:'QQQ',displaySymbol:'SPY'})).toBe('QQQ');
- for(const symbol of ['GC=F','CL=F','BZ=F','NQ=F'])expect(feedTickerContext(symbol)).toBe('Futuros');
+ for(const symbol of ['GC=F','NQ=F'])expect(feedTickerContext(symbol)).toBe('Futuros');
+ for(const symbol of ['CL=F','BZ=F'])expect(feedTickerContext(symbol)).toBe('Futuro continuo');
  for(const symbol of ['XAUUSD=X','XAGUSD=X'])expect(feedTickerContext(symbol)).toBe('Contado');
  for(const [symbol,ticker] of [['WTI-SPOT','WTI'],['BRENT-SPOT','BRENT']]){expect(feedTicker(symbol)).toBe(ticker);expect(feedTickerContext(symbol)).toBe('Contado');}
  expect(feedTickerContext('EURUSD=X')).toBeNull();

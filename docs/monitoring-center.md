@@ -3,7 +3,9 @@
 El apartado **Seguimiento** reúne Cambios, Alertas y Agenda. Usa la lista existente
 `beta_watchlists` y lee las posiciones de las carteras simuladas autorizadas.
 No crea otra cartera, ejecuta órdenes, cambia sus marcas ni escribe en sus tablas.
-La cartera conserva su restricción actual de administrador.
+La navegación ya no incluye Portfolio; su historial permanece intacto. La vista
+independiente muestra la lista personal (hasta siete activos), novedades,
+riesgos observables, alertas y próximos eventos. No muestra posiciones retiradas.
 
 ## Datos y límites
 
@@ -15,6 +17,8 @@ La cartera conserva su restricción actual de administrador.
   existentes y Massive `/v2/reference/news` completan la cobertura disponible.
 - Cotización y variación usan sesión regular o cierre, con su fecha real.
   No se prometen precios en tiempo real ni se atribuye un movimiento a una noticia.
+  Las condiciones numéricas de precio/variación consideran antiguo un dato de
+  más de 24 horas; durante cierres prolongados esperan una nueva observación.
 - Las revisiones de BPA requieren período, moneda y unidad compatibles. Las
   publicaciones necesitan fecha de publicación, no solo cierre fiscal.
 - El historial numérico conserva hasta 64 observaciones horarias recientes por
@@ -76,6 +80,8 @@ sesenta minutos. No se envían correos ni notificaciones móviles desde este mó
 ## Activación y operación
 
 1. Aplicar `202611110001_monitoring.sql` con las migraciones anteriores presentes.
+   Después de Analytics, aplicar `202611160002_following.sql` para permitir nuevas
+   reglas. No reactiva automáticamente alertas históricas pausadas.
 2. Publicar `analyze-ticker` y `monitoring-worker` con `verify_jwt=false`:
    ambos implementan su propia validación de identidad o secreto.
 3. Reutilizar `BRIEF_CRON_SECRET` y la entrada Vault `terminal_brief_cron` ya
