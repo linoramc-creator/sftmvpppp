@@ -8,6 +8,7 @@ import {companyNewsPattern} from './news-topics.ts';
 import {loadEarningsPreview} from './earnings-preview.ts';
 import {eodhdGet,eodhdSymbol} from './eodhd-client.ts';
 import {summarizeNews} from './news-summary-ai.ts';
+import {photoUrl} from './news-covers.ts';
 import type {Article} from './panels.ts';
 import type {MonitorSnapshot,MonitorMetric,MonitorField,MonitorNews,MonitorCalendarEvent} from './monitoring-types.ts';
 
@@ -55,7 +56,8 @@ export function normalizeMonitorNews(rows:Article[],symbol:string,name:string,no
  return rows.slice().sort((a,b)=>Date.parse(b.publishedAt??b.date)-Date.parse(a.publishedAt??a.date)).flatMap(a=>{
   const url=monitorSourceUrl(a.url),date=stamp(a.publishedAt??a.date,now),title=clean(a.title,300),source=clean(a.source,100),key=title.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]/gu,'');
   if(!url||!date||Date.parse(date)<now-7*86400000||!source||!title||seen.has(url)||titles.has(key)||!pattern.test(title+' '+(a.excerpt??''))||/prediction:|stocks? to buy|millionaire|class action|investor deadline|motley fool|zacks rank/i.test(title+' '+source))return [];
-  seen.add(url);titles.add(key);return [{id:url,title,date,source,url,excerpt:clean(a.excerpt,900)}];
+  const imageUrl=monitorSourceUrl(photoUrl(a.image)),keyPoints=(a.keyPoints??[]).filter(value=>typeof value==='string').map(value=>clean(value,250)).filter(Boolean).slice(0,4);
+  seen.add(url);titles.add(key);return [{id:url,title,date,source,url,excerpt:clean(a.excerpt,900),...(imageUrl?{imageUrl}:{}),...(keyPoints.length?{keyPoints}:{})}];
  }).slice(0,16);
 }
 export async function collectMonitorSnapshot(symbol:string,previous:MonitorSnapshot|null,env:Row={},deps:MonitorDataDependencies={}):Promise<MonitorSnapshot>{
@@ -96,7 +98,7 @@ export async function collectMonitorSnapshot(symbol:string,previous:MonitorSnaps
  const next=out.calendar.filter(e=>e.kind==='earnings'&&e.date>=at.slice(0,10)).sort((a,b)=>a.date.localeCompare(b.date))[0];
  if(next&&out.metrics.earningsWithinDays)out.metrics.earningsWithinDays={...out.metrics.earningsWithinDays,value:daysUntil(next.date,now)};else delete out.metrics.earningsWithinDays;
  const newsRows=await newsTask;
- const current=normalizeMonitorNews(newsRows??[],symbol,name,now),previousNews=new Map((previous?.news??[]).map(n=>[n.id,n]));out.news=current.map(n=>({...n,...(previousNews.get(n.id)?.analysisKey?{analysisKey:previousNews.get(n.id)!.analysisKey,summary:previousNews.get(n.id)!.summary}:{})}));
+ const current=normalizeMonitorNews(newsRows??[],symbol,name,now),previousNews=new Map((previous?.news??[]).map(n=>[n.id,n]));out.news=current.map(n=>({...n,...(previousNews.get(n.id)?.analysisKey?{analysisKey:previousNews.get(n.id)!.analysisKey,summary:previousNews.get(n.id)!.summary,keyPoints:n.keyPoints??previousNews.get(n.id)!.keyPoints}:{})}));
  for(const old of previous?.news??[])if(!out.news.some(n=>n.id===old.id)&&Date.parse(old.date)>now-7*86400000)out.news.push(old);out.news=out.news.sort((a,b)=>b.date.localeCompare(a.date)).slice(0,24);
  if(!quote.price)out.coverage.push('Cotización no recuperada; se conserva la última observación con su fecha.');
  if(due&&!raw&&!summary)out.coverage.push('Fundamentales y estimaciones no recuperados con los proveedores actuales.');
@@ -109,5 +111,5 @@ export async function collectMonitorSnapshot(symbol:string,previous:MonitorSnaps
 /** Small source-bound editorial batch, cached persistently by the worker, with no web grounding. */
 export async function interpretMonitorNews(news:MonitorNews[],key:string|undefined):Promise<MonitorNews[]>{
  const selected=news.slice(0,6),summaries=await summarizeNews(selected,key);
- return news.map(n=>{const result=summaries.find(s=>s.id===n.id);return {...n,analysisKey:'monitor-news-v1:'+n.id,summary:result?.keyPoints?.join(' ').slice(0,650)||n.excerpt.slice(0,650)||n.title};});
+ return news.map(n=>{const result=summaries.find(s=>s.id===n.id),keyPoints=result?.keyPoints?.map(value=>clean(value,250)).filter(Boolean).slice(0,4);return {...n,analysisKey:'monitor-news-v1:'+n.id,...(keyPoints?.length?{keyPoints}:{}),summary:keyPoints?.join(' ').slice(0,650)||n.excerpt.slice(0,650)||n.title};});
 }

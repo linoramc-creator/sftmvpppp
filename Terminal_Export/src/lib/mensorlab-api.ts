@@ -13,6 +13,7 @@ async function request<T>(accountAction:string,body:Record<string,unknown>={},si
  return data as T;
 }
 export const labRun=(definition:LabDefinition,signal?:AbortSignal)=>request<LabRun>('labRun',{definition},signal);
+export const labOrganize=(value:{runId:string;studies:{id:string;name:string}[]},signal?:AbortSignal)=>request<LabRun>('labOrganize',{runId:value.runId,studies:value.studies.map(({id,name})=>({id,name}))},signal);
 export const labList=(signal?:AbortSignal)=>request<{items:LabProjectSummary[]}>('labList',{},signal);
 export const labOpen=(id:string,snapshotId?:string,signal?:AbortSignal)=>request<{project:LabProject}>('labOpen',{id,...(snapshotId?{snapshotId}:{})},signal);
 export const labSave=(value:{name:string;runId:string;requestId:string;id?:string;revision?:number},signal?:AbortSignal)=>request<{project:LabProject}>('labSave',{name:value.name,runId:value.runId,requestId:value.requestId,...(value.id?{id:value.id,revision:value.revision}:{})},signal);

@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {labDelete,labList,labOpen,labRefresh,labRequestIdentity,labRun,labSave,labSymbols,MensorLabError} from '../lib/mensorlab-api';
+import {labDelete,labList,labOpen,labOrganize,labRefresh,labRequestIdentity,labRun,labSave,labSymbols,MensorLabError} from '../lib/mensorlab-api';
 import {analyticsQuery} from './fixtures/analytics';
 const fetch=vi.hoisted(()=>vi.fn());vi.mock('@/lib/beta-api',()=>({authenticatedFetch:fetch}));
 beforeEach(()=>{fetch.mockReset();fetch.mockResolvedValue({ok:true,json:async()=>({items:[]})});});afterEach(()=>vi.restoreAllMocks());
@@ -12,3 +12,4 @@ it('uses authenticated bounded actions and saves only server execution identity,
 });
 it('preserves aborts and exposes revision conflicts without faking a successful save',async()=>{fetch.mockResolvedValue({ok:false,status:409,json:async()=>({error:'La revisión ha cambiado.'})});const controller=new AbortController();await expect(labOpen('project',undefined,controller.signal)).rejects.toEqual(new MensorLabError('La revisión ha cambiado.',409));controller.abort();expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);});
 it('reuses request identities for uncertain replies and explicitly deduplicates symbols without inventing data',()=>{const value=labRequestIdentity(null,'one');expect(labRequestIdentity(value,'one')).toBe(value);expect(labRequestIdentity(value,'two').id).not.toBe(value.id);expect(labSymbols('msft, MSFT; ^gspc\nGOOGL')).toEqual(['MSFT','^GSPC','GOOGL']);});
+it('organizes only a server execution and study identities without uploading results or queries',async()=>{await labOrganize({runId:'server-owned-run',studies:[{id:'two',name:'Nuevo nombre'},{id:'one',name:'Primero'}]});expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({accountAction:'labOrganize',runId:'server-owned-run',studies:[{id:'two',name:'Nuevo nombre'},{id:'one',name:'Primero'}]});});

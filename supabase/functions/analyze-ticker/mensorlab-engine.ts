@@ -94,6 +94,10 @@ function studyMetrics(study:LabStudy,analytics:AnalyticsResult,now:number):LabSt
  return result;
 }
 
+export function mensorLabResultStatus(results:LabStudyResult[]):LabRun['status']{
+ const statuses=results.map(result=>result.analytics.status==='unavailable'?'unavailable':result.warnings.length||result.analytics.status==='partial'||result.scenario?.status==='unavailable'?'partial':'complete');
+ return statuses.every(status=>status==='unavailable')?'unavailable':statuses.every(status=>status==='complete')?'complete':'partial';
+}
 export async function executeMensorLab(input:unknown,deps:LabRunDependencies={}):Promise<LabRun>{
  const definition=validateLabDefinition(input),now=deps.now??Date.now(),cache=new Map<string,Promise<Awaited<ReturnType<NonNullable<AnalyticsDependencies['prices']>>>> >();
  // Check every date range before any provider work, including later studies.
@@ -107,8 +111,7 @@ export async function executeMensorLab(input:unknown,deps:LabRunDependencies={})
   for(const alternative of analyticsResultAlternatives(analytics))if(!alternatives.has(JSON.stringify(alternative.query))){analytics.alternatives.push(alternative);alternatives.add(JSON.stringify(alternative.query));}
   results.push(study.kind==='analytics'?{id:study.id,name:study.name,kind:study.kind,analytics,benchmark:null,metrics:[],correlations:{symbols:[],values:[],observations:0},sample:{from:analytics.from,to:analytics.to,observations:analytics.table.length,returns:0,annualization:252,minimumRiskReturns:20},methodology:analytics.methodology,warnings:analytics.warnings}:studyMetrics(study,analytics,now));
  }
- const statuses=results.map(result=>result.analytics.status==='unavailable'?'unavailable':result.warnings.length||result.analytics.status==='partial'||result.scenario?.status==='unavailable'?'partial':'complete');
- const run:LabRun={runId:crypto.randomUUID(),definition,generatedAt:new Date(now).toISOString(),results,status:statuses.every(status=>status==='unavailable')?'unavailable':statuses.every(status=>status==='complete')?'complete':'partial',warnings:['Investigación descriptiva con cobertura disponible. Los escenarios no son predicciones ni recomendaciones de inversión.']};
+ const run:LabRun={runId:crypto.randomUUID(),definition,generatedAt:new Date(now).toISOString(),results,status:mensorLabResultStatus(results),warnings:['Investigación descriptiva con cobertura disponible. Los escenarios no son predicciones ni recomendaciones de inversión.']};
  if(new TextEncoder().encode(JSON.stringify(run)).length>LAB_LIMITS.snapshotBytes)reject('El proyecto supera el límite de 1,5 MB por instantánea. Reduce estudios, activos o periodo; no se recortan datos silenciosamente.');
  return run;
 }

@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {analyticsRequestClass,handleAnalyticsAction,analyticsPortfolio,AnalyticsError} from '../supabase/functions/analyze-ticker/analytics-service.ts';
 import {createPortfolioState} from '../supabase/functions/analyze-ticker/portfolio-model.ts';
 import {classify,secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
-import {AnalyticsValidationError} from '../supabase/functions/analyze-ticker/analytics-engine.ts';
+import {AnalyticsValidationError,ANALYTICS_PRICE_STUDIES} from '../supabase/functions/analyze-ticker/analytics-engine.ts';
 import type {AnalyticsQuery,AnalyticsResult} from '../supabase/functions/analyze-ticker/analytics-types.ts';
 const uid=randomUUID(),other=randomUUID(),pid=randomUUID(),now=Date.parse('2026-11-11T15:00:00Z');
 const query:AnalyticsQuery={version:1,assets:['MSFT','^GSPC'],metric:'price',operation:'base100',period:{range:'2y'},frequency:'daily',currency:'original',chart:'line',dataKind:'reported'};
@@ -62,8 +62,8 @@ test('context ideas are authenticated metadata only and never trigger storage, A
  const deps={rpc:forbidden,env:()=>{throw new Error('No secrets needed');},interpret:forbidden,execute:forbidden};
  assert.equal(classify({accountAction:'analyticsIdeas',context:{symbol:'GOOG',kind:'equity'}}).request_class,'account');
  const result=await (await handleAnalyticsAction({accountAction:'analyticsIdeas',context:{symbol:'GOOG',kind:'equity'}},user,deps))!.json();
- assert.equal(result.catalogVersion,1);assert.equal(result.ideas.length,4);assert.ok(result.ideas.every((idea:any)=>idea.query.assets[0]==='GOOGL'&&idea.coverage.status==='catalog'));
- for(const kind of ['etf','index','forex']){const value=await (await handleAnalyticsAction({accountAction:'analyticsIdeas',context:{symbol:'SPY',kind}},user,deps))!.json();assert.ok(value.ideas.every((idea:any)=>idea.query.metric==='price'));}
+ assert.equal(result.catalogVersion,1);assert.equal(result.ideas.length,9);assert.ok(result.ideas.every((idea:any)=>idea.query.assets[0]==='GOOGL'&&idea.coverage.status==='catalog'));
+ for(const kind of ['etf','index','forex']){const value=await (await handleAnalyticsAction({accountAction:'analyticsIdeas',context:{symbol:'SPY',kind}},user,deps))!.json();assert.ok(value.ideas.every((idea:any)=>idea.query.metric==='price'||ANALYTICS_PRICE_STUDIES.has(idea.query.metric)));}
  for(const body of [{accountAction:'analyticsIdeas',user_id:other},{accountAction:'analyticsIdeas',context:{symbol:'MSFT',uid:other}},{accountAction:'analyticsIdeas',context:{symbol:'https://evil.example'}},{accountAction:'analyticsIdeas',context:{kind:'sql'}}])await assert.rejects(handleAnalyticsAction(body,user,deps));
 });
 

@@ -1,5 +1,5 @@
 /** Versioned, serializable Analytics contract. No expressions, SQL or code. */
-export type AnalyticsMetric = 'price'|'revenue'|'netIncome'|'grossProfit'|'operatingCashFlow'|'freeCashFlow'|'capex'|'capexAI'|'cash'|'totalDebt'|'equity'|'totalAssets'|'portfolioExposure';
+export type AnalyticsMetric = 'price'|'realizedVolatility'|'drawdown'|'rollingCorrelation'|'rollingBeta'|'relativeStrength'|'revenue'|'netIncome'|'grossProfit'|'operatingCashFlow'|'freeCashFlow'|'capex'|'capexAI'|'cash'|'totalDebt'|'equity'|'totalAssets'|'portfolioExposure';
 export type AnalyticsOperation = 'level'|'base100'|'growth_yoy'|'growth_qoq'|'ratio';
 export type AnalyticsFrequency = 'daily'|'weekly'|'monthly'|'quarterly'|'annual';
 export type AnalyticsQuery = {
@@ -14,9 +14,13 @@ export type AnalyticsQuery = {
   chart: 'line'|'bar'|'scatter';
   dataKind: 'reported';
   portfolioId?: string;
+  /** Daily observed-return window, independent of display frequency. */
+  window?:20|60|120;
+  /** Explicit reference, included once among assets. */
+  benchmark?:string;
 };
 export type AnalyticsSource = { id:string; name:string; url:string; fetchedAt:string; dataThrough:string|null; exportAllowed:boolean; exportNote:string };
-export type AnalyticsPoint = { date:string; value:number|null; originalValue?:number|null; currency:string|null; fiscalPeriod?:string; filingDate?:string|null; periodType?:'3M'|'12M'|'instant'|'price'; status:'available'|'missing'|'incompatible'; sourceId:string; sourceIds?:string[]; detail?:string };
+export type AnalyticsPoint = { date:string; value:number|null; originalValue?:number|null; currency:string|null; fiscalPeriod?:string; filingDate?:string|null; periodType?:'3M'|'12M'|'instant'|'price'; status:'available'|'missing'|'incompatible'; sourceId:string; sourceIds?:string[]; detail?:string; sample?:{from:string|null;to:string;observations:number;returns:number;window:number|null;benchmark?:string;annualization?:number} };
 export type AnalyticsSeries = { id:string; symbol:string; label:string; unit:string; currency:string|null; points:AnalyticsPoint[]; status:'complete'|'partial'|'unavailable'; sourceIds:string[]; notes:string[] };
 export type AnalyticsResult = {
   version:1;

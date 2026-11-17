@@ -24,3 +24,21 @@ export function portfolioNewsGroups(data:MonitorOverview,scope:'positions'|'watc
 }
 
 export function visibleMonitoringNotices(notices:MonitorNotice[]){return notices.filter(item=>item.kind!=='alert');}
+
+export type FollowingNewsItem=MonitorNews&{symbols:string[];noticeIds:string[];unread:boolean;collectedAt:string|null;imageUrl?:string|null;keyPoints?:string[]};
+/** One chronological feed for the independent following list. Never widens to positions or feed assets. */
+export function followingNewsItems(data:MonitorOverview):FollowingNewsItem[]{
+ const followed=new Set(data.context.watchlist),candidates:(MonitorNews&{symbol:string;collectedAt:string|null})[]=[];
+ for(const snapshot of data.context.snapshots){if(!followed.has(snapshot.symbol))continue;for(const news of snapshot.news)candidates.push({...news,symbol:snapshot.symbol,collectedAt:snapshot.collectedAt});}
+ const notices=data.notices.filter(item=>item.kind==='news'&&followed.has(item.symbol));
+ for(const notice of notices)candidates.push({id:notice.key,title:notice.title,date:notice.occurredAt,source:notice.source,url:notice.url,excerpt:notice.detail,analysisKey:notice.analysisKey,symbol:notice.symbol,collectedAt:notice.createdAt});
+ const items:FollowingNewsItem[]=[];
+ for(const news of candidates.sort((a,b)=>time(b.date)-time(a.date))){
+  if(!news.title.trim())continue;
+  const found=items.find(item=>sameNews(item,news));
+  const linked=notices.filter(notice=>sameNews(notice,news));
+  if(found){found.symbols=[...new Set([...found.symbols,news.symbol,...linked.map(item=>item.symbol)])];found.noticeIds=[...new Set([...found.noticeIds,...linked.map(item=>item.id)])];found.unread=found.unread||linked.some(item=>!item.readAt);if(!found.summary&&news.summary)found.summary=news.summary;if(!found.imageUrl&&news.imageUrl)found.imageUrl=news.imageUrl;if(!found.keyPoints?.length&&news.keyPoints?.length)found.keyPoints=news.keyPoints;continue;}
+  items.push({...news,symbols:[...new Set([news.symbol,...linked.map(item=>item.symbol)])],noticeIds:[...new Set(linked.map(item=>item.id))],unread:linked.some(item=>!item.readAt)});
+ }
+ return items;
+}

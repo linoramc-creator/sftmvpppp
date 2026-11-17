@@ -9,13 +9,14 @@ const pg=await import(pathToFileURL(process.env.RESEARCH_PGLITE_MODULE??resolve(
 const admin='11111111-1111-4111-8111-111111111111',reader='22222222-2222-4222-8222-222222222222',third='33333333-3333-4333-8333-333333333333';
 const conditions=[{field:'price',op:'gt',value:100,currency:'USD'}];
 const iso=(offset=0)=>new Date(Date.now()+offset).toISOString();
-const snapshot=(symbol:string,price=105,asOf=iso(-2000)):any=>({schema:1,symbol,name:'Verified asset',kind:'stock',currency:'USD',collectedAt:iso(),metrics:{price:{value:price,asOf,source:'Verified exchange observation',url:'https://example.test/asset',unit:'currency',currency:'USD',maxAgeHours:1}},news:[],calendar:[],holdings:null,coverage:[],fundamentalsAt:null});
+const snapshot=(symbol:string,price=105,asOf=iso(-2000)):any=>({schema:1,symbol,name:'Verified asset',kind:'stock',currency:'USD',collectedAt:iso(),metrics:{price:{value:price,asOf,source:'Verified exchange observation',url:'https://example.com/asset',unit:'currency',currency:'USD',maxAgeHours:1}},news:[],calendar:[],holdings:null,coverage:[],fundamentalsAt:null});
 const news=(symbol:string,key='news:shared'):any=>({key,symbol,kind:'news',title:'Verified business announcement',detail:'Source-backed business event.',occurredAt:iso(-60000),source:'Issuer release',url:'https://example.test/news',importance:'high'});
 const evaluate=(snap:any,matched:boolean|null=true,status?:string):any=>({status:status??(matched===null?'missing':matched?'matched':'unmatched'),matched,reason:'Verified threshold evaluation.',checkedAt:iso(),conditions:conditions.map(condition=>({condition,status:matched===null?'missing':matched?'met':'unmet',value:matched===null?null:snap.metrics.price.value,asOf:matched===null?null:snap.metrics.price.asOf,source:matched===null?'':snap.metrics.price.source,url:matched===null?'':snap.metrics.price.url}))});
 
 test('isolated PostgreSQL monitoring owns receipts and rules, leases work, and preserves every existing portfolio',{skip:pg?false:'PGlite not installed'},async t=>{
  const db=new pg.PGlite();t.after(()=>db.close());
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz,last_sign_in_at timestamptz);create function auth.uid() returns uuid language sql as $$select null::uuid$$;`);
+ await db.exec(`create function auth.role() returns text language sql as $$select current_setting('request.jwt.claim.role',true)$$;`);
  const migrate=async(name:string)=>db.exec(await readFile(new URL('../supabase/migrations/'+name,import.meta.url),'utf8'));
  await migrate('202609160001_secure_beta.sql');await migrate('202609160002_private_policy_helper.sql');
  await db.query('insert into auth.users values($1,$2,now(),now()),($3,$4,now(),now()),($5,$6,now(),now())',[admin,'linoramc@gmail.com',reader,'reader@example.test',third,'third@example.test']);await migrate('202609160003_pin_admin_identity.sql');
@@ -108,6 +109,42 @@ test('isolated PostgreSQL monitoring owns receipts and rules, leases work, and p
   const restored=await rpc('save_alert',reader,rule('AAPL','New Seguimiento condition'));
   assert.equal(restored.enabled,true);
   await assert.rejects(rpc('pause_alert',third,{id:restored.id,revision:restored.revision,enabled:false}),/BETA_MONITOR_NOT_FOUND/);
+  assert.deepEqual((await db.query('select * from public.beta_paper_portfolios order by id')).rows,original);
+ });
+ await t.test('independent following list, permanent alert inbox, audit and advanced definitions remain owner scoped',async()=>{
+  await migrate('202611160001_mensorlab.sql');await migrate('202611170001_following_workspace.sql');await migrate('202611170002_analytics_risk.sql');
+  const follow=async(operation:string,uid=reader,payload:any={})=>(await db.query('select public.beta_following_store($1,$2::uuid,$3::jsonb) result',[operation,uid,JSON.stringify(payload)])).rows[0].result as any;
+  const first=await follow('watchlist');assert.deepEqual(first.symbols,['AAPL','SPY']);
+  const edited=await follow('save_watchlist',reader,{symbols:['NVDA'],revision:first.revision});assert.equal(edited.revision,first.revision+1);
+  assert.deepEqual((await db.query('select symbols from public.beta_watchlists where user_id=$1',[reader])).rows[0].symbols,['AAPL','SPY']);
+  assert.deepEqual((await follow('save_watchlist',reader,{symbols:['NVDA'],revision:first.revision})).symbols,['NVDA']);
+  await assert.rejects(follow('save_watchlist',reader,{symbols:['GOOGL'],revision:first.revision}),/BETA_MONITOR_CONFLICT/);
+  for(const symbols of [Array(8).fill('AAPL'),['NVDA','NVDA'],['nvda'],['../secrets']])await assert.rejects(follow('save_watchlist',reader,{symbols,revision:edited.revision}),/BETA_MONITOR_INVALID/);
+  assert.deepEqual((await follow('watchlist',third)).symbols,['MSFT']);assert.deepEqual((await follow('state')).watchlist,['NVDA']);
+  assert.ok(!(await rpc('context',reader)).symbols.includes('SPY'));
+  for(const role of ['anon','authenticated','service_role']){await db.exec('set role '+role);for(const table of ['beta_following_lists','beta_monitor_alert_messages','beta_monitor_alert_audit'])await assert.rejects(db.query('select * from public.'+table),/permission denied/);if(role!=='service_role')await assert.rejects(follow('watchlist'),/permission denied/);await db.exec('reset role');}
+  let rule=await rpc('save_alert',reader,{requestId:randomUUID(),symbol:'NVDA',name:'Original threshold',conditions,enabled:true});
+  const job=await claim('NVDA'),snap=snapshot('NVDA'),ev=evaluateMonitoringAlert(rule,snap);assert.equal(ev.matched,true);const valid=(await db.query('select beta_private.monitor_evaluation_valid($1::jsonb,$2::jsonb,$3::jsonb) valid',[JSON.stringify(rule.conditions),JSON.stringify(snap),JSON.stringify(ev)])).rows[0].valid;assert.equal(valid,true,JSON.stringify(ev));const committed=await commit(job,snap,[],[{id:rule.id,revision:rule.revision,evaluation:ev}]);assert.equal(committed.ignoredEvaluations,0);
+  const initial=await follow('inbox',reader,{alertId:rule.id});assert.equal(initial.items.length,1);assert.equal(initial.unread,1);assert.equal(initial.items[0].alertName,'Original threshold');assert.deepEqual(initial.items[0].conditions,conditions);assert.equal(initial.items[0].evaluation.conditions[0].value,105);
+  assert.equal((await follow('inbox',third,{alertId:rule.id})).items.length,0);
+  const again=await claim('NVDA');await commit(again,snapshot('NVDA',106),[],[{id:rule.id,revision:rule.revision,evaluation:evaluateMonitoringAlert(rule,snapshot('NVDA',106))}]);assert.equal((await follow('inbox',reader,{alertId:rule.id})).items.length,1);
+  rule=await rpc('save_alert',reader,{id:rule.id,revision:rule.revision,symbol:'NVDA',name:'Edited threshold',conditions:[{field:'price',op:'gt',value:200,currency:'USD'}],enabled:true});
+  rule=await rpc('pause_alert',reader,{id:rule.id,revision:rule.revision,enabled:false});rule=await rpc('pause_alert',reader,{id:rule.id,revision:rule.revision,enabled:true});
+  const message=initial.items[0];await follow('read',third,{ids:[message.id]});assert.equal((await follow('inbox',reader,{alertId:rule.id})).unread,1);await follow('read',reader,{ids:[message.id]});assert.equal((await follow('inbox',reader,{alertId:rule.id})).unread,0);
+  await db.query(`insert into public.beta_monitor_notices(user_id,key,data,created_at) select $1,'flood:'||n,jsonb_build_object('kind','news','symbol','NVDA','title','Fixture publication'),$2::timestamptz+n*interval '1 microsecond' from generate_series(1,501) n`,[reader,message.createdAt]);
+  await db.query("select beta_private.monitor_add_notice($1,$2::jsonb)",[reader,JSON.stringify(news('NVDA','last-fixture'))]);assert.equal((await db.query('select count(*)::integer n from public.beta_monitor_notices where id=$1',[message.id])).rows[0].n,0);
+  assert.equal((await follow('inbox',reader,{alertId:rule.id})).items[0].alertName,'Original threshold');
+  for(let n=0;n<35;n++)await db.query('select beta_private.monitor_add_notice($1,$2::jsonb,$3::uuid)',[reader,JSON.stringify({...news('NVDA','pagination:'+n),kind:'alert',conditions:[],occurredAt:iso()}),rule.id]);
+  let page=await follow('inbox',reader,{alertId:rule.id}),seenIds=page.items.map((item:any)=>item.id);assert.equal(page.items.length,30);assert.ok(page.next);page=await follow('inbox',reader,{alertId:rule.id,before:page.next});seenIds.push(...page.items.map((item:any)=>item.id));assert.equal(new Set(seenIds).size,36);assert.equal(page.next,null);
+  await rpc('delete_alert',reader,{id:rule.id,revision:rule.revision});const history=await follow('alert_history',reader,{alertId:rule.id});const actions=history.items.map((item:any)=>item.action);assert.ok(actions.includes('deleted'));assert.ok(history.next);const older=await follow('alert_history',reader,{alertId:rule.id,before:history.next});for(const kind of ['created','edited','paused','resumed'])assert.ok(older.items.some((item:any)=>item.action===kind));assert.equal((await follow('alert_history',third,{alertId:rule.id})).items.length,0);
+  assert.equal((await follow('inbox',reader,{alertId:rule.id})).items.length,30);
+  const emptied=await follow('save_watchlist',reader,{symbols:[],revision:edited.revision});assert.deepEqual(emptied.symbols,[]);assert.deepEqual((await follow('watchlist')).symbols,[]);
+  const query={version:1,assets:['MSFT','^GSPC'],metric:'rollingCorrelation',operation:'level',period:{range:'1y'},frequency:'daily',currency:'USD',chart:'line',dataKind:'reported',window:60,benchmark:'^GSPC'};
+  const saved=(await db.query('select public.beta_analytics_store($1,$2,$3::jsonb) result',['save',reader,JSON.stringify({name:'Advanced persisted window',requestId:randomUUID(),query})])).rows[0].result as any;assert.equal(saved.query.window,60);
+  await assert.rejects(db.query('select public.beta_analytics_store($1,$2,$3::jsonb)',['save',reader,JSON.stringify({name:'Invalid window',requestId:randomUUID(),query:{...query,window:9}})]),/BETA_ANALYTICS_INVALID/);
+  const run={runId:randomUUID(),definition:{version:1,studies:[{id:'one',name:'Research',kind:'analytics',query}]},generatedAt:iso(),results:[],status:'unavailable',warnings:[]};await db.query('select public.beta_mensorlab_store($1,$2,$3::jsonb)',['putRun',reader,JSON.stringify({run})]);
+  const source=async(uid:string)=>(await db.query('select public.beta_mensorlab_source($1,$2) result',[uid,run.runId])).rows[0].result;assert.deepEqual(await source(reader),run);await assert.rejects(source(third),/BETA_LAB_NOT_FOUND/);
+  await db.query('update public.beta_profiles set revoked=true where id=$1',[reader]);await assert.rejects(follow('watchlist'),/BETA_MONITOR_FORBIDDEN/);await assert.rejects(source(reader),/BETA_LAB_FORBIDDEN/);await db.query('update public.beta_profiles set revoked=false where id=$1',[reader]);
   assert.deepEqual((await db.query('select * from public.beta_paper_portfolios order by id')).rows,original);
  });
 });

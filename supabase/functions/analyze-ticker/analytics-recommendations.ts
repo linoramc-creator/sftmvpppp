@@ -1,4 +1,4 @@
-import {validateAnalyticsQuery,AnalyticsValidationError} from './analytics-engine.ts';
+import {validateAnalyticsQuery,AnalyticsValidationError,ANALYTICS_PRICE_STUDIES} from './analytics-engine.ts';
 import type {AnalyticsMetric,AnalyticsQuery,AnalyticsResult,AnalyticsSuggestion} from './analytics-types.ts';
 
 export type AnalyticsIdeasContext={symbol?:string;kind?:'stock'|'etf'|'index'|'forex'|'crypto'|'future'|'commodity'|'bond'|'sector';sector?:string};
@@ -22,10 +22,13 @@ export function validateAnalyticsIdeasContext(input:unknown):AnalyticsIdeasConte
  return {...(row.symbol?{symbol:row.symbol==='GOOG'?'GOOGL':row.symbol as string}:{}),...(kind?{kind:kind as AnalyticsIdeasContext['kind']}:{}),...(row.sector?{sector:(row.sector as string).trim()}:{})};
 }
 
-type QueryOptions=Partial<Pick<AnalyticsQuery,'metric'|'operation'|'denominator'|'frequency'|'currency'|'chart'|'period'>>;
+type QueryOptions=Partial<Pick<AnalyticsQuery,'metric'|'operation'|'denominator'|'frequency'|'currency'|'chart'|'period'|'window'|'benchmark'>>;
 export function analyticsSuggestedQuery(assets:string[],options:QueryOptions={}):AnalyticsQuery{
  const metric=options.metric??'price',operation=options.operation??(metric==='price'?'base100':'level');
- return validateAnalyticsQuery({version:1,assets,metric,operation,period:options.period??{range:'2y'},frequency:options.frequency??(metric==='price'?'daily':'quarterly'),currency:options.currency??'original',chart:options.chart??(metric==='price'||operation.startsWith('growth_')?'line':'bar'),dataKind:'reported',...(options.denominator?{denominator:options.denominator}:{})});
+ const advanced=ANALYTICS_PRICE_STUDIES.has(metric),related=['rollingCorrelation','rollingBeta','relativeStrength'].includes(metric),selected=[...assets];
+ if(related&&selected.length===1)selected.push(selected[0]==='^GSPC'?'^NDX':'^GSPC');
+ const benchmark=related?(options.benchmark??selected.find(symbol=>symbol.startsWith('^'))??selected.at(-1)):undefined;
+ return validateAnalyticsQuery({version:1,assets:selected,metric,operation,period:options.period??{range:'2y'},frequency:options.frequency??(metric==='price'||advanced?'daily':'quarterly'),currency:related?(options.currency&&options.currency!=='original'?options.currency:'USD'):options.currency??'original',chart:options.chart??(metric==='price'||advanced||operation.startsWith('growth_')?'line':'bar'),dataKind:'reported',...(options.denominator?{denominator:options.denominator}:{}),...(options.window?{window:options.window}:{}),...(benchmark?{benchmark}:{})});
 }
 /** The original request exceeded a supported period, not its metric. Retain
  * the independently validated definition and offer a shorter window by name. */
@@ -61,6 +64,18 @@ export function analyticsIdeas(input:AnalyticsIdeasContext={}):AnalyticsSuggesti
   const peerAssets=[...new Set([symbol,benchmark])];
   const currencyNote=kind==='forex'?'Compara la evolución de los cruces de divisas normalizada; una cotización no representa la rentabilidad de una inversión financiada.':kind==='future'?'Serie de precios del futuro continuo; no incluye el efecto de renovar contratos ni equivale a rentabilidad total o al mercado físico al contado.':'Precios de cierre en base 100, sin reinversión de dividendos y con fechas observadas comunes.';
   const rows=[suggestion('context-base100-'+symbol,'Evolución frente a una referencia',currencyNote,analyticsSuggestedQuery(peerAssets),'context'),suggestion('context-price-'+symbol,'Evolución mensual de cinco años','Último cierre observado de cada mes; no hay relleno de festivos ni interpolación.',analyticsSuggestedQuery([symbol],{period:{range:'5y'},frequency:'monthly',operation:'level'}),'context')];
+  rows.push(
+   suggestion('context-volatility-'+symbol,'Cómo cambia la volatilidad','Volatilidad realizada anualizada de 20 variaciones de cierre. Se calcula con código; no es volatilidad implícita ni una predicción.',analyticsSuggestedQuery([symbol],{metric:'realizedVolatility',window:20}),'context'),
+   suggestion('context-drawdown-'+symbol,'Distancia al máximo observado','Caída desde el máximo de cierre alcanzado desde el inicio del periodo mostrado; no afirma un máximo histórico anterior.',analyticsSuggestedQuery([symbol],{metric:'drawdown'}),'context'),
+  );
+  // A quoted FX cross is not a cash asset: translating one base unit back
+  // into that base currency may become constant. Do not promote that as a
+  // useful converted correlation study; native cross volatility remains valid.
+  if(kind!=='forex')rows.push(
+   suggestion('context-correlation-'+symbol,'Diversificación que cambia','Correlación móvil de 60 cambios diarios frente a '+benchmark+', en USD con cambio observado. Muestra relaciones, no causalidad.',analyticsSuggestedQuery(peerAssets,{metric:'rollingCorrelation',window:60,benchmark}),'context'),
+   suggestion('context-beta-'+symbol,'Sensibilidad móvil a la referencia','Beta de 60 cambios frente a '+benchmark+'. No se calcula cuando la muestra es incompleta o la referencia no tiene varianza.',analyticsSuggestedQuery(peerAssets,{metric:'rollingBeta',window:60,benchmark}),'context'),
+   suggestion('context-relative-'+symbol,'Fortaleza relativa observada','Variación del cociente de precios frente a '+benchmark+', desde la misma fecha y en USD. Excluye dividendos y no es RSI.',analyticsSuggestedQuery(peerAssets,{metric:'relativeStrength',benchmark}),'context'),
+  );
   // Fundamentals are only suggested for an explicitly identified company.
   // ETF/indices/FX do not acquire corporate revenue merely by being selected.
   if(kind==='stock')rows.push(
@@ -70,6 +85,8 @@ export function analyticsIdeas(input:AnalyticsIdeasContext={}):AnalyticsSuggesti
   return unique(rows);
  }
  return [
+  suggestion('theme-risk-regimes','Cambios de volatilidad entre activos','Volatilidad realizada de SPY, TLT y GLD sobre 20 cambios de cierre, anualizada con 252 sesiones. No depende de fundamentales ni de previsiones.',analyticsSuggestedQuery(['SPY','TLT','GLD'],{metric:'realizedVolatility',window:20,currency:'USD'}),'theme'),
+  suggestion('theme-stock-bond-correlation','Relación entre bolsa y bonos','Correlación móvil de TLT frente a SPY con 60 cambios observados en USD. Una relación pasada no garantiza diversificación futura.',analyticsSuggestedQuery(['TLT','SPY'],{metric:'rollingCorrelation',window:60,benchmark:'SPY'}),'theme'),
   suggestion('theme-ai-capex','Inversión de las Big 7','CapEx total publicado: compara la intensidad de inversión y su evolución. No es un desglose de gasto exclusivo en IA.',analyticsSuggestedQuery(BIG7,{metric:'capex',chart:'line'}),'theme'),
   suggestion('theme-ai-cash','Inversión frente a ventas de las Big 7','CapEx total / ingresos del mismo trimestre fiscal; permite evaluar la intensidad de inversión sin equipararla a CapEx de IA.',analyticsSuggestedQuery(BIG7,{metric:'capex',operation:'ratio',denominator:'revenue',chart:'line'}),'theme'),
   suggestion('theme-cash-quality','Conversión de ventas en caja','Caja libre / ingresos de Microsoft, Alphabet y Meta; importes publicados y periodos fiscales identificados.',analyticsSuggestedQuery(['MSFT','GOOGL','META'],{metric:'freeCashFlow',operation:'ratio',denominator:'revenue',chart:'line'}),'theme'),
@@ -109,7 +126,7 @@ export function analyticsAlternativeSuggestions(options:{prompt:string;assets:st
  }
  if(options.category==='valuation')return [make('cash-margin','Margen de caja libre','Caja libre / ingresos publicados. Describe conversión de ventas en caja; no sustituye al PER, EV/EBITDA ni a otra valoración solicitada.',{metric:'freeCashFlow',operation:'ratio',denominator:'revenue',chart:'line'}),make('net-margin','Margen neto publicado','Beneficio neto / ingresos del mismo periodo fiscal. No es un múltiplo de valoración ni una previsión.',{metric:'netIncome',operation:'ratio',denominator:'revenue',chart:'line'})];
  if(options.category==='unsupported-ratio')return [make('leverage','Deuda sobre patrimonio','Ratio compatible de deuda total / patrimonio publicado; no equivale a deuda neta/EBITDA, ROE o al ratio original.',{metric:'totalDebt',operation:'ratio',denominator:'equity',chart:'line'}),make('net-margin','Margen neto publicado','Beneficio neto / ingresos publicados; alternativa diferenciada y nunca sustitución del ratio solicitado.',{metric:'netIncome',operation:'ratio',denominator:'revenue',chart:'line'})];
- if(options.category==='risk')return [make('price','Trayectoria del precio','El gráfico muestra cierres de precio en base 100; no calcula ni reemplaza la volatilidad, Sharpe, beta o drawdown solicitado.',{metric:'price',operation:'base100'})];
+ if(options.category==='risk')return [make('realized-volatility','Volatilidad realizada · 20 sesiones','Estudio distinto sobre 20 cambios de cierre, sin tipo libre de riesgo. No sustituye Sharpe, Sortino, volatilidad implícita, RSI ni una ventana no admitida.',{metric:'realizedVolatility',window:20,operation:'level'}),make('price','Trayectoria del precio','Cierres observados en base 100; no equivalen a una medida de riesgo solicitada.',{metric:'price',operation:'base100'})];
  return [make('price','Evolución del precio en base 100','Alternativa explícita con cierres observados; no representa una métrica desconocida ni reproduce el gráfico original.',{metric:'price',operation:'base100'}),make('revenue','Crecimiento de ingresos publicados','Consulta distinta de la petición original, con cifras publicadas y fechas fiscales verificadas.',{metric:'revenue',operation:'growth_yoy'})];
 }
 
@@ -121,6 +138,7 @@ export function analyticsResultAlternatives(result:AnalyticsResult):AnalyticsSug
  if(!assets.length||query.metric==='portfolioExposure')return [];
  if(query.metric==='capexAI')return [suggestion('alternative-total-capex','CapEx total publicado','Se presenta separado del CapEx específico de IA, cuyo desglose no se ha verificado.',analyticsSuggestedQuery(assets,{...query,metric:'capex',operation:'level'}),'alternative')];
  if(query.metric==='price')return [];
+ if(ANALYTICS_PRICE_STUDIES.has(query.metric))return [suggestion('alternative-observed-price','Precios observados por separado','La muestra o la referencia no permiten calcular el estudio solicitado. Se ofrece una consulta distinta de precios, sin sustituir ni estimar la métrica ausente.',analyticsSuggestedQuery(assets,{period:query.period,currency:query.currency}),'alternative')];
  return [suggestion('alternative-price','Evolución del precio en base 100','No hay cobertura suficiente para el fundamental solicitado. Esta es una consulta de precios diferente; no reemplaza la métrica original.',analyticsSuggestedQuery(assets,{period:query.period,currency:query.currency}),'alternative')];
 }
 

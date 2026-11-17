@@ -1,0 +1,3 @@
+import type {AnalyticsMetric} from './analytics-api';
+
+export const analyticsMetricLabels:Record<AnalyticsMetric,string>={price:'Precio',realizedVolatility:'Volatilidad realizada móvil',drawdown:'Caída desde máximos',rollingCorrelation:'Correlación móvil',rollingBeta:'Beta móvil',relativeStrength:'Fortaleza relativa',revenue:'Ingresos',netIncome:'Beneficio neto',grossProfit:'Beneficio bruto',operatingCashFlow:'Flujo de caja operativo',freeCashFlow:'Flujo de caja libre',capex:'CapEx total',capexAI:'CapEx de IA divulgado',cash:'Efectivo',totalDebt:'Deuda total',equity:'Patrimonio neto',totalAssets:'Activos totales',portfolioExposure:'Exposición del portfolio'};

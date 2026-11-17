@@ -1,6 +1,8 @@
 import {accountApi} from './beta-api';
-import type {MonitorAlert,MonitorAlertInput,MonitorOverview} from '../../../supabase/functions/analyze-ticker/monitoring-types';
-export type {MonitorAlert,MonitorAlertInput,MonitorCondition,MonitorContext,MonitorField,MonitorNotice,MonitorOverview,MonitorAgendaItem,MonitorSnapshot,MonitorMetric} from '../../../supabase/functions/analyze-ticker/monitoring-types';
+import type {MonitorAlert,MonitorAlertAudit,MonitorAlertInput,MonitorAlertMessage,MonitorOverview} from '../../../supabase/functions/analyze-ticker/monitoring-types';
+export type {MonitorAlert,MonitorAlertAudit,MonitorAlertInput,MonitorAlertMessage,MonitorCondition,MonitorContext,MonitorField,MonitorNotice,MonitorOverview,MonitorAgendaItem,MonitorSnapshot,MonitorMetric} from '../../../supabase/functions/analyze-ticker/monitoring-types';
+export type MonitoringCursor={at:string;id:string};
+export type MonitoringFollowingList={symbols:string[];revision:number;updatedAt:string|null};
 
 export function monitoringSourceUrl(value:string|null|undefined){try{const url=new URL(value??'');return ['https:','http:'].includes(url.protocol)?url.href:null;}catch{return null;}}
 
@@ -22,3 +24,7 @@ export const monitoringRead=(ids:string[],signal?:AbortSignal)=>accountApi<{ok:t
 export const monitoringSaveAlert=(input:MonitorAlertInput,signal?:AbortSignal)=>accountApi<MonitorAlert>('monitorSaveAlert',{...input},{signal});
 export const monitoringPauseAlert=(input:Pick<MonitorAlert,'id'|'revision'|'enabled'>,signal?:AbortSignal)=>accountApi<MonitorAlert>('monitorPauseAlert',{...input},{signal});
 export const monitoringDeleteAlert=(input:Pick<MonitorAlert,'id'|'revision'>,signal?:AbortSignal)=>accountApi<{ok:true}>('monitorDeleteAlert',{...input},{signal});
+export const monitoringWatchlist=(signal?:AbortSignal)=>accountApi<MonitoringFollowingList>('monitorWatchlist',{},{signal});
+export const monitoringSaveWatchlist=(input:{symbols:string[];revision:number},signal?:AbortSignal)=>accountApi<MonitoringFollowingList>('monitorSaveWatchlist',{...input},{signal});
+export const monitoringInbox=(input:{before?:MonitoringCursor;alertId?:string;unreadOnly?:boolean}={},signal?:AbortSignal)=>accountApi<{items:MonitorAlertMessage[];next:MonitoringCursor|null;unread:number}>('monitorInbox',{...input},{signal});
+export const monitoringAlertHistory=(input:{before?:MonitoringCursor;alertId?:string}={},signal?:AbortSignal)=>accountApi<{items:MonitorAlertAudit[];next:MonitoringCursor|null}>('monitorAlertHistory',{...input},{signal});

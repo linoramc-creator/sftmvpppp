@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {analyticsIdeas,analyticsAlternativeSuggestions,analyticsResultAlternatives,analyticsSuggestionCoverage,validateAnalyticsIdeasContext} from '../supabase/functions/analyze-ticker/analytics-recommendations.ts';
-import {executeAnalytics,validateAnalyticsQuery,AnalyticsValidationError} from '../supabase/functions/analyze-ticker/analytics-engine.ts';
+import {executeAnalytics,validateAnalyticsQuery,AnalyticsValidationError,ANALYTICS_PRICE_STUDIES} from '../supabase/functions/analyze-ticker/analytics-engine.ts';
 
 const now=Date.parse('2026-11-16T12:00:00Z');
 test('curated research ideas are executable catalog definitions, not claims of observed popularity or forecasts',()=>{
@@ -11,7 +11,7 @@ test('curated research ideas are executable catalog definitions, not claims of o
 });
 test('company contexts preserve actual ticker and unknown ETF/FX/index types do not receive corporate fundamentals',()=>{
  const company=analyticsIdeas({symbol:'GOOG',kind:'stock'});assert.ok(company.every(idea=>idea.query.assets.includes('GOOGL')));assert.ok(company.some(idea=>idea.query.metric==='revenue'));
- for(const context of [{symbol:'QQQ',kind:'etf'},{symbol:'^IBEX',kind:'index'},{symbol:'EURUSD=X',kind:'forex'}] as const){const ideas=analyticsIdeas(context);assert.ok(ideas.length>=2);assert.ok(ideas.every(idea=>idea.query.metric==='price'));assert.ok(ideas.every(idea=>idea.query.assets.includes(context.symbol)));}
+ for(const context of [{symbol:'QQQ',kind:'etf'},{symbol:'^IBEX',kind:'index'},{symbol:'EURUSD=X',kind:'forex'}] as const){const ideas=analyticsIdeas(context);assert.ok(ideas.length>=2);assert.ok(ideas.every(idea=>idea.query.metric==='price'||ANALYTICS_PRICE_STUDIES.has(idea.query.metric)));assert.ok(ideas.every(idea=>idea.query.assets.includes(context.symbol)));}
  const fx=analyticsIdeas({symbol:'EURUSD=X',kind:'forex'})[0];assert.deepEqual(fx.query.assets,['EURUSD=X','GBPUSD=X']);
 });
 test('sector proposals use labelled representative ETFs and never manufacture an unknown sector symbol',()=>{

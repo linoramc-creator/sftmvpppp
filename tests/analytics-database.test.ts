@@ -132,4 +132,19 @@ test('Analytics PostgreSQL enforces owned definitions, service-only access, boun
   await assert.rejects(db.query('update public.beta_monitor_alerts set enabled=true where id=$1',[alerts[0].id]),/BETA_MONITOR_ALERTS_DISABLED/);
   await assert.rejects(db.query('insert into public.beta_monitor_alerts(enabled) values(true)'),/BETA_MONITOR_ALERTS_DISABLED/);
  });
+ await t.test('advanced price study migration preserves private saved definitions and rejects mismatched windows/references',async()=>{
+  await migrate('202611170002_analytics_risk.sql');
+  for(const metric of ['realizedVolatility','drawdown','rollingCorrelation','rollingBeta','relativeStrength']){
+   const rolling=['realizedVolatility','rollingCorrelation','rollingBeta'].includes(metric),related=['rollingCorrelation','rollingBeta','relativeStrength'].includes(metric);
+   const query={...definition,metric,operation:'level',currency:'USD',...(rolling?{window:60}:{}),...(related?{benchmark:'^GSPC'}:{})};
+   const item=await rpc('save',reader,{name:'Advanced '+metric,requestId:randomUUID(),query});assert.deepEqual(item.query,query);
+   await assert.rejects(rpc('save',third,{id:item.id,revision:1,name:'Foreign change',query}),/BETA_ANALYTICS_NOT_FOUND/);
+  }
+  const create=(query:Record<string,unknown>)=>rpc('save',reader,{name:'Invalid advanced',requestId:randomUUID(),query});
+  await assert.rejects(create({...definition,metric:'drawdown',operation:'level',window:20}),/BETA_ANALYTICS_INVALID/);
+  await assert.rejects(create({...definition,metric:'realizedVolatility',operation:'level',window:30}),/BETA_ANALYTICS_INVALID/);
+  await assert.rejects(create({...definition,metric:'rollingBeta',operation:'level',window:20,currency:'USD',benchmark:'AAPL'}),/BETA_ANALYTICS_INVALID/);
+  await db.exec('set role authenticated');try{await assert.rejects(rpc('list'),/permission denied/);}finally{await db.exec('reset role');}
+  assert.deepEqual((await db.query('select * from public.beta_paper_portfolios order by id')).rows,originalPortfolios);
+ });
 });

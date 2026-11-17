@@ -1,5 +1,5 @@
 import {AnalyticsValidationError} from './analytics-engine.ts';
-import {executeMensorLab,validateLabDefinition,LAB_LIMITS} from './mensorlab-engine.ts';
+import {executeMensorLab,validateLabDefinition,mensorLabResultStatus,LAB_LIMITS} from './mensorlab-engine.ts';
 import type {LabRun,LabRunDependencies,LabProject} from './mensorlab-types.ts';
 
 type Body=Record<string,unknown>;
@@ -8,11 +8,16 @@ export type MensorLabServiceDependencies={rpc:(name:string,body:Body)=>Promise<a
 export class MensorLabError extends Error{status:number;constructor(message:string,status=400){super(message);this.name='MensorLabError';this.status=status;}}
 const invalid=(message='Solicitud de MensorLab inválida.'):never=>{throw new MensorLabError(message);};
 const uuid=(value:unknown)=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)?value:invalid('Identificador de MensorLab inválido.');
-const fields:Record<string,string[]>={labRun:['definition'],labSave:['name','runId','requestId','id','revision'],labList:[],labOpen:['id','snapshotId'],labDelete:['id','revision','requestId'],labRefresh:['id','revision','requestId']};
+const fields:Record<string,string[]>={labRun:['definition'],labOrganize:['runId','studies'],labSave:['name','runId','requestId','id','revision'],labList:[],labOpen:['id','snapshotId'],labDelete:['id','revision','requestId'],labRefresh:['id','revision','requestId']};
 export function mensorLabRequestClass(body:Body):'account'|'data'|null{
  if(typeof body.accountAction!=='string'||!body.accountAction.startsWith('lab'))return null;
  const action=body.accountAction,allowed=fields[action];if(!allowed||Object.keys(body).some(key=>key!=='accountAction'&&!allowed.includes(key)))invalid();
  if(action==='labRun'){try{validateLabDefinition(body.definition);}catch(error){if(error instanceof AnalyticsValidationError)throw new MensorLabError(error.message);throw error;}return 'data';}
+ if(action==='labOrganize'){
+  uuid(body.runId);
+  if(!Array.isArray(body.studies)||body.studies.length<1||body.studies.length>6)invalid('Conserva entre uno y seis estudios.');
+  const ids=new Set<string>();for(const value of body.studies as unknown[]){if(!value||typeof value!=='object'||Array.isArray(value))invalid();const item=value as Body;if(Object.keys(item).some(key=>!['id','name'].includes(key))||typeof item.id!=='string'||!/^[A-Za-z0-9_-]{1,40}$/.test(item.id)||ids.has(item.id)||typeof item.name!=='string'||!item.name.trim()||item.name.length>100||/[\p{Cc}\p{Cf}<>]/u.test(item.name))invalid('Revisa los identificadores y nombres de los estudios.');ids.add(item.id as string);}
+ }
  if(action==='labSave'){
   if(typeof body.name!=='string'||!body.name.trim()||body.name.length>100||/[\p{Cc}\p{Cf}<>]/u.test(body.name))invalid('El proyecto necesita un nombre de hasta 100 caracteres.');
   uuid(body.runId);uuid(body.requestId);
@@ -47,6 +52,16 @@ export async function handleMensorLabAction(body:Body,user:User,deps:MensorLabSe
   if(body.accountAction==='labDelete'){await store('delete',{id:body.id,revision:body.revision,...(body.requestId?{requestId:body.requestId}:{})});return Response.json({ok:true});}
   if(body.accountAction==='labSave')return Response.json({project:await store('save',{name:(body.name as string).trim(),runId:body.runId,requestId:body.requestId,...(body.id?{id:body.id,revision:body.revision}:{})})});
   const now=(deps.now??Date.now)();
+  if(body.accountAction==='labOrganize'){
+   const source:LabRun=await deps.rpc('beta_mensorlab_source',{uid:user.id,run_id:body.runId});
+   if(!source||source.runId!==body.runId||!Array.isArray(source.results)||!Number.isFinite(Date.parse(source.generatedAt)))throw new MensorLabError('La ejecución original ya no está disponible para esta cuenta.',404);
+   const definition=validateLabDefinition(source.definition),selected=body.studies as {id:string;name:string}[];
+   const studies=selected.map(item=>{const study=definition.studies.find(study=>study.id===item.id);if(!study)invalid('Solo puedes reorganizar estudios que existan en la ejecución original.');return {...study!,name:item.name.trim()};});
+   const results=selected.map(item=>{const result=source.results.find(result=>result.id===item.id);if(!result)invalid('El resultado original de un estudio no está disponible.');return {...result!,name:item.name.trim()};});
+   const run:LabRun={...source,runId:crypto.randomUUID(),definition:{version:1,studies},generatedAt:source.generatedAt,organizedAt:new Date(now).toISOString(),results,status:mensorLabResultStatus(results)};
+   if(new TextEncoder().encode(JSON.stringify(run)).length>LAB_LIMITS.snapshotBytes)invalid('La ejecución reorganizada supera el tamaño máximo de instantánea.');
+   await store('putRun',{run});return Response.json(run);
+  }
   if(body.accountAction==='labRun'){
    const definition=validateLabDefinition(body.definition),run=await(deps.execute??executeMensorLab)(definition,{...deps.data,now});
    await store('putRun',{run});return Response.json(run);

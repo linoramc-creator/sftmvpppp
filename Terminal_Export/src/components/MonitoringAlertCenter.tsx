@@ -1,0 +1,9 @@
+import {useState} from 'react';
+import type {MonitorAlert,MonitorContext} from '@/lib/monitoring-api';
+import MonitoringAlerts from './MonitoringAlerts';
+import AlertInbox from './AlertInbox';
+import KeepPanel from './KeepPanel';
+export default function MonitoringAlertCenter({accountId,alerts,context,busy,onMutate,onMessagesRead}:{accountId:string;alerts:MonitorAlert[];context:MonitorContext;busy:boolean;onMutate:(operation:(signal:AbortSignal)=>Promise<unknown>,after?:()=>void)=>Promise<void>;onMessagesRead?:()=>void}){
+ const [tab,setTab]=useState<'rules'|'inbox'|'history'>('rules'),[unread,setUnread]=useState<number|null>(null);
+ return <section className="space-y-4" aria-label="Centro de alertas"><div role="tablist" aria-label="Vistas de alertas" className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-800 p-1">{([['rules','Reglas'],['inbox','Buzón'],['history','Registro']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={tab===key} onClick={()=>setTab(key)} className={'rounded-md px-4 py-2 text-[11px] '+(tab===key?'bg-slate-800/70 text-white':'text-slate-500 hover:text-slate-200')}>{label}{key==='rules'?<span className="ml-2 text-[9px] text-slate-500">{alerts.length}</span>:key==='inbox'&&unread!==null&&unread>0?<span className="ml-2 text-[9px] text-slate-300">{unread}</span>:null}</button>)}</div><div role="tabpanel" aria-label={{rules:'Reglas de alertas',inbox:'Buzón de alertas',history:'Registro de alertas'}[tab]}><KeepPanel active={tab==='rules'}><MonitoringAlerts alerts={alerts} context={context} busy={busy} onMutate={onMutate}/></KeepPanel><KeepPanel active={tab==='inbox'}><AlertInbox accountId={accountId} alerts={alerts} mode="inbox" onUnread={setUnread} onMessagesRead={onMessagesRead}/></KeepPanel><KeepPanel active={tab==='history'}><AlertInbox accountId={accountId} alerts={alerts} mode="history"/></KeepPanel></div></section>;
+}

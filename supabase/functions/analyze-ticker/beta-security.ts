@@ -150,7 +150,7 @@ const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,
 async function account(body: Body,user: User,analyticsData?:Pick<AnalyticsDependencies,'fundamentals'>): Promise<Response> {
   const lab=await handleMensorLabAction(body,user,{rpc,data:analyticsData});if(lab)return lab;
   const analytics=await handleAnalyticsAction(body,user,{rpc,env,data:analyticsData});if(analytics)return analytics;
-  const monitoring=await handleMonitoringAction(body,user.id,{store:(operation,uid,payload={})=>rpc('beta_monitor_store',{operation,uid,payload})});if(monitoring)return monitoring;
+  const monitoring=await handleMonitoringAction(body,user.id,{store:(operation,uid,payload={})=>rpc('beta_monitor_store',{operation,uid,payload}),following:(operation,uid,payload={})=>rpc('beta_following_store',{operation,uid,payload})});if(monitoring)return monitoring;
   const research=await handleResearchAction(body,user,{service,rpc,env});if(research)return research;
   switch(body.accountAction){
     case 'getFeedPreferences':{const rows=await service(`beta_feed_preferences?user_id=eq.${user.id}&select=groups&limit=1`);return json({groups:normalizeSavedFeedPreferences(rows[0]?.groups)});}
