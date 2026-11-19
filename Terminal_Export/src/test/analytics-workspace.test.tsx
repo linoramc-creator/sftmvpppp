@@ -11,6 +11,18 @@ vi.mock('@/lib/analytics-export',async()=>({...await vi.importActual('@/lib/anal
 vi.mock('recharts',async()=>({...await vi.importActual('recharts'),ResponsiveContainer:({children}:{children:ReactElement})=>cloneElement(children,{width:800,height:380} as Record<string,unknown>)}));
 beforeEach(()=>{Object.values(mocks).forEach(mock=>mock.mockReset());mocks.list.mockResolvedValue({items:[]});mocks.ideas.mockResolvedValue({ideas:[]});mocks.interpret.mockResolvedValue(analyticsParsed);mocks.run.mockImplementation(async query=>({...analyticsFixture(),query}));mocks.save.mockImplementation(async value=>({...savedAnalyticsFixture(value.query),name:value.name}));mocks.remove.mockResolvedValue({ok:true});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
+it('interprets a custom quick-card handoff exactly once and leaves subsequent manual edits intact',async()=>{
+ const consumed=vi.fn(),initialRequest={id:'quick-custom',accountId:'owner',prompt:'MSFT · volatilidad móvil de 60 sesiones'};
+ const view=render(<AnalyticsWorkspace accountId="owner" initialRequest={initialRequest} onRequestConsumed={consumed}/>);
+ await screen.findByRole('heading',{name:'Microsoft frente al S&P 500 · QA'});
+ expect(mocks.interpret).toHaveBeenCalledExactlyOnceWith(initialRequest.prompt,expect.any(AbortSignal));
+ expect(mocks.run).toHaveBeenCalledExactlyOnceWith(analyticsQuery,expect.any(AbortSignal));
+ expect(consumed).toHaveBeenCalledExactlyOnceWith('quick-custom');
+ fireEvent.change(screen.getByLabelText('Petición de Analytics'),{target:{value:'Mi siguiente consulta'}});
+ view.rerender(<AnalyticsWorkspace accountId="owner" initialRequest={{...initialRequest}} onRequestConsumed={consumed}/>);
+ expect(screen.getByLabelText('Petición de Analytics')).toHaveValue('Mi siguiente consulta');
+ expect(mocks.interpret).toHaveBeenCalledTimes(1);
+});
 async function create(){render(<AnalyticsWorkspace accountId="account-a"/>);fireEvent.change(screen.getByLabelText('Petición de Analytics'),{target:{value:'Compara Microsoft y el S&P 500 los últimos dos años'}});fireEvent.click(screen.getByRole('button',{name:'Crear gráfico'}));await screen.findByRole('heading',{name:'Microsoft frente al S&P 500 · QA'});}
 function openParameters(){const summary=screen.getByText('Parámetros y guardado');if(!summary.closest('details')?.open)fireEvent.click(summary);}
 it('interprets a request once, executes its validated definition and exposes defaults, sources and null data honestly',async()=>{await create();expect(mocks.interpret).toHaveBeenCalledExactlyOnceWith('Compara Microsoft y el S&P 500 los últimos dos años',expect.any(AbortSignal));expect(mocks.run).toHaveBeenCalledExactlyOnceWith(analyticsQuery,expect.any(AbortSignal));expect(screen.getByText('Resultado parcial')).toBeVisible();openParameters();expect(screen.getByText('Base 100: comparación de precio, sin dividendos.')).toBeVisible();expect(screen.getByRole('link',{name:'Fuente de prueba'})).toHaveAttribute('href','https://example.test/series');expect(screen.getByText(/Datos hasta/)).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Ver tabla'}));const table=screen.getByRole('table');expect(within(table).getByText('N/D')).toBeVisible();expect(within(table).getAllByRole('row')).toHaveLength(4);expect(screen.getByText('MensorTerminal')).toBeVisible();});

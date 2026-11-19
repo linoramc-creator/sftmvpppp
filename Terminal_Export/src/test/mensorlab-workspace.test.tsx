@@ -4,7 +4,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import MensorLabWorkspace from '../components/MensorLabWorkspace';
 import KeepPanel from '../components/KeepPanel';
 import {MensorLabError,type LabDefinition,type LabProject,type LabRun} from '../lib/mensorlab-api';
-import {analyticsFixture,analyticsQuery} from './fixtures/analytics';
+import {analyticsFixture,analyticsParsed,analyticsQuery} from './fixtures/analytics';
 const mocks=vi.hoisted(()=>({list:vi.fn(),run:vi.fn(),organize:vi.fn(),save:vi.fn(),open:vi.fn(),refresh:vi.fn(),remove:vi.fn(),interpret:vi.fn(),analyticsRun:vi.fn(),analyticsList:vi.fn(),ideas:vi.fn(),download:vi.fn()}));
 vi.mock('@/lib/beta-api',()=>({authenticatedFetch:vi.fn()}));
 vi.mock('@/lib/mensorlab-api',async()=>({...await vi.importActual('@/lib/mensorlab-api'),labList:mocks.list,labRun:mocks.run,labOrganize:mocks.organize,labSave:mocks.save,labOpen:mocks.open,labRefresh:mocks.refresh,labDelete:mocks.remove}));
@@ -17,6 +17,22 @@ function runFixture(value:LabDefinition=definition):LabRun{return {runId:'server
 function projectFixture(run=runFixture()):LabProject{return {id:'project-one',name:'Proyecto privado',revision:1,created_at:'2026-11-16T07:00:00Z',updated_at:'2026-11-16T07:00:00Z',study_count:run.definition.studies.length,snapshot_count:1,definition:run.definition,snapshots:[{id:'snapshot-one',created_at:'2026-11-16T07:00:00Z',run}]};}
 beforeEach(()=>{Object.values(mocks).forEach(mock=>mock.mockReset());mocks.list.mockResolvedValue({items:[]});runs.clear();runs.set('server-run',runFixture());mocks.run.mockImplementation(async value=>{const run=runFixture(value);runs.set(run.runId,run);return run;});mocks.organize.mockImplementation(async value=>{const source=runs.get(value.runId)??runFixture(),next={...source,runId:'organized-'+mocks.organize.mock.calls.length,definition:{version:1 as const,studies:value.studies.map((item:{id:string;name:string})=>({...source.definition.studies.find(study=>study.id===item.id),name:item.name}))},results:value.studies.map((item:{id:string;name:string})=>({...source.results.find(study=>study.id===item.id),name:item.name}))};runs.set(next.runId,next);return next;});mocks.save.mockImplementation(async value=>({project:{...projectFixture(runs.get(value.runId)??runFixture()),name:value.name}}));mocks.open.mockResolvedValue({project:projectFixture()});mocks.refresh.mockResolvedValue({project:{...projectFixture(),revision:2}});mocks.remove.mockResolvedValue({ok:true});mocks.analyticsList.mockResolvedValue({items:[]});mocks.ideas.mockResolvedValue({ideas:[]});mocks.analyticsRun.mockImplementation(async query=>({...analyticsFixture(),query}));});
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
+it('opens a private custom quick-card query in the existing graphs workflow only when visible',async()=>{
+ mocks.interpret.mockResolvedValue(analyticsParsed);
+ const request={id:'quick-prompt',accountId:'owner',prompt:'MSFT · volatilidad móvil'},consumed=vi.fn();
+ const view=render(<KeepPanel active={false}><MensorLabWorkspace accountId="owner" initialRequest={request} onRequestConsumed={consumed}/></KeepPanel>);
+ expect(mocks.interpret).not.toHaveBeenCalled();
+ view.rerender(<KeepPanel active><MensorLabWorkspace accountId="owner" initialRequest={request} onRequestConsumed={consumed}/></KeepPanel>);
+ await screen.findByRole('heading',{name:'Microsoft frente al S&P 500 · QA'});
+ expect(mocks.interpret).toHaveBeenCalledExactlyOnceWith(request.prompt,expect.any(AbortSignal));
+ expect(mocks.analyticsRun).toHaveBeenCalledExactlyOnceWith(analyticsQuery,expect.any(AbortSignal));
+ expect(consumed).toHaveBeenCalledExactlyOnceWith('quick-prompt');
+ expect(screen.getByRole('button',{name:'Gráficos a medida'})).toHaveAttribute('aria-pressed','true');
+ expect(mocks.run).not.toHaveBeenCalled();
+ view.rerender(<KeepPanel active><MensorLabWorkspace accountId="another" initialRequest={request}/></KeepPanel>);
+ await act(async()=>{});expect(mocks.interpret).toHaveBeenCalledTimes(1);
+ expect(screen.queryByRole('heading',{name:'Microsoft frente al S&P 500 · QA'})).toBeNull();
+});
 async function calculate(){render(<MensorLabWorkspace accountId="owner"/>);fireEvent.click(screen.getByRole('button',{name:/^Activo y referencia/}));fireEvent.click(screen.getByRole('button',{name:'Incluir estudio'}));fireEvent.click(screen.getByRole('button',{name:'Calcular proyecto'}));await screen.findByText(/Resultado del proyecto ·/);}
 it('requires an explicit calculation and renders missing risk metrics without invoking AI or portfolio operations',async()=>{render(<MensorLabWorkspace accountId="owner"/>);fireEvent.click(screen.getByRole('button',{name:/^Activo y referencia/}));expect(mocks.run).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Incluir estudio'}));expect(mocks.run).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Calcular proyecto'}));await screen.findByText(/Resultado del proyecto ·/);expect(mocks.run.mock.calls[0][0].studies[0]).toMatchObject({kind:'comparison',benchmark:'^GSPC',query:{metric:'price',operation:'base100',frequency:'daily',currency:'USD'}});expect(mocks.interpret).not.toHaveBeenCalled();expect(screen.getAllByText('N/D').length).toBeGreaterThan(1);expect(screen.getByText(/N\/D indica datos ausentes/)).toBeVisible();});
 it('keeps hypothetical percentages explicit and refuses invalid totals without normalization',async()=>{render(<MensorLabWorkspace accountId="owner"/>);fireEvent.click(screen.getByRole('button',{name:/^Cartera hipotética/}));fireEvent.change(screen.getByLabelText('Peso de SPY'),{target:{value:'50'}});fireEvent.click(screen.getByRole('button',{name:'Incluir estudio'}));expect(screen.getByRole('alert')).toHaveTextContent('sumar exactamente 100%');expect(mocks.run).not.toHaveBeenCalled();fireEvent.change(screen.getByLabelText('Peso de efectivo'),{target:{value:'10'}});fireEvent.click(screen.getByRole('button',{name:'Incluir estudio'}));fireEvent.click(screen.getByRole('button',{name:'Calcular proyecto'}));await screen.findByText(/Resultado del proyecto ·/);expect(mocks.run.mock.calls[0][0].studies[0]).toMatchObject({kind:'scenario',cashWeight:10,weights:[{symbol:'SPY',weight:50},{symbol:'TLT',weight:30},{symbol:'GLD',weight:10}]});});
