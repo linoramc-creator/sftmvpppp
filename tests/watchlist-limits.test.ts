@@ -1,3 +1,4 @@
+import {testAccessToken} from './access-fixture.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {BetaError,classify,secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
@@ -6,7 +7,7 @@ import {feedSymbols} from '../supabase/functions/analyze-ticker/feed-quotes.ts';
 
 const symbols=['AAPL','MSFT','NVDA','BRK-B','SPY','QQQ','URTH'];
 const uid='22222222-2222-4222-8222-222222222222';
-const request=(body:unknown)=>new Request('https://project.supabase.co/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+'x'.repeat(30)},body:JSON.stringify(body)});
+const request=(body:unknown)=>new Request('https://project.supabase.co/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+testAccessToken(uid)},body:JSON.stringify(body)});
 function fixture(t:any){
  const previousFetch=globalThis.fetch,previousDeno=(globalThis as any).Deno,writes:any[]=[],paths:string[]=[];
  let saved=[...symbols];
@@ -14,6 +15,7 @@ function fixture(t:any){
  globalThis.fetch=async(input:any,init:any={})=>{
   const url=String(input);paths.push(url);
   if(url.includes('/auth/v1/user'))return Response.json({id:uid,email:'test@example.com',email_confirmed_at:'2026-10-01'});
+  if(url.includes('/rpc/beta_access_session'))return Response.json(true);
   if(url.includes('/rpc/beta_active_user'))return Response.json(true);
   if(url.includes('/rpc/beta_reserve'))return Response.json('44444444-4444-4444-8444-444444444444');
   if(url.includes('/beta_usage'))return new Response(null,{status:204});

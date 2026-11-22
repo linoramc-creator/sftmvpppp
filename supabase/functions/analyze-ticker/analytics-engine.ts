@@ -1,5 +1,6 @@
 import type {AnalyticsDependencies,AnalyticsFrequency,AnalyticsFundamentalInput,AnalyticsMetric,AnalyticsPoint,AnalyticsQuery,AnalyticsResult,AnalyticsSeries,AnalyticsSource} from './analytics-types.ts';
 import {analyticsFundamentals,analyticsPrices,analyticsFx} from './analytics-providers.ts';
+import {analyticsValuation} from './analytics-valuation.ts';
 export type {AnalyticsQuery,AnalyticsResult,AnalyticsDependencies} from './analytics-types.ts';
 
 export class AnalyticsValidationError extends Error {
@@ -7,12 +8,14 @@ export class AnalyticsValidationError extends Error {
   constructor(message:string,code='invalid'){super(message);this.name='AnalyticsValidationError';this.code=code;}
 }
 export const ANALYTICS_CATALOG = {
-  price:{label:'Precio de cierre',kind:'price'},realizedVolatility:{label:'Volatilidad realizada móvil',kind:'computed-price'},drawdown:{label:'Drawdown desde máximo de cierre',kind:'computed-price'},rollingCorrelation:{label:'Correlación móvil',kind:'computed-price'},rollingBeta:{label:'Beta móvil',kind:'computed-price'},relativeStrength:{label:'Fortaleza relativa',kind:'computed-price'},revenue:{label:'Ingresos',kind:'flow'},netIncome:{label:'Beneficio neto',kind:'flow'},grossProfit:{label:'Beneficio bruto',kind:'flow'},operatingCashFlow:{label:'Flujo de caja operativo',kind:'flow'},freeCashFlow:{label:'Flujo de caja libre',kind:'flow'},capex:{label:'CapEx total',kind:'flow'},capexAI:{label:'CapEx específico de IA',kind:'unavailable'},cash:{label:'Efectivo y equivalentes',kind:'stock'},totalDebt:{label:'Deuda total',kind:'stock'},equity:{label:'Patrimonio neto',kind:'stock'},totalAssets:{label:'Activos totales',kind:'stock'},portfolioExposure:{label:'Exposición del portfolio',kind:'portfolio'},
+  price:{label:'Precio de cierre',kind:'price'},realizedVolatility:{label:'Volatilidad realizada móvil',kind:'computed-price'},drawdown:{label:'Drawdown desde máximo de cierre',kind:'computed-price'},rollingCorrelation:{label:'Correlación móvil',kind:'computed-price'},rollingBeta:{label:'Beta móvil',kind:'computed-price'},relativeStrength:{label:'Fortaleza relativa',kind:'computed-price'},revenue:{label:'Ingresos',kind:'flow'},netIncome:{label:'Beneficio neto',kind:'flow'},grossProfit:{label:'Beneficio bruto',kind:'flow'},operatingIncome:{label:'Beneficio operativo',kind:'flow'},researchDevelopment:{label:'Investigación y desarrollo',kind:'flow'},operatingCashFlow:{label:'Flujo de caja operativo',kind:'flow'},freeCashFlow:{label:'Flujo de caja libre',kind:'flow'},capex:{label:'CapEx total',kind:'flow'},capexAI:{label:'CapEx específico de IA',kind:'unavailable'},cash:{label:'Efectivo y equivalentes',kind:'stock'},totalDebt:{label:'Deuda total',kind:'stock'},netDebt:{label:'Deuda neta',kind:'stock'},currentAssets:{label:'Activos corrientes',kind:'stock'},currentLiabilities:{label:'Pasivos corrientes',kind:'stock'},forwardPeCurrent:{label:'PER forward · instantánea actual',kind:'snapshot'},trailingPeCurrent:{label:'PER TTM · instantánea actual',kind:'snapshot'},priceToBookCurrent:{label:'Precio / valor contable · actual',kind:'snapshot'},enterpriseToEbitdaCurrent:{label:'EV / EBITDA · actual',kind:'snapshot'},equity:{label:'Patrimonio neto',kind:'stock'},totalAssets:{label:'Activos totales',kind:'stock'},portfolioExposure:{label:'Exposición del portfolio',kind:'portfolio'},
 } as const;
 const METRICS=new Set(Object.keys(ANALYTICS_CATALOG));
 const OPS=new Set(['level','base100','growth_yoy','growth_qoq','ratio']);
 const FREQ=new Set(['daily','weekly','monthly','quarterly','annual']);
-const RATIO_PAIRS=new Set(['netIncome/revenue','grossProfit/revenue','freeCashFlow/revenue','operatingCashFlow/revenue','capex/revenue','totalDebt/equity','totalDebt/totalAssets','cash/totalDebt']);
+const RATIO_PAIRS=new Set(['netIncome/revenue','grossProfit/revenue','freeCashFlow/revenue','operatingCashFlow/revenue','capex/revenue','totalDebt/equity','totalDebt/totalAssets','cash/totalDebt','operatingIncome/revenue','researchDevelopment/revenue','currentAssets/currentLiabilities','cash/currentLiabilities','capex/operatingCashFlow']);
+export const ANALYTICS_VALUATION_METRICS=new Set<AnalyticsMetric>(['forwardPeCurrent','trailingPeCurrent','priceToBookCurrent','enterpriseToEbitdaCurrent']);
+const TIMES_RATIOS=new Set(['totalDebt/equity','cash/totalDebt','currentAssets/currentLiabilities','cash/currentLiabilities']);
 export const ANALYTICS_PRICE_STUDIES=new Set<AnalyticsMetric>(['realizedVolatility','drawdown','rollingCorrelation','rollingBeta','relativeStrength']);
 const ROLLING_METRICS=new Set<AnalyticsMetric>(['realizedVolatility','rollingCorrelation','rollingBeta']);
 const RELATION_METRICS=new Set<AnalyticsMetric>(['rollingCorrelation','rollingBeta','relativeStrength']);
@@ -28,7 +31,7 @@ const noExtra=(v:Record<string,unknown>,allowed:string[])=>{if(Object.keys(v).so
  * become provider URLs, expressions, generated code or database statements. */
 export function validateAnalyticsQuery(input:unknown):AnalyticsQuery {
   const r=object(input);noExtra(r,['version','assets','metric','operation','denominator','period','frequency','currency','chart','dataKind','portfolioId','window','benchmark']);
-  if(r.version!==1||!METRICS.has(String(r.metric))||!OPS.has(String(r.operation))||!FREQ.has(String(r.frequency))||!['original','USD','EUR','GBP'].includes(String(r.currency))||!['line','bar','scatter'].includes(String(r.chart))||r.dataKind!=='reported')throw new AnalyticsValidationError('Revisa la métrica, operación, frecuencia y tipo de datos. Solo se admiten datos publicados del catálogo.');
+  if(r.version!==1||!METRICS.has(String(r.metric))||!OPS.has(String(r.operation))||!FREQ.has(String(r.frequency))||!['original','USD','EUR','GBP'].includes(String(r.currency))||!['line','bar','scatter'].includes(String(r.chart))||r.dataKind!==(r.metric==='forwardPeCurrent'?'estimate':'reported'))throw new AnalyticsValidationError('Revisa la métrica, operación, frecuencia y tipo de datos. Las previsiones solo se admiten en la instantánea forward identificada del catálogo.');
   if(!Array.isArray(r.assets)||r.assets.length>8||r.assets.some(s=>!symbol(s)))throw new AnalyticsValidationError('Indica hasta ocho símbolos válidos.');
   const assets=[...new Set((r.assets as string[]).map(s=>s==='GOOG'?'GOOGL':s))];
   if(r.metric!=='portfolioExposure'&&!assets.length)throw new AnalyticsValidationError('Selecciona al menos un activo.');
@@ -40,24 +43,25 @@ export function validateAnalyticsQuery(input:unknown):AnalyticsQuery {
     if(!day(p.from)||!day(p.to)||p.from>p.to||Date.parse(p.to)-Date.parse(p.from)>10*366*DAY)throw new AnalyticsValidationError('Las fechas deben ser válidas, ordenadas y cubrir como máximo diez años.');
   }else if(p.from!==undefined||p.to!==undefined)throw new AnalyticsValidationError('Un periodo móvil no admite fechas fijas ocultas.');
   const metric=r.metric as AnalyticsMetric,operation=r.operation as AnalyticsQuery['operation'];
-  const advanced=ANALYTICS_PRICE_STUDIES.has(metric),rolling=ROLLING_METRICS.has(metric),related=RELATION_METRICS.has(metric);
+  const snapshot=ANALYTICS_VALUATION_METRICS.has(metric),advanced=ANALYTICS_PRICE_STUDIES.has(metric),rolling=ROLLING_METRICS.has(metric),related=RELATION_METRICS.has(metric);
   if(advanced&&(operation!=='level'||!['daily','weekly','monthly'].includes(String(r.frequency))))throw new AnalyticsValidationError('Los estudios de riesgo y relaciones utilizan nivel y frecuencia de visualización diaria, semanal o mensual.');
   if(rolling&&r.window!==undefined&&![20,60,120].includes(r.window as number))throw new AnalyticsValidationError('Elige una ventana de 20, 60 o 120 variaciones de cierres observados.');
   if(!rolling&&r.window!==undefined)throw new AnalyticsValidationError('La ventana solo se utiliza para volatilidad, correlación o beta móviles.');
   const benchmark=typeof r.benchmark==='string'&&r.benchmark==='GOOG'?'GOOGL':r.benchmark;
   if(related&&(!symbol(benchmark)||!assets.includes(benchmark)||assets.length<2||r.currency==='original'))throw new AnalyticsValidationError('Incluye una referencia explícita entre al menos dos activos y elige USD, EUR o GBP para homogeneizar la divisa.');
   if(!related&&r.benchmark!==undefined)throw new AnalyticsValidationError('La referencia solo se admite para correlación móvil, beta móvil o fortaleza relativa.');
+  if(snapshot&&(operation!=='level'||r.frequency!=='daily'||r.chart!=='bar'))throw new AnalyticsValidationError('Los múltiplos actuales son una instantánea fechada: nivel, frecuencia diaria y barras, sin evolución histórica.');
   if(metric==='price'&&(!['daily','weekly','monthly'].includes(String(r.frequency))||!['level','base100'].includes(operation)))throw new AnalyticsValidationError('Los precios admiten niveles o base 100 con frecuencia diaria, semanal o mensual.');
   if(metric==='portfolioExposure'&&(operation!=='level'||r.frequency!=='daily'||r.chart!=='bar'||assets.length))throw new AnalyticsValidationError('La exposición utiliza las posiciones actuales del portfolio, sin una cartera duplicada. Usa barras, nivel y frecuencia diaria.');
   if(metric==='portfolioExposure'&&r.currency!=='original')throw new AnalyticsValidationError('La exposición reutiliza la moneda de la valoración existente. Selecciona moneda original.');
-  if(!['price','portfolioExposure'].includes(metric)&&!advanced&&!['quarterly','annual'].includes(String(r.frequency)))throw new AnalyticsValidationError('Los fundamentales publicados admiten frecuencia trimestral o anual.');
+  if(!['price','portfolioExposure'].includes(metric)&&!advanced&&!snapshot&&!['quarterly','annual'].includes(String(r.frequency)))throw new AnalyticsValidationError('Los fundamentales publicados admiten frecuencia trimestral o anual.');
   if(metric!=='price'&&operation==='base100')throw new AnalyticsValidationError('La base 100 inicial está disponible para precios de cierre.');
   if(operation==='growth_qoq'&&r.frequency!=='quarterly')throw new AnalyticsValidationError('El crecimiento entre trimestres requiere datos trimestrales.');
   if(operation==='ratio'){
     if(!METRICS.has(String(r.denominator))||!RATIO_PAIRS.has(metric+'/'+r.denominator))throw new AnalyticsValidationError('Ese ratio no tiene una combinación compatible en el catálogo.');
   }else if(r.denominator!==undefined)throw new AnalyticsValidationError('El denominador solo se admite para un ratio.');
   if(metric==='capexAI'&&operation==='ratio')throw new AnalyticsValidationError('No hay un desglose normalizado de CapEx de IA para formar ese ratio.');
-  return {version:1,assets,metric,operation,...(operation==='ratio'?{denominator:r.denominator as AnalyticsMetric}:{}),period:{range:p.range as AnalyticsQuery['period']['range'],...(p.range==='custom'?{from:p.from as string,to:p.to as string}:{})},frequency:r.frequency as AnalyticsFrequency,currency:r.currency as AnalyticsQuery['currency'],chart:r.chart as AnalyticsQuery['chart'],dataKind:'reported',...(r.portfolioId?{portfolioId:r.portfolioId as string}:{}),...(rolling?{window:(r.window??20) as 20|60|120}:{}),...(related?{benchmark:benchmark as string}:{})};
+  return {version:1,assets,metric,operation,...(operation==='ratio'?{denominator:r.denominator as AnalyticsMetric}:{}),period:{range:p.range as AnalyticsQuery['period']['range'],...(p.range==='custom'?{from:p.from as string,to:p.to as string}:{})},frequency:r.frequency as AnalyticsFrequency,currency:r.currency as AnalyticsQuery['currency'],chart:r.chart as AnalyticsQuery['chart'],dataKind:metric==='forwardPeCurrent'?'estimate':'reported',...(r.portfolioId?{portfolioId:r.portfolioId as string}:{}),...(rolling?{window:(r.window??20) as 20|60|120}:{}),...(related?{benchmark:benchmark as string}:{})};
 }
 export function analyticsBounds(query:AnalyticsQuery,now=Date.now()):{from:string;to:string} {
   const to=new Date(now).toISOString().slice(0,10);
@@ -71,15 +75,16 @@ export function analyticsBounds(query:AnalyticsQuery,now=Date.now()):{from:strin
 const sourceOk=(s:AnalyticsSource|undefined)=>Boolean(s&&typeof s.id==='string'&&s.id.length<=100&&typeof s.name==='string'&&s.name.length<=200&&/^https:\/\//.test(s.url)&&typeof s.fetchedAt==='string'&&Number.isFinite(Date.parse(s.fetchedAt)));
 function emptySeries(symbol:string,query:AnalyticsQuery,note:string):AnalyticsSeries{return {id:symbol,symbol,label:symbol,unit:unit(query,null),currency:null,points:[],status:'unavailable',sourceIds:[],notes:[note]};}
 function unit(query:AnalyticsQuery,money:string|null):string {
+  if(ANALYTICS_VALUATION_METRICS.has(query.metric))return 'x';
   if(ANALYTICS_PRICE_STUDIES.has(query.metric))return ['rollingCorrelation','rollingBeta'].includes(query.metric)?'x':'%';
   if(query.operation==='base100')return 'base 100';
   if(query.operation.startsWith('growth_'))return '%';
-  if(query.operation==='ratio')return ['totalDebt/equity','cash/totalDebt'].includes(query.metric+'/'+query.denominator)?'x':'%';
+  if(query.operation==='ratio')return TIMES_RATIOS.has(query.metric+'/'+query.denominator)?'x':'%';
   return query.metric==='portfolioExposure'?'% del patrimonio':money??'moneda no disponible';
 }
 function makeResult(query:AnalyticsQuery,now:number):AnalyticsResult {
   const bounds=analyticsBounds(query,now),label=ANALYTICS_CATALOG[query.metric].label;
-  return {version:1,query,generatedAt:new Date(now).toISOString(),...bounds,title:query.operation==='base100'?'Evolución de precios · base 100':query.operation==='growth_yoy'?label+' · crecimiento interanual':query.operation==='growth_qoq'?label+' · crecimiento entre trimestres':query.operation==='ratio'?label+' / '+ANALYTICS_CATALOG[query.denominator!].label:label,status:'unavailable',series:[],table:[],sources:[],methodology:['Solo datos publicados; las ausencias se conservan como nulos. No se estiman valores ni se completan con cero.'],warnings:[],alternatives:[],export:{chart:false,table:false,reason:'No hay observaciones para exportar.'}};
+  return {version:1,query,generatedAt:new Date(now).toISOString(),...bounds,title:query.operation==='base100'?'Evolución de precios · base 100':query.operation==='growth_yoy'?label+' · crecimiento interanual':query.operation==='growth_qoq'?label+' · crecimiento entre trimestres':query.operation==='ratio'?label+' / '+ANALYTICS_CATALOG[query.denominator!].label:label,status:'unavailable',series:[],table:[],sources:[],methodology:[query.dataKind==='estimate'?'Estimaciones publicadas por el proveedor, identificadas como una instantánea actual; no son resultados realizados. Las ausencias se conservan como nulos. No se reconstruyen estimaciones pasadas.':'Solo datos publicados; las ausencias se conservan como nulos. No se estiman valores ni se completan con cero.'],warnings:[],alternatives:[],export:{chart:false,table:false,reason:'No hay observaciones para exportar.'}};
 }
 function finish(result:AnalyticsResult):AnalyticsResult {
   const dates=[...new Set(result.series.flatMap(s=>s.points.map(p=>p.date)))].sort();
@@ -234,6 +239,9 @@ function cleanFundamentals(raw:AnalyticsFundamentalInput,now:number):Fundamental
     if(!day(r.date)||r.date>cutoff||r.filingDate!==null&&(!day(r.filingDate)||r.filingDate>cutoff)||!['3M','12M','instant','YTD'].includes(r.periodType))continue;
     const key=r.date+':'+r.periodType,money=currency(r.currency)?r.currency:null,values:FundamentalRow['values']={};
     for(const [key,v]of Object.entries(object(r.values)))if(METRICS.has(key))values[key as AnalyticsMetric]=finite(v)?v:null;
+    // Do not trust a differently defined provider net-debt field. This catalog
+    // consistently means total debt less cash/equivalents, same fiscal row.
+    values.netDebt=finite(values.totalDebt)&&finite(values.cash)?values.totalDebt-values.cash:null;
     const row={date:r.date,currency:money,filingDate:r.filingDate,periodType:r.periodType,values,...(r.valueSourceIds?{valueSourceIds:r.valueSourceIds}:{})};
     if(out.has(key)&&JSON.stringify(out.get(key))!==JSON.stringify(row)){conflicts.add(key);continue;}out.set(key,row);
   }
@@ -253,8 +261,9 @@ async function fundamentalsResult(result:AnalyticsResult,deps:AnalyticsDependenc
   result.methodology.push('Fechas de cierre fiscal reales de cada emisor; los trimestres de empresas distintas pueden tener cierres diferentes. No se renombran como un mismo trimestre natural. Importes en unidades monetarias completas, sin escalas implícitas.');
   result.methodology.push('Solo observaciones identificadas como '+(expected==='3M'?'trimestres independientes (3M)':'ejercicios completos (12M)')+'. Los acumulados YTD y los datos sin duración verificada no se tratan como trimestres.');
   if(q.operation.startsWith('growth_'))result.methodology.push((q.operation==='growth_yoy'?'Crecimiento interanual':'Crecimiento entre trimestres')+' = (actual − anterior) / |anterior| × 100. Se exige una observación fiscal comparable en la misma moneda y duración; denominador cero o periodo ausente → nulo.');
-  if(q.operation==='ratio')result.methodology.push('Ratio calculado con numerador y denominador publicados del mismo emisor, fecha fiscal, duración y moneda. Se exige denominador positivo. '+(['totalDebt/equity','cash/totalDebt'].includes(q.metric+'/'+q.denominator)?'Se expresa en veces.':'Se expresa en porcentaje.'));
+  if(q.operation==='ratio')result.methodology.push('Ratio calculado con numerador y denominador publicados del mismo emisor, fecha fiscal, duración y moneda. Se exige denominador positivo. '+(TIMES_RATIOS.has(q.metric+'/'+q.denominator)?'Se expresa en veces.':'Se expresa en porcentaje.'));
   if(q.metric==='capex')result.methodology.push('CapEx total: desembolso de inversión en activos, presentado positivo. No mide específicamente inversión en inteligencia artificial y no incluye automáticamente arrendamientos u otros compromisos.');
+  if(q.metric==='netDebt')result.methodology.push('Deuda neta = deuda total − efectivo y equivalentes de la misma fecha fiscal, duración y moneda. Un valor negativo representa caja neta. No se agregan inversiones financieras ni se convierten datos desconocidos en cero.');
   const mismatched=new Set<string>();
   for(let i=0;i<q.assets.length;i++){
     const symbol=q.assets[i],raw=all[i];if(!raw||raw.symbol!==symbol||!sourceOk(raw.source)){result.series.push(emptySeries(symbol,q,'No hay fundamentales publicados verificables con la cobertura autorizada.'));continue;}
@@ -264,16 +273,17 @@ async function fundamentalsResult(result:AnalyticsResult,deps:AnalyticsDependenc
     const points:AnalyticsPoint[]=[];
     for(const row of rows){
       const base=row.values[q.metric],den=q.operation==='ratio'?row.values[q.denominator!]:null;
-      const sourceIds=[row.valueSourceIds?.[q.metric]??raw.source.id];
+      const idsFor=(r:FundamentalRow,metric:AnalyticsMetric)=>metric==='netDebt'?[r.valueSourceIds?.totalDebt??raw.source.id,r.valueSourceIds?.cash??raw.source.id]:[r.valueSourceIds?.[metric]??raw.source.id];
+      const sourceIds=idsFor(row,q.metric);
       let value=finite(base)?base:null,status:AnalyticsPoint['status']=value===null?'missing':'available',detail:string|undefined;
       if(q.operation.startsWith('growth_')){
         const previous=previousPeriod(valid,row,q.operation),before=previous?.values[q.metric];
-        if(previous)sourceIds.push(previous.valueSourceIds?.[q.metric]??raw.source.id);
+        if(previous)sourceIds.push(...idsFor(previous,q.metric));
         value=finite(base)&&finite(before)&&before!==0?(base-before)/Math.abs(before)*100:null;
         if(value===null){status='missing';detail='Falta una observación fiscal comparable o el denominador es cero.';}
       }else if(q.operation==='ratio'){
         sourceIds.push(row.valueSourceIds?.[q.denominator!]??raw.source.id);
-        value=finite(base)&&finite(den)&&den>0?base/den*(['totalDebt/equity','cash/totalDebt'].includes(q.metric+'/'+q.denominator)?1:100):null;
+        value=finite(base)&&finite(den)&&den>0?base/den*(TIMES_RATIOS.has(q.metric+'/'+q.denominator)?1:100):null;
         if(value===null){status='missing';detail='Numerador o denominador compatible ausente; no se calcula con cero ni con otra frecuencia.';}
       }
       if(!row.currency){value=null;status='incompatible';detail='La moneda del estado financiero no está identificada.';}
@@ -295,6 +305,27 @@ async function fundamentalsResult(result:AnalyticsResult,deps:AnalyticsDependenc
   }
   if(mismatched.size){result.warnings.push('No se puede convertir de forma rigurosa el flujo fiscal de '+[...mismatched].join(', ')+'.');result.alternatives.push({label:'Ver cifras en moneda de origen',reason:'Mantiene las cifras publicadas sin una conversión de divisa no verificable.',query:{...q,currency:'original'}});}
   if(q.operation==='level'&&q.currency==='original'&&new Set(result.series.filter(s=>s.points.some(p=>p.value!==null)).map(s=>s.currency)).size>1)result.warnings.push('Las empresas presentan sus cuentas en monedas diferentes; los niveles no son directamente comparables. Los crecimientos y ratios usan únicamente observaciones compatibles de cada empresa.');
+}
+async function valuationResult(result:AnalyticsResult,deps:AnalyticsDependencies,now:number){
+  const q=result.query,metric=q.metric as 'forwardPeCurrent'|'trailingPeCurrent'|'priceToBookCurrent'|'enterpriseToEbitdaCurrent';
+  const load=deps.valuation??analyticsValuation;
+  result.methodology.push('Instantánea fechada, no evolución histórica: un múltiplo actual no se copia sobre precios antiguos. La fecha del punto es la de consulta del múltiplo; la fecha de su última cotización se conserva por separado.');
+  result.methodology.push('Unidad: veces (x), sin conversión monetaria. Son ratios publicados para acciones individuales; no se usan valoraciones agregadas de ETF ni se mezclan estimaciones de clases de acciones. Los valores no positivos se consideran no interpretables.');
+  if(metric==='forwardPeCurrent')result.methodology.push('El PER forward incorpora previsiones del proveedor y se identifica como estimación. No se acredita un histórico de consensos point-in-time ni un horizonte NTM uniforme. No se infiere una valoración pasada usando las estimaciones actuales.');
+  const inputs=await Promise.all(q.assets.map(async symbol=>{try{return await load(symbol);}catch{return null;}}));
+  let excludedByPeriod=false;
+  for(let i=0;i<q.assets.length;i++){
+    const symbol=q.assets[i],raw=inputs[i],observed=raw?Date.parse(raw.asOf):NaN,quote=raw?.quoteAt?Date.parse(raw.quoteAt):NaN;
+    if(!raw||raw.symbol!==symbol||!sourceOk(raw.source)||!Number.isFinite(observed)||observed>now||now-observed>7*DAY||!Number.isFinite(quote)||quote>observed||now-quote>7*DAY){result.series.push(emptySeries(symbol,q,'No hay una instantánea actual verificable con la cobertura autorizada. No se fabrican múltiplos históricos.'));continue;}
+    const date=raw.asOf.slice(0,10);
+    if(date<result.from||date>result.to){excludedByPeriod=true;result.series.push(emptySeries(symbol,q,'La instantánea actual está fuera de las fechas solicitadas; no se presenta como dato de aquel periodo.'));continue;}
+    result.sources.push(raw.source);
+    const value=raw.values[metric],valid=finite(value)&&value>0,notes=[...raw.notes,'Cotización de referencia: '+raw.quoteAt+'. Consulta del múltiplo: '+raw.asOf+'.'];
+    const points:AnalyticsPoint[]=[{date,value:valid?value:null,currency:null,periodType:'instant',status:valid?'available':'missing',sourceId:raw.source.id,detail:valid?'Instantánea consultada el '+raw.asOf+'; última cotización '+raw.quoteAt+'.':'El múltiplo no está disponible o no tiene un denominador positivo interpretable.'}];
+    result.series.push({id:symbol,symbol,label:symbol,unit:'x',currency:null,points,status:valid?'partial':'unavailable',sourceIds:[raw.source.id],notes});
+  }
+  result.warnings.push('Solo una observación actual por activo. No representa cómo evolucionaron los múltiplos durante el periodo seleccionado.');
+  if(excludedByPeriod)result.alternatives.push({label:'Consultar instantánea actual por separado',reason:'Las fechas originales no incluyen la instantánea disponible; esta alternativa termina hoy y no reemplaza el periodo solicitado.',query:{...q,period:{range:'1y'}}});
 }
 async function portfolioResult(result:AnalyticsResult,deps:AnalyticsDependencies){
   const q=result.query;if(!deps.portfolio)throw new AnalyticsValidationError('El portfolio simulado no está disponible para esta cuenta.','forbidden');
@@ -322,6 +353,7 @@ export async function executeAnalytics(input:unknown,deps:AnalyticsDependencies=
     result.alternatives.push({label:'Ver CapEx total por separado',reason:'CapEx total publicado; incluye inversiones ajenas a IA. No sustituye la métrica solicitada.',query:{...query,metric:'capex'}});
   }else if(ANALYTICS_PRICE_STUDIES.has(query.metric))await advancedPriceResult(result,deps,now);
   else if(query.metric==='price')await priceResult(result,deps,now);
+  else if(ANALYTICS_VALUATION_METRICS.has(query.metric))await valuationResult(result,deps,now);
   else if(query.metric==='portfolioExposure')await portfolioResult(result,deps);
   else await fundamentalsResult(result,deps,now);
   if(query.chart==='scatter')result.methodology.push('Dispersión: las dos series seleccionadas se emparejan exclusivamente en fechas observadas comunes. La relación visual no prueba causalidad. No se mezclan cierres fiscales diferentes.');

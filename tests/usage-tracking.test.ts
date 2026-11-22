@@ -1,3 +1,4 @@
+import {testAccessToken} from './access-fixture.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
@@ -9,6 +10,7 @@ function fixture(t:any){
  globalThis.fetch=async(input:any,init:any={})=>{
   const url=String(input);
   if(url.includes('/auth/v1/user'))return Response.json({id,email:'unit@example.test',email_confirmed_at:'2026-01-01'});
+  if(url.includes('/rpc/beta_access_session'))return Response.json(true);
   if(url.includes('/rpc/beta_active_user'))return Response.json(true);
   if(url.includes('/rpc/beta_reserve'))return Response.json(id);
   if(url.includes('/beta_usage?')){assert.equal(init.method,'PATCH');statuses.push(JSON.parse(init.body).status);return new Response(null,{status:204});}
@@ -17,7 +19,7 @@ function fixture(t:any){
  t.after(()=>{globalThis.fetch=previousFetch;(globalThis as any).Deno=previousDeno;});
  return statuses;
 }
-const request=(body:any)=>new Request('https://project.example.test/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+'x'.repeat(30)},body:JSON.stringify(body)});
+const request=(body:any)=>new Request('https://project.example.test/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+testAccessToken(id)},body:JSON.stringify(body)});
 function fragmented(text:string,contentType:string){
  const bytes=new TextEncoder().encode(text);
  return new Response(new ReadableStream<Uint8Array>({start(controller){for(let i=0;i<bytes.length;i+=7)controller.enqueue(bytes.slice(i,i+7));controller.close();}}),{headers:{'Content-Type':contentType}});

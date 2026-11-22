@@ -106,7 +106,7 @@ export async function executeMensorLab(input:unknown,deps:LabRunDependencies={})
  // Sequential studies keep provider concurrency bounded to the existing eight
  // per query; identical raw asset windows share a single promise for this run.
  const results:LabStudyResult[]=[];
- for(const study of definition.studies){const analytics=await(deps.execute??executeAnalytics)(study.query,{now,prices,fundamentals:deps.fundamentals,fx:deps.fx});
+ for(const study of definition.studies){const analytics=await(deps.execute??executeAnalytics)(study.query,{now,prices,fundamentals:deps.fundamentals,valuation:deps.valuation,fx:deps.fx});
   const alternatives=new Set(analytics.alternatives.map(item=>JSON.stringify(item.query)));
   for(const alternative of analyticsResultAlternatives(analytics))if(!alternatives.has(JSON.stringify(alternative.query))){analytics.alternatives.push(alternative);alternatives.add(JSON.stringify(alternative.query));}
   results.push(study.kind==='analytics'?{id:study.id,name:study.name,kind:study.kind,analytics,benchmark:null,metrics:[],correlations:{symbols:[],values:[],observations:0},sample:{from:analytics.from,to:analytics.to,observations:analytics.table.length,returns:0,annualization:252,minimumRiskReturns:20},methodology:analytics.methodology,warnings:analytics.warnings}:studyMetrics(study,analytics,now));

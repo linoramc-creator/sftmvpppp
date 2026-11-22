@@ -62,7 +62,9 @@ test('context ideas are authenticated metadata only and never trigger storage, A
  const deps={rpc:forbidden,env:()=>{throw new Error('No secrets needed');},interpret:forbidden,execute:forbidden};
  assert.equal(classify({accountAction:'analyticsIdeas',context:{symbol:'GOOG',kind:'equity'}}).request_class,'account');
  const result=await (await handleAnalyticsAction({accountAction:'analyticsIdeas',context:{symbol:'GOOG',kind:'equity'}},user,deps))!.json();
- assert.equal(result.catalogVersion,1);assert.equal(result.ideas.length,9);assert.ok(result.ideas.every((idea:any)=>idea.query.assets[0]==='GOOGL'&&idea.coverage.status==='catalog'));
+ assert.equal(result.catalogVersion,1);assert.equal(result.ideas.length,12);assert.ok(result.ideas.every((idea:any)=>idea.query.assets[0]==='GOOGL'&&idea.coverage.status==='catalog'));
+ assert.ok(result.ideas.some((idea:any)=>idea.query.metric==='forwardPeCurrent'&&idea.query.dataKind==='estimate'));
+ assert.ok(result.ideas.some((idea:any)=>idea.query.metric==='currentAssets'&&idea.query.denominator==='currentLiabilities'));
  for(const kind of ['etf','index','forex']){const value=await (await handleAnalyticsAction({accountAction:'analyticsIdeas',context:{symbol:'SPY',kind}},user,deps))!.json();assert.ok(value.ideas.every((idea:any)=>idea.query.metric==='price'||ANALYTICS_PRICE_STUDIES.has(idea.query.metric)));}
  for(const body of [{accountAction:'analyticsIdeas',user_id:other},{accountAction:'analyticsIdeas',context:{symbol:'MSFT',uid:other}},{accountAction:'analyticsIdeas',context:{symbol:'https://evil.example'}},{accountAction:'analyticsIdeas',context:{kind:'sql'}}])await assert.rejects(handleAnalyticsAction(body,user,deps));
 });

@@ -147,4 +147,19 @@ test('Analytics PostgreSQL enforces owned definitions, service-only access, boun
   await db.exec('set role authenticated');try{await assert.rejects(rpc('list'),/permission denied/);}finally{await db.exec('reset role');}
   assert.deepEqual((await db.query('select * from public.beta_paper_portfolios order by id')).rows,originalPortfolios);
  });
+ await t.test('expanded catalog stores current estimates separately, rejects artificial historical snapshot definitions and retains owner isolation',async()=>{
+  const before=(await rpc('list',reader)).map((item:any)=>item.id);
+  await migrate('202611220001_analytics_catalog.sql');
+  assert.deepEqual((await rpc('list',reader)).map((item:any)=>item.id),before);
+  const create=(query:Record<string,unknown>)=>rpc('save',reader,{name:'Specific financial study',requestId:randomUUID(),query});
+  const forward={...definition,metric:'forwardPeCurrent',operation:'level',chart:'bar',frequency:'daily',dataKind:'estimate'};
+  const current=await create(forward);assert.deepEqual(current.query,forward);
+  assert.equal((await rpc('list',third)).some((item:any)=>item.id===current.id),false);
+  await assert.rejects(rpc('delete',third,{id:current.id,revision:1}),/BETA_ANALYTICS_NOT_FOUND/);
+  for(const metric of ['operatingIncome','researchDevelopment','currentAssets','currentLiabilities','netDebt'])assert.equal((await create({...definition,metric,operation:'level',chart:'bar',frequency:'quarterly'})).query.metric,metric);
+  const ratio={...definition,metric:'currentAssets',denominator:'currentLiabilities',operation:'ratio',frequency:'quarterly'};assert.deepEqual((await create(ratio)).query,ratio);
+  for(const invalid of [{...forward,dataKind:'reported'},{...forward,frequency:'monthly'},{...forward,chart:'line'},{...forward,operation:'growth_yoy'},{...ratio,denominator:'revenue'},{...forward,metric:'forwardPeHistory'},{...definition,dataKind:'estimate'}])await assert.rejects(create(invalid),/BETA_ANALYTICS_INVALID/);
+  for(const role of ['anon','authenticated']){await db.exec('set role '+role);try{await assert.rejects(rpc('list'),/permission denied/);}finally{await db.exec('reset role');}}
+  assert.deepEqual((await db.query('select * from public.beta_paper_portfolios order by id')).rows,originalPortfolios);
+ });
 });

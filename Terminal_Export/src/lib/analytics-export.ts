@@ -1,4 +1,5 @@
 import type {AnalyticsQuery,AnalyticsResult} from './analytics-api';
+import {analyticsSnapshotMetrics} from './analytics-labels';
 
 function csvCell(value:unknown){const raw=value==null?'':String(value),safe=typeof value==='string'&&(/^[\s]*[=+\-@]/.test(raw)||/^[\t\r]/.test(raw))?`'${raw}`:raw;return `"${safe.replace(/"/g,'""')}"`;}
 /** Null stays empty; the status and fiscal columns retain the evidence gaps. */
@@ -19,10 +20,11 @@ export function analyticsSvg(plot:SVGSVGElement,result:AnalyticsResult,colors:st
  const root=document.createElementNS(NS,'svg');root.setAttribute('width',String(width));root.setAttribute('height',String(totalHeight));root.setAttribute('viewBox',`0 0 ${width} ${totalHeight}`);root.setAttribute('role','img');
  const background=document.createElementNS(NS,'rect');background.setAttribute('width','100%');background.setAttribute('height','100%');background.setAttribute('fill','#0d0f12');root.append(background);
  const title=document.createElementNS(NS,'title');title.textContent=result.title;root.append(title);
- root.append(textNode(result.title.slice(0,90),24,30,17,'#f8fafc'),textNode(`${result.from} — ${result.to} · Datos publicados · ${result.query.frequency}`,24,50,10,'#94a3b8'));
+ const period=analyticsSnapshotMetrics.has(result.query.metric)?'Instantánea actual · '+result.to+(result.query.dataKind==='estimate'?' · Estimaciones':''):result.from+' — '+result.to;
+ root.append(textNode(result.title.slice(0,90),24,30,17,'#f8fafc'),textNode(`${period} · ${result.query.frequency}`,24,50,10,'#94a3b8'));
  result.series.forEach((series,index)=>{const x=24+(index%4)*(width-48)/4,y=70+Math.floor(index/4)*16;root.append(textNode(`● ${series.symbol} · ${series.unit}${series.currency&&series.currency!==series.unit?' '+series.currency:''}`,x,y,10,colors[index%colors.length]));});
  const chart=plot.cloneNode(true) as SVGSVGElement;chart.removeAttribute('xmlns');chart.querySelectorAll('script,foreignObject,image').forEach(node=>node.remove());chart.querySelectorAll('*').forEach(node=>{for(const attr of [...node.attributes])if(/^on/i.test(attr.name)||/^(?:href|xlink:href)$/i.test(attr.name)&&!attr.value.startsWith('#'))node.removeAttribute(attr.name);});chart.setAttribute('x','0');chart.setAttribute('y',String(chartY));chart.setAttribute('width',String(width));chart.setAttribute('height',String(height));chart.setAttribute('font-family','Arial, Helvetica, sans-serif');root.append(chart);
- const sourceText=result.sources.map(source=>source.name+(source.dataThrough?' · '+source.dataThrough:'')).join(' | ');root.append(textNode(`Fuentes: ${sourceText}`.slice(0,Math.floor(width/5.5)),24,chartY+height+24,9,'#94a3b8'));
+ const sourceText=[...new Set(result.sources.map(source=>source.name.trim()).filter(Boolean))].join(' · '),sourceLimit=Math.max(20,Math.floor((width-220)/5.5));root.append(textNode(sourceText.length>sourceLimit?sourceText.slice(0,sourceLimit-1)+'…':sourceText,24,chartY+height+48,9,'#94a3b8'));
  const credit=textNode('MensorTerminal',width-24,chartY+height+48,16,'#ffffff');credit.setAttribute('font-weight','700');credit.setAttribute('text-anchor','end');root.append(credit);
  const metadata=document.createElementNS(NS,'metadata');metadata.textContent=JSON.stringify({query:result.query,generatedAt:result.generatedAt,from:result.from,to:result.to,methodology:result.methodology,warnings:result.warnings,sources:result.sources.map(({name,url,dataThrough,fetchedAt})=>({name,url,dataThrough,fetchedAt}))});root.append(metadata);
  return new XMLSerializer().serializeToString(root);

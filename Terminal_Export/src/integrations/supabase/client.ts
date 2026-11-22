@@ -4,17 +4,17 @@ import type { Database } from './types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-// Recovery is the only email callback accepted; normal access uses passwords.
-export const isPasswordRecovery = window.location.pathname === '/' && new URLSearchParams(window.location.hash.slice(1)).get('type') === 'recovery';
+// A new page entry always requires the personal code. No URL login callbacks.
+export const isPasswordRecovery = false;
+try{localStorage.removeItem('sb-'+new URL(SUPABASE_URL).hostname.split('.')[0]+'-auth-token');}catch{/* Storage can be disabled. */}
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    storage: localStorage,
-    persistSession: true,
+    persistSession: false,
     autoRefreshToken: true,
-    detectSessionInUrl: (url, params) => url.pathname === '/' && params.type === 'recovery',
+    detectSessionInUrl: false,
   }
 });

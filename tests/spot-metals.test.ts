@@ -1,3 +1,4 @@
+import {testAccessToken} from './access-fixture.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createSpotMetalQuotes,spotMetalDailyClose} from '../supabase/functions/analyze-ticker/spot-metal-quotes.ts';
@@ -57,14 +58,14 @@ test('authenticated spot validation and feed quotes use the actual spot series, 
  globalThis.fetch=async(input,init)=>{
   const url=new URL(String(input));paths.push(url.hostname+url.pathname);
   if(url.pathname==='/auth/v1/user')return Response.json({id:uid,email:'test@example.com',email_confirmed_at:'2026-10-01'});
-  if(url.pathname.endsWith('/rpc/beta_active_user'))return Response.json(true);
+  if(url.pathname.endsWith('/rpc/beta_access_session'))return Response.json(true);if(url.pathname.endsWith('/rpc/beta_active_user'))return Response.json(true);
   if(url.pathname.endsWith('/rpc/beta_reserve'))return Response.json('44444444-4444-4444-8444-444444444444');
   if(url.pathname.endsWith('/beta_usage'))return new Response(null,{status:204});
   if(url.hostname==='eodhd.com'&&url.pathname==='/api/eod/XAUUSD.FOREX')return Response.json(rows);
   throw Error('Unexpected request '+url.pathname);
  };
  t.after(()=>{globalThis.fetch=previousFetch;(globalThis as any).Deno=previousDeno;Date.now=previousNow;});
- const req=new Request('https://project.supabase.co/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+'x'.repeat(30)},body:JSON.stringify({accountAction:'validateFeedAsset',group:'commodities',symbol:'XAU/USD'})});
+ const req=new Request('https://project.supabase.co/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+testAccessToken(uid)},body:JSON.stringify({accountAction:'validateFeedAsset',group:'commodities',symbol:'XAU/USD'})});
  const response=await secureRequest(req,async()=>{throw Error('Unexpected dispatch');});assert.equal(response.status,200);assert.deepEqual(await response.json(),{symbol:'XAUUSD=X',label:'Oro · Spot'});
  const quote=await feedSessionQuote('XAUUSD=X','Oro · Spot',true);assert.equal(quote.price,4020);assert.equal(quote.priceKind,'daily-close');assert.equal(quote.date,'2026-10-23');assert.equal(quote.at,null);
  assert.equal(paths.filter(path=>path.includes('eod/XAUUSD.FOREX')).length,1);assert.ok(paths.every(path=>!path.includes('GC')&&!path.includes('real-time')&&!path.includes('intraday')&&!path.includes('yahoo')));

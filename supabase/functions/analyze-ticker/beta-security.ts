@@ -9,6 +9,7 @@ import {handleMonitoringAction,validateMonitoringRequest,MonitoringError} from '
 import {handleAnalyticsAction,analyticsRequestClass,AnalyticsError} from './analytics-service.ts';
 import type {AnalyticsDependencies} from './analytics-types.ts';
 import {handleMensorLabAction,mensorLabRequestClass,MensorLabError} from './mensorlab-service.ts';
+import {AccessCodeError,requireCodeSession} from './access-code-session.ts';
 type Body = Record<string, any>;
 type User = { id: string; email: string; email_confirmed_at?: string; user_metadata?: Record<string, unknown> };
 const SITE = 'https://sftmvpppp.vercel.app';
@@ -85,11 +86,12 @@ export function classify(body: Body): {request_class:string;report_kind?:string;
   if(body.panel){
     if(body.panel==='feedMarkets'&&feedSymbols(body.subject)===null)throw new BetaError(400,'Lista de seguimiento inválida.');
     if(body.panel==='feedMarkets'&&(body.feedGroups===null||!normalizeFeedPreferences(body.feedGroups)))throw new BetaError(400,'Configuración de mercado inválida.');
-    if(!['feed','feedMarkets','feedNews','stockResearchRadar','bonds','bondsCredit','bondsCreditNews','issuerResearch','earningsPreview','instrumentSearch','sectorActivity','sectorComparables','news','institutional','business','assetSnapshot','assetCandles','assetInsights','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
+    if(!['feed','feedMarkets','feedNews','stockResearchRadar','bonds','bondsCredit','bondsCreditNews','issuerResearch','earningsPreview','earningsReview','instrumentSearch','sectorActivity','sectorComparables','news','institutional','business','assetSnapshot','assetCandles','assetInsights','extendedHours','regularQuote','assetContext','marketPulse','comparison','correlation','relativeComparison','marketComparison'].includes(body.panel))throw new BetaError(400,'Panel inválido.');
     if(body.panel==='stockResearchRadar'){
       if(Object.keys(body).some(key=>!['panel','subject'].includes(key))||body.subject!==undefined&&body.subject!=='')throw new BetaError(400,'Consulta de radar inválida.');
       return {request_class:'data'};
     }
+    if(body.panel==='earningsReview'){if(!symbol(body.subject)||Object.keys(body).some(key=>!['panel','subject'].includes(key)))throw new BetaError(400,'Consulta de resultados inválida.');return {request_class:'expensive'};}
     if(body.panel==='earningsPreview'){
       if(!symbol(body.subject)||body.eventDate!==undefined&&(typeof body.eventDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(body.eventDate)||!Number.isFinite(Date.parse(body.eventDate))||new Date(body.eventDate).toISOString().slice(0,10)!==body.eventDate))throw new BetaError(400,'Publicación de resultados inválida.');
       return {request_class:'expensive'};
@@ -144,10 +146,11 @@ async function userFrom(req: Request): Promise<User> {
   const user=await response.json();
   if(!UUID.test(user.id??'')||!user.email||!user.email_confirmed_at)throw new BetaError(403,'Confirma tu e-mail para acceder.');
   if(!await rpc('beta_active_user',{uid:user.id}))throw new BetaError(403,'Tu acceso está revocado. Contacta con el administrador.');
+  await requireCodeSession(authorization,user.id,rpc);
   return user;
 }
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
-async function account(body: Body,user: User,analyticsData?:Pick<AnalyticsDependencies,'fundamentals'>): Promise<Response> {
+async function account(body: Body,user: User,analyticsData?:Pick<AnalyticsDependencies,'fundamentals'|'valuation'>): Promise<Response> {
   const lab=await handleMensorLabAction(body,user,{rpc,data:analyticsData});if(lab)return lab;
   const analytics=await handleAnalyticsAction(body,user,{rpc,env,data:analyticsData});if(analytics)return analytics;
   const monitoring=await handleMonitoringAction(body,user.id,{store:(operation,uid,payload={})=>rpc('beta_monitor_store',{operation,uid,payload}),following:(operation,uid,payload={})=>rpc('beta_following_store',{operation,uid,payload})});if(monitoring)return monitoring;
@@ -257,7 +260,7 @@ function tracked(response: Response,id: string): Response {
     async cancel(reason){cancelled=true;const finished=settle('cancelled');try{await reader.cancel(reason);}finally{await finished;}}
   });return new Response(body,{status:response.status,headers:response.headers});
 }
-export async function secureRequest(req: Request,dispatch: (body:Body,user:User)=>Promise<Response>,analyticsData?:Pick<AnalyticsDependencies,'fundamentals'>): Promise<Response> {
+export async function secureRequest(req: Request,dispatch: (body:Body,user:User)=>Promise<Response>,analyticsData?:Pick<AnalyticsDependencies,'fundamentals'|'valuation'>): Promise<Response> {
   const origin=req.headers.get('origin');
   const headers={'Access-Control-Allow-Origin':origin&&ORIGINS.has(origin)?origin:SITE,'Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS','Vary':'Origin','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
   const wrap=(r:Response)=>{const h=new Headers(r.headers);for(const[k,v]of Object.entries(headers))h.set(k,v);return new Response(r.body,{status:r.status,headers:h});};
@@ -280,5 +283,5 @@ export async function secureRequest(req: Request,dispatch: (body:Body,user:User)
     }
     const response=body.accountAction?await account(body,user,analyticsData):await dispatch(body,user);
     return wrap(eventId?tracked(response,eventId):response);
-  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof ResearchError||error instanceof PortfolioRequestError||error instanceof MonitoringError||error instanceof AnalyticsError||error instanceof MensorLabError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
+  }catch(error){if(eventId)await finish(eventId,'failed');const known=error instanceof BetaError||error instanceof AccessCodeError||error instanceof ResearchError||error instanceof PortfolioRequestError||error instanceof MonitoringError||error instanceof AnalyticsError||error instanceof MensorLabError;return wrap(json({error:known?error.message:'No se ha podido completar la solicitud.'},known?error.status:503));}
 }

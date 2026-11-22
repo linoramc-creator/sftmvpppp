@@ -1,3 +1,4 @@
+import {AccessCodeError,requireCodeSession} from '../analyze-ticker/access-code-session.ts';
 import {buildBrief,briefWindow,zoneDate,type BriefEnv} from './data.ts';
 import {renderBrief} from './render.ts';
 import {mailReady,sendBrief} from './email.ts';
@@ -53,7 +54,7 @@ Deno.serve(async(req:Request)=>{
   if(!req.headers.get('content-type')?.startsWith('application/json'))return json({error:'Formato inválido.'},415);
   const trusted=await sameSecret(req.headers.get('x-brief-job')??'',env('BRIEF_CRON_SECRET'));
   let uid='';
-  if(!trusted){const auth=req.headers.get('authorization')??'';if(!/^Bearer \S{20,4096}$/.test(auth))return json({error:'Inicia sesión.'},401);const r=await fetch(env('SUPABASE_URL')+'/auth/v1/user',{headers:{apikey:env('SUPABASE_ANON_KEY'),Authorization:auth},signal:AbortSignal.timeout(8000)});if(!r.ok)return json({error:'Sesión no válida.'},401);uid=(await r.json()).id;if(!await rpc('beta_is_admin',{uid}))return json({error:'El brief está reservado a tu cuenta de administrador.'},403);}
+  if(!trusted){const auth=req.headers.get('authorization')??'';if(!/^Bearer \S{20,4096}$/.test(auth))return json({error:'Inicia sesión.'},401);const r=await fetch(env('SUPABASE_URL')+'/auth/v1/user',{headers:{apikey:env('SUPABASE_ANON_KEY'),Authorization:auth},signal:AbortSignal.timeout(8000)});if(!r.ok)return json({error:'Sesión no válida.'},401);uid=(await r.json()).id;await requireCodeSession(auth,uid,rpc);if(!await rpc('beta_is_admin',{uid}))return json({error:'El brief está reservado a tu cuenta de administrador.'},403);}
   const reader=req.body?.getReader(),decoder=new TextDecoder();let body='',bytes=0;if(reader){for(;;){const part=await reader.read();if(part.done)break;bytes+=part.value.length;if(bytes>4096){await reader.cancel();return json({error:'Petición demasiado grande.'},413);}body+=decoder.decode(part.value,{stream:true});}body+=decoder.decode();}
   let input:any;try{input=JSON.parse(body);}catch{return json({error:'JSON inválido.'},400);}if(!input||Array.isArray(input)||typeof input!=='object')return json({error:'Petición inválida.'},400);
   if(trusted){if(!briefId(input.userId)||!await rpc('beta_is_admin',{uid:input.userId}))return json({error:'Destinatario inválido.'},403);uid=input.userId;}
@@ -82,5 +83,5 @@ Deno.serve(async(req:Request)=>{
    const job=operation==='generate'?generateDaily(uid,input.date):deliver(uid,`&edition=eq.${input.date}&kind=eq.daily`);EdgeRuntime.waitUntil(job.catch(()=>console.error('Daily brief job failed')));return json({accepted:true},202);
   }
   return json({error:'Operación inválida.'},400);
- }catch(error){return error instanceof BriefError?json({error:error.message},error.status):json({error:'No se ha podido completar el brief. Inténtalo de nuevo.'},503);}
+ }catch(error){return error instanceof BriefError||error instanceof AccessCodeError?json({error:error.message},error.status):json({error:'No se ha podido completar el brief. Inténtalo de nuevo.'},503);}
 });

@@ -1,3 +1,4 @@
+import {testAccessToken} from './access-fixture.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {classify,secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
@@ -25,6 +26,7 @@ function securityFixture(t:any,type:string|((symbol:string)=>string)='INDEX',pre
  globalThis.fetch=async(input:any,init:any={})=>{
   const url=String(input);paths.push(url);
   if(url.includes('/auth/v1/user'))return Response.json({id:uid,email:'test@example.com',email_confirmed_at:'2026-10-01'});
+  if(url.includes('/rpc/beta_access_session'))return Response.json(true);
   if(url.includes('/rpc/beta_active_user'))return Response.json(true);
   if(url.includes('/rpc/beta_reserve'))return Response.json('44444444-4444-4444-8444-444444444444');
   if(url.includes('/beta_usage'))return new Response(null,{status:204});
@@ -34,7 +36,7 @@ function securityFixture(t:any,type:string|((symbol:string)=>string)='INDEX',pre
  };
  t.after(()=>{globalThis.fetch=previousFetch;(globalThis as any).Deno=previousDeno;});return {writes,paths};
 }
-const request=(body:any)=>new Request('https://project.supabase.co/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+'x'.repeat(30)},body:JSON.stringify(body)});
+const request=(body:any)=>new Request('https://project.supabase.co/functions/v1/analyze-ticker',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+testAccessToken(uid)},body:JSON.stringify(body)});
 test('a forged save cannot place an equity in ETF group or trigger database writes',async t=>{
  const {writes}=securityFixture(t,'EQUITY');const groups={...defaultFeedPreferences(),etfs:['FAKEETF']};
  const response=await secureRequest(request({accountAction:'saveFeedPreferences',groups}),async()=>Response.json({unexpected:true}));

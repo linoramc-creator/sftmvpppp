@@ -1,3 +1,4 @@
+import {AccessCodeError,requireCodeSession} from '../analyze-ticker/access-code-session.ts';
 // ============================================================
 // OPTIONS-DATA  Edge Function
 // ------------------------------------------------------------
@@ -15,7 +16,7 @@
 // ============================================================
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "https://sftmvpppp.vercel.app",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -751,6 +752,7 @@ async function handleIvHv(ticker: string, window = 30) {
 // HTTP entrypoint
 // ============================================================
 Deno.serve(async (req: Request): Promise<Response> => {
+  const origin=req.headers.get('origin');if(origin&&!['https://sftmvpppp.vercel.app','http://localhost:5173','http://127.0.0.1:4173'].includes(origin))return new Response(null,{status:403});
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const json = (body: unknown, status = 200) =>
@@ -760,6 +762,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
 
   try {
+    if (req.method !== 'POST') return json({error:'Método no permitido'},405);
+    const authorization=req.headers.get('authorization')??'';
+    if (!/^Bearer\s+\S+/i.test(authorization)) throw new AccessCodeError(401,'Introduce tu código personal para acceder.');
+    const base=Deno.env.get('SUPABASE_URL')??'',anon=Deno.env.get('SUPABASE_ANON_KEY')??'',service=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')??'';
+    const response=await fetch(base+'/auth/v1/user',{headers:{apikey:anon,Authorization:authorization},signal:AbortSignal.timeout(12000)});
+    if (!response.ok) throw new AccessCodeError(401,'Introduce tu código personal para acceder.');
+    const user=await response.json();
+    if (typeof user.id!=='string'||!user.email_confirmed_at) throw new AccessCodeError(401,'Introduce tu código personal para acceder.');
+    await requireCodeSession(authorization,user.id,async(name,body)=>{
+      const r=await fetch(base+'/rest/v1/rpc/'+name,{method:'POST',headers:{apikey:service,Authorization:'Bearer '+service,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12000)});
+      if(!r.ok)throw new AccessCodeError(503,'No se ha podido verificar el acceso.');
+      return r.json();
+    });
     const body = await req.json().catch(() => ({}));
     const action = String(body.action ?? "");
     const ticker = String(body.ticker ?? "").trim().toUpperCase();
@@ -788,7 +803,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     return json(result);
   } catch (e) {
-    if (e instanceof ApiError) return json({ error: e.message }, e.status);
+    if (e instanceof ApiError||e instanceof AccessCodeError) return json({ error: e.message }, e.status);
     console.error("[options-data] error:", e);
     return json({ error: (e as Error).message || "Error interno" }, 500);
   }

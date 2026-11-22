@@ -30,6 +30,7 @@ import { fetchEtfData } from "@/lib/etf-api";
 import AnalyticsSuggestions from '@/components/AnalyticsSuggestions';
 import type {AnalyticsInitialRequest} from '@/lib/analytics-api';
 
+const EarningsReview=lazy(()=>import('@/components/EarningsReview'));
 const ResearchLibrary=lazy(()=>import('@/components/research/ResearchLibrary'));
 const MensorLabWorkspace=lazy(()=>import('@/components/MensorLabWorkspace'));
 const MonitoringCenter=lazy(()=>import('@/components/MonitoringCenter'));
@@ -67,6 +68,7 @@ const DailyBrief = lazy(() => import('@/components/DailyBrief'));
 // ── Section configs ────────────────────────────────────────────────────
 
 const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
+  "Últimos resultados": {label:"ÚLTIMOS RESULTADOS",category:"LATEST EARNINGS"},
   "Resumen Ejecutivo":      { label: "RESUMEN EJECUTIVO",     category: "EXECUTIVE SUMMARY"     },
   "Finanzas":               { label: "FUNDAMENTALES",          category: "VALUATION & FINANCIALS" },
   "Desglose de ingresos": { label: "DESGLOSE DE INGRESOS", category: "BUSINESS SEGMENTS" },
@@ -1022,7 +1024,8 @@ function ReportView({
 
   // Sections appear progressively while the report streams; a tab shows up
   // as soon as its content (or structured data) exists. Order never changes.
-  const available = EXPECTED_TABS.filter((key) => {
+  const available = [EXPECTED_TABS[0],"Últimos resultados",...EXPECTED_TABS.slice(1)].filter((key) => {
+    if(key==="Últimos resultados"&&ticker)return true;
     if (["Desglose de ingresos", "Institucional", "Noticias", "Sector"].includes(key) && ticker) return true;
     if (sections[key]) return true;
     if (key === "Resumen Ejecutivo" && !!ticker) return true;
@@ -1083,6 +1086,7 @@ function ReportView({
                   <CatalystCalendarSection data={catalystCalendar ?? null} />
                 </>
               )}
+              {active === "Últimos resultados" && <Suspense fallback={<p className="py-5 text-xs text-slate-500">Preparando resultados publicados…</p>}><EarningsReview key={ticker} symbol={ticker}/></Suspense>}
               {active === "Opciones" && <OptionsSubSection ticker={ticker} />}
               {active === "Riesgo" && <RiskSubSection ticker={ticker} />}
               {active === "Señales Técnicas" && <TechnicalSubSection ticker={ticker} />}

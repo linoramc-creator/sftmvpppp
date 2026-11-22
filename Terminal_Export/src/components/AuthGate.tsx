@@ -1,33 +1,31 @@
-import { Eye, EyeOff, ArrowRight, Loader2 } from 'lucide-react';
-import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Link, useLocation } from 'react-router-dom';
-import { supabase, isPasswordRecovery } from '@/integrations/supabase/client';
+import { supabase } from '@/integrations/supabase/client';
 import { accountApi,type Profile } from '@/lib/beta-api';
 import { normalizeProfileName, profileDisplayName } from '../../../supabase/functions/analyze-ticker/profile-name';
 import TerminalWelcome from './TerminalWelcome';
 import {TerminalEntryProvider,type FeedReadiness,type TerminalEntryScope} from '@/lib/terminal-entry';
 import './auth-experience.css';
+import PersonalAccess from './PersonalAccess';
+import {accessCodeApi,type AccessTokens} from '@/lib/access-code-api';
 const Context = createContext<Profile | null>(null);
 export const useProfile = () => useContext(Context)!;
 export default function AuthGate({children}: {children:ReactNode}) {
-  const [showPassword,setShowPassword]=useState(false);
   const [session,setSession]=useState<Session|null>(null),[ready,setReady]=useState(false);
   const [profile,setProfile]=useState<Profile|null>(null),[error,setError]=useState('');
-  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmation,setConfirmation]=useState('');
-  const [name,setName]=useState('');
-  const location=useLocation();
+  const location=useLocation(),currentToken=useRef(session?.access_token);currentToken.current=session?.access_token;
   const [welcome,setWelcome]=useState<{id:string;profileId:string;name:string;attempt:number;startedAt:number;phase:'loading'|'ready'|'error'|'leaving';detail:string;portfolioRequired:boolean;gates:Partial<Record<TerminalEntryScope,FeedReadiness>>}|null>(null);
   const welcomedUsers=useRef(new Set<string>());
-  const [register,setRegister]=useState(false),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0);
-  const [settings,setSettings]=useState(isPasswordRecovery),[notice,setNotice]=useState('');
-  const [recovery,setRecovery]=useState(isPasswordRecovery);
+  const [retry,setRetry]=useState(0),[settings,setSettings]=useState(false);
+  const recovery=false,changingAccess=useRef(false);
+  const accessBusy=useCallback((value:boolean)=>{changingAccess.current=value;},[]);
   useEffect(()=>{let active=true;supabase.auth.getSession().then(({data,error})=>{if(active){setSession(data.session);setReady(true);if(error)setError('No se pudo recuperar la sesión.');}});
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,value)=>{if(event==='PASSWORD_RECOVERY'){setRecovery(true);setSettings(true);}setSession(value);setReady(true);});return()=>{active=false;subscription.unsubscribe();};},[]);
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,value)=>{if(event==='PASSWORD_RECOVERY'){setSession(null);queueMicrotask(()=>void supabase.auth.signOut({scope:'local'}));return;}setSession(value);setReady(true);});return()=>{active=false;subscription.unsubscribe();};},[]);
   useEffect(()=>{let active=true;setProfile(previous=>previous?.id===session?.user?.id?previous:null);setError('');if(!session)return;
     // Profile uses the normal authenticated request but not the global 403
     // listener, avoiding an access-check loop for revoked accounts.
-    const load=async()=>{try{const r=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`,apikey:import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY},body:JSON.stringify({accountAction:'profile'}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)throw new Error(data.error||'No se pudo comprobar el acceso.');if(active)setProfile(data);}catch(e){if(active)setError((e as Error).message);}};
+    const load=async()=>{try{const r=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-ticker`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`,apikey:import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY},body:JSON.stringify({accountAction:'profile'}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!active||currentToken.current!==session.access_token)return;if(!r.ok){if(r.status===401){if(changingAccess.current)return;await supabase.auth.signOut({scope:'local'});if(active){setSession(null);setProfile(null);setWelcome(null);}return;}throw new Error(data.error||'No se pudo comprobar el acceso.');}if(active)setProfile(data);}catch(e){if(active)setError((e as Error).message);}};
     void load();const check=()=>{void load();};window.addEventListener('beta-access-check',check);
     const interval=window.setInterval(()=>{if(document.visibilityState==='visible')void load();},60000);
     return()=>{active=false;window.clearInterval(interval);window.removeEventListener('beta-access-check',check);};},[session?.access_token,retry]);
@@ -69,27 +67,10 @@ export default function AuthGate({children}: {children:ReactNode}) {
     return()=>window.clearTimeout(timer);
   },[welcome?.id,welcome?.phase]);
   const welcomeVisible=location.pathname==='/'&&!recovery&&!!profile&&!error&&(!welcomedUsers.current.has(profile.id)||welcome?.profileId===profile.id);
-  const signOut=async()=>{await supabase.auth.signOut({scope:'local'});window.location.assign('/');};
-  async function enter(event:FormEvent){event.preventDefault();if(busy)return;setBusy(true);setError('');
-    try {
-      if(register&&password!==confirmation){setError('Las contraseñas no coinciden.');return;}
-      const displayName=normalizeProfileName(name);
-      if(register&&!displayName){setError('Escribe tu nombre, con un máximo de 60 caracteres.');return;}
-      const credentials={email:email.trim().toLowerCase(),password};
-      const result=register?await supabase.auth.signUp({...credentials,options:{data:{display_name:displayName}}}):await supabase.auth.signInWithPassword(credentials);
-      if(result.error){setError(result.error.status===429?'Demasiados intentos. Espera unos minutos.':register?'No se pudo crear la cuenta. Usa una contraseña de al menos 12 caracteres; si ya tienes cuenta, inicia sesión.':'E-mail o contraseña incorrectos.');return;}
-      if(!result.data.session){setError('No se pudo iniciar la sesión. Contacta con el administrador.');return;}
-      setPassword('');setConfirmation('');setSession(result.data.session);
-    } catch {setError('No se pudo conectar. Comprueba tu conexión e inténtalo de nuevo.');} finally {setBusy(false);}
-  }
-  async function savePassword(event:FormEvent){event.preventDefault();if(busy)return;setNotice('');
-    if(password!==confirmation){setNotice('Las contraseñas no coinciden.');return;}setBusy(true);
-    try{const {error}=await supabase.auth.updateUser({password});if(error){setNotice('No se pudo guardar la contraseña. Usa al menos 12 caracteres y vuelve a intentarlo.');return;}setPassword('');setConfirmation('');setRecovery(false);setNotice('Contraseña guardada. Ya puedes entrar con tu e-mail y contraseña.');}catch{setNotice('No se pudo conectar. Inténtalo de nuevo.');}finally{setBusy(false);}
-  }
-  const passwordFields=<><div className="flex justify-end"><button type="button" aria-label={showPassword?"Ocultar contraseña":"Mostrar contraseña"} aria-pressed={showPassword} className="text-xs text-slate-400 inline-flex gap-2 items-center hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-section-heading rounded" onClick={()=>setShowPassword(!showPassword)}>{showPassword?<EyeOff size={14}/>:<Eye size={14}/>} {showPassword?"Ocultar":"Mostrar"}</button></div><label className="block text-sm text-slate-300">Contraseña<input type={showPassword?"text":"password"} autoComplete={register||settings?'new-password':'current-password'} required minLength={register||settings?12:undefined} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)} className="auth-input"/></label>{(register||settings)&&<><p className="text-xs text-slate-400">Mínimo 12 caracteres. Utiliza una contraseña única.</p><label className="block text-sm text-slate-300">Repetir contraseña<input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirmation} onChange={e=>setConfirmation(e.target.value)} className="auth-input"/></label></>}</>;
-  if(ready&&session&&recovery)return <main className="min-h-screen flex items-center justify-center p-5"><section className="w-full max-w-md border border-border bg-card p-7 space-y-5"><h1 className="text-xl">Establecer nueva contraseña</h1><p className="text-sm text-slate-400">Tu cuenta y tus informes se conservarán.</p><form onSubmit={savePassword} className="space-y-4">{passwordFields}<button disabled={busy} className="w-full rounded-md bg-section-heading text-black font-semibold py-3 hover:brightness-110 transition disabled:opacity-50">{busy?'Guardando…':'Guardar contraseña'}</button></form>{notice&&<p role="status">{notice}</p>}</section></main>;
+  const signOut=async()=>{if(session)await accessCodeApi('logout',{},session.access_token).catch(()=>{});await supabase.auth.signOut({scope:'local'});window.location.assign('/');};
+  const enterWithCode=async(tokens:AccessTokens)=>{const result=await supabase.auth.setSession(tokens);if(result.error||!result.data.session)throw new Error('No se ha podido iniciar la sesión. Vuelve a introducir tu código.');setSession(result.data.session);};
   if(!ready||session)return <>
-    {ready&&session&&profile&&!error&&<Context.Provider value={profile}><TerminalEntryProvider value={entryContext}><div ref={node=>{if(node)node.inert=welcomeVisible;}} aria-hidden={welcomeVisible||undefined}><div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border-b border-border text-xs"><span className="truncate">{profile.email}</span><nav className="flex flex-wrap gap-4 text-white/80"><Link to="/">Terminal</Link>{profile.isAdmin&&<Link className="text-white" to="/admin">Administración</Link>}<button onClick={()=>{setSettings(!settings);setPassword('');setConfirmation('');setNotice('');}}>Mi contraseña</button><button onClick={signOut}>Cerrar sesión</button></nav></div>{settings&&<section className="max-w-md mx-auto p-6 space-y-4 border border-border"><h2>Establecer o cambiar contraseña</h2><form onSubmit={savePassword} className="space-y-4">{passwordFields}<button disabled={busy} className="bg-section-heading text-black px-4 py-3 disabled:opacity-50">{busy?'Guardando…':'Guardar contraseña'}</button></form>{notice&&<p role="status" className="text-sm">{notice}</p>}</section>}<div key={profile.id}>{children}</div></div></TerminalEntryProvider></Context.Provider>}
+    {ready&&session&&profile&&!error&&<Context.Provider value={profile}><TerminalEntryProvider value={entryContext}><div ref={node=>{if(node)node.inert=welcomeVisible;}} aria-hidden={welcomeVisible||undefined}><div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border-b border-border text-xs"><span className="truncate">{profile.email}</span><nav className="flex flex-wrap gap-4 text-white/80"><Link to="/">Terminal</Link>{profile.isAdmin&&<Link className="text-white" to="/admin">Administración</Link>}<button onClick={()=>setSettings(!settings)}>Mi código</button><button onClick={signOut}>Cerrar sesión</button></nav></div>{settings&&<div className="mx-auto max-w-md p-5"><PersonalAccess token={session.access_token} onEnter={enterWithCode} onBusyChange={accessBusy} onClose={()=>setSettings(false)}/></div>}<div key={profile.id}>{children}</div></div></TerminalEntryProvider></Context.Provider>}
     {(!ready||!profile||error||welcomeVisible)&&<TerminalWelcome
       name={profile?(normalizeProfileName(profile.displayName)||profileDisplayName(session?.user?.user_metadata,profile.email)):session?profileDisplayName(session.user?.user_metadata,session.user?.email??''):''}
       phase={error?'error':welcome?.phase??'loading'}
@@ -99,26 +80,5 @@ export default function AuthGate({children}: {children:ReactNode}) {
       onSignOut={session?signOut:undefined}
     />}
   </>;
-  return <main className="auth-page relative flex min-h-screen items-center justify-center overflow-hidden px-5 py-10 text-slate-200 sm:px-8">
-    <div className="relative grid w-full max-w-[960px] items-center gap-9 lg:grid-cols-[1fr_1.05fr] lg:gap-20">
-      <section className="auth-intro mx-auto w-full max-w-md lg:mx-0">
-        <p className="flex items-center gap-2.5 text-[11px] font-semibold tracking-[0.22em] text-slate-200"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-section-heading shadow-[0_0_18px_hsl(var(--section-heading)/0.3)]"/>TERMINAL<span className="ml-1 rounded border border-slate-600/70 px-1.5 py-0.5 text-[9px] tracking-wider text-slate-400">BETA</span></p>
-        <h2 className="mt-7 max-w-sm font-body text-[30px] font-medium leading-[1.2] tracking-tight text-slate-100 sm:text-[36px]">Una mirada más clara<br className="hidden sm:block"/> al mercado.</h2>
-        <p className="mt-5 max-w-sm text-sm leading-7 text-slate-400">Noticias, análisis y seguimiento de activos en tu espacio de trabajo.</p>
-        <div aria-hidden="true" className="mt-8 hidden h-px w-32 bg-gradient-to-r from-section-heading/70 via-sky-400/40 to-transparent lg:block"/>
-      </section>
-      <section aria-label="Acceso a la terminal" className="auth-card mx-auto w-full max-w-md rounded-2xl border border-slate-700/70 bg-[#101823]/90 p-6 shadow-[0_24px_90px_#0005] sm:p-8">
-        <div className="mb-7"><h1 className="font-body text-[23px] font-semibold tracking-tight text-slate-100">{register?'Crear cuenta':'Bienvenido de nuevo'}</h1><p className="mt-2.5 text-sm leading-6 text-slate-400">{register?'Crea tu espacio con tu e-mail y una contraseña.':'Accede a tu terminal y a tus informes guardados.'}</p></div>
-        {error&&<p role="alert" className="mb-5 rounded-lg border border-rose-400/30 bg-rose-400/5 p-3 text-sm leading-relaxed text-rose-300">{error}</p>}
-          <form onSubmit={enter} className="space-y-4">
-            {register&&<label className="block text-sm text-slate-300">Nombre<input type="text" autoComplete="name" required maxLength={60} value={name} onChange={event=>setName(event.target.value)} className="auth-input" placeholder="Tu nombre"/></label>}
-            <label className="block text-sm text-slate-300">E-mail<input type="email" autoComplete="email" required maxLength={254} value={email} onChange={event=>setEmail(event.target.value)} className="auth-input" placeholder="tu@email.com"/></label>
-            {passwordFields}
-            <button disabled={busy} className="!mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-section-heading px-4 py-3 text-sm font-semibold text-slate-950 transition-colors hover:bg-section-heading/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-section-heading focus-visible:ring-offset-2 focus-visible:ring-offset-[#101823] disabled:opacity-60">{busy?<><Loader2 className="h-4 w-4 motion-safe:animate-spin"/>{register?'Creando tu cuenta…':'Entrando…'}</>:<>{register?'Crear cuenta':'Entrar a la terminal'}<ArrowRight size={16} aria-hidden="true"/></>}</button>
-          </form>
-          <button disabled={busy} className="mt-5 w-full rounded text-center text-xs leading-relaxed text-slate-400 transition-colors hover:text-section-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-section-heading" onClick={()=>{setRegister(!register);setError('');setPassword('');setConfirmation('');}}>{register?'Ya tengo cuenta · Iniciar sesión':'No tengo cuenta · Registrarme'}</button>
-        <p className="mt-7 border-t border-slate-700/50 pt-5 text-[11px] leading-5 text-slate-500">Esta es una versión beta, no la versión final. Puede presentar pequeños errores.</p>
-      </section>
-    </div>
-  </main>;
+  return <PersonalAccess onEnter={enterWithCode} onBusyChange={accessBusy}/>;
 }

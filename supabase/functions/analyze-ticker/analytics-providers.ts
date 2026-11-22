@@ -14,8 +14,8 @@ const money=(v:unknown):v is string=>typeof v==='string'&&/^[A-Z]{3}$/.test(v);
 const symbolOk=(v:string)=>/^[A-Z0-9^][A-Z0-9.^=-]{0,24}$/.test(v)&&!v.includes('..');
 const exportEntitled=()=>{try{return (globalThis as any).Deno?.env?.get('ANALYTICS_DATA_EXPORT_ALLOWED')==='1';}catch{return false;}};
 function source(id:string,name:string,url:string,through:string|null,now:number,publicFiling=false):AnalyticsSource{return {id,name,url,fetchedAt:new Date(now).toISOString(),dataThrough:through,exportAllowed:publicFiling||exportEntitled(),exportNote:publicFiling?'Cifras publicadas en EDGAR; conserva atribución y metodología.':exportEntitled()?'Exportación habilitada por el administrador según los derechos contratados.':'La licencia de exportación de datos de este proveedor no está acreditada. Gráfico derivado para uso personal.'};}
-const FIELDS:Partial<Record<AnalyticsMetric,string>>={revenue:'TotalRevenue',netIncome:'NetIncome',grossProfit:'GrossProfit',operatingCashFlow:'OperatingCashFlow',freeCashFlow:'FreeCashFlow',capex:'CapitalExpenditure',cash:'CashAndCashEquivalents',totalDebt:'TotalDebt',equity:'StockholdersEquity',totalAssets:'TotalAssets'};
-const STOCKS=new Set(['cash','totalDebt','equity','totalAssets']);
+const FIELDS:Partial<Record<AnalyticsMetric,string>>={revenue:'TotalRevenue',netIncome:'NetIncome',grossProfit:'GrossProfit',operatingIncome:'OperatingIncome',researchDevelopment:'ResearchAndDevelopment',currentAssets:'CurrentAssets',currentLiabilities:'CurrentLiabilities',operatingCashFlow:'OperatingCashFlow',freeCashFlow:'FreeCashFlow',capex:'CapitalExpenditure',cash:'CashAndCashEquivalents',totalDebt:'TotalDebt',equity:'StockholdersEquity',totalAssets:'TotalAssets'};
+const STOCKS=new Set(['cash','totalDebt','netDebt','equity','totalAssets','currentAssets','currentLiabilities']);
 
 /** Close is the provider's split-adjusted price field, never adjclose (which
  * includes distributions). EODHD's synthetic raw closes are rejected for this
@@ -75,7 +75,7 @@ export function analyticsFundamentalsFromTimeseries(symbol:string,input:unknown,
 }
 
 function eodhdAnnual(raw:Row):Row[]{
-  const blocks={income:object(raw.Financials?.Income_Statement),cash:object(raw.Financials?.Cash_Flow),balance:object(raw.Financials?.Balance_Sheet)},types:Row={revenue:['income','totalRevenue'],netIncome:['income','netIncome'],grossProfit:['income','grossProfit'],operatingCashFlow:['cash','totalCashFromOperatingActivities'],freeCashFlow:['cash','freeCashFlow'],capex:['cash','capitalExpenditures'],cash:['balance','cashAndEquivalents'],totalDebt:['balance','shortLongTermDebtTotal'],equity:['balance','totalStockholderEquity'],totalAssets:['balance','totalAssets']};
+  const blocks={income:object(raw.Financials?.Income_Statement),cash:object(raw.Financials?.Cash_Flow),balance:object(raw.Financials?.Balance_Sheet)},types:Row={revenue:['income','totalRevenue'],netIncome:['income','netIncome'],grossProfit:['income','grossProfit'],operatingIncome:['income','operatingIncome'],researchDevelopment:['income','researchDevelopment'],currentAssets:['balance','totalCurrentAssets'],currentLiabilities:['balance','totalCurrentLiabilities'],operatingCashFlow:['cash','totalCashFromOperatingActivities'],freeCashFlow:['cash','freeCashFlow'],capex:['cash','capitalExpenditures'],cash:['balance','cashAndEquivalents'],totalDebt:['balance','shortLongTermDebtTotal'],equity:['balance','totalStockholderEquity'],totalAssets:['balance','totalAssets']};
   return Object.entries(types).flatMap(([metric,[block,field]]:any)=>{
     const data=(blocks as Row)[block],type='annual'+FIELDS[metric as AnalyticsMetric];
     const points=Object.values(object(data.yearly)).flatMap((v:any)=>{const currency=v.currency_symbol??data.currency_symbol,value=number(v[field]);return day(v.date)&&money(currency)&&value!==null?[{asOfDate:v.date,currencyCode:currency,periodType:'12M',reportedValue:{raw:value}}]:[];});
@@ -84,7 +84,7 @@ function eodhdAnnual(raw:Row):Row[]{
 }
 
 const SEC_CIKS:Record<string,string>={AAPL:'0000320193',MSFT:'0000789019',GOOGL:'0001652044',AMZN:'0001018724',META:'0001326801',NVDA:'0001045810',TSLA:'0001318605',VRT:'0001674101',JPM:'0000019617',BRK_B:'0001067983'};
-const SEC_TAGS:Partial<Record<AnalyticsMetric,string[]>>={revenue:['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','SalesRevenueNet','RevenueFromContractWithCustomerIncludingAssessedTax'],netIncome:['NetIncomeLoss'],grossProfit:['GrossProfit'],operatingCashFlow:['NetCashProvidedByUsedInOperatingActivities'],capex:['PaymentsToAcquirePropertyPlantAndEquipment','PaymentsToAcquireProductiveAssets'],cash:['CashAndCashEquivalentsAtCarryingValue'],equity:['StockholdersEquity'],totalAssets:['Assets']};
+const SEC_TAGS:Partial<Record<AnalyticsMetric,string[]>>={revenue:['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','SalesRevenueNet','RevenueFromContractWithCustomerIncludingAssessedTax'],netIncome:['NetIncomeLoss'],grossProfit:['GrossProfit'],operatingIncome:['OperatingIncomeLoss'],researchDevelopment:['ResearchAndDevelopmentExpense'],currentAssets:['AssetsCurrent'],currentLiabilities:['LiabilitiesCurrent'],operatingCashFlow:['NetCashProvidedByUsedInOperatingActivities'],capex:['PaymentsToAcquirePropertyPlantAndEquipment','PaymentsToAcquireProductiveAssets'],cash:['CashAndCashEquivalentsAtCarryingValue'],equity:['StockholdersEquity'],totalAssets:['Assets']};
 type Fact={start:string|null;end:string;filed:string;value:number;currency:string;accession:string};
 /** SEC facts retain their actual fiscal start/end and filing date. Standalone
  * quarters are accepted by duration, not by fp/frame labels. YTD is differenced
@@ -159,19 +159,21 @@ export function mergeAnalyticsFundamentals(primary:AnalyticsFundamentalInput|nul
 }
 export function analyticsFundamentalsFromEodhd(symbol:string,raw:Row,now=Date.now()):AnalyticsFundamentalInput|null{
   const flow=new Map(Object.values(object(raw.Financials?.Cash_Flow?.quarterly)).map((r:any)=>[r.date,r])),allowed=(date:string)=>{const row=flow.get(date);if(!row)return false;const start=row.startDate??row.start_date??row.start;return row.periodType==='3M'||row.period_type==='3M'||day(start)&&day(row.date)&&(Date.parse(row.date)-Date.parse(start))/DAY>=69&&(Date.parse(row.date)-Date.parse(start))/DAY<=110;};
+  const extraFields={operatingIncome:['Income_Statement','operatingIncome'],researchDevelopment:['Income_Statement','researchDevelopment'],currentAssets:['Balance_Sheet','totalCurrentAssets'],currentLiabilities:['Balance_Sheet','totalCurrentLiabilities']};
+  const extra=Object.entries(extraFields).flatMap(([metric,[block,field]])=>{const data=object(raw.Financials?.[block]);const type='quarterly'+FIELDS[metric as AnalyticsMetric],points=Object.values(object(data.quarterly)).flatMap((r:any)=>{const value=number(r[field]),currency=r.currency_symbol??data.currency_symbol;return day(r.date)&&money(currency)&&value!==null?[{asOfDate:r.date,currencyCode:currency,periodType:'3M',reportedValue:{raw:value}}]:[];});return points.length?[{meta:{type:[type],symbol:[symbol]},[type]:points}]:[];});
   const quarterly=normalizeEodhdTimeseries(raw,symbol).map(series=>{
     const type=series.meta?.type?.[0];return ['quarterlyOperatingCashFlow','quarterlyFreeCashFlow','quarterlyCapitalExpenditure'].includes(type)?{...series,[type]:series[type].filter((p:any)=>allowed(p.asOfDate))}:series;
   }),annual=eodhdAnnual(raw).map(s=>({...s,meta:{...s.meta,symbol:[symbol]}}));
-  const normalized=analyticsFundamentalsFromTimeseries(symbol,[...quarterly,...annual],source('eodhd:financials:'+symbol,'EODHD · estados financieros publicados','https://eodhd.com/financial-apis/stock-etfs-fundamental-data-feeds',raw.General?.UpdatedAt??null,now),now);
+  const normalized=analyticsFundamentalsFromTimeseries(symbol,[...quarterly,...extra,...annual],source('eodhd:financials:'+symbol,'EODHD · estados financieros publicados','https://eodhd.com/financial-apis/stock-etfs-fundamental-data-feeds',raw.General?.UpdatedAt??null,now),now);
   if(normalized)normalized.notes=[...(normalized.notes??[]),'Los flujos trimestrales de EODHD sin duración explícita se excluyen para evitar confundir acumulados YTD con trimestres.'];return normalized;
 }
 export async function analyticsFundamentals(symbol:string,from:string,to:string,options:FundamentalOptions={}):Promise<AnalyticsFundamentalInput|null>{
   if(!symbolOk(symbol)||!day(from)||!day(to))return null;
-  return cached('analytics-fund-v2:'+symbol,6*3600000,async()=>{
+  return cached('analytics-fund-v3:'+symbol,6*3600000,async()=>{
     const now=Date.now(),raw=await eodhdFundamentalRaw(symbol);
     let normalized=raw?analyticsFundamentalsFromEodhd(symbol,raw,now):null;
     if(SEC_CIKS[symbol]){const sec=await secRead(SEC_CIKS[symbol]);normalized=mergeAnalyticsFundamentals(normalized,analyticsFundamentalsFromSec(symbol,sec,now));}
-    const metrics=['revenue','netIncome','capex','operatingCashFlow'];
+    const metrics=['revenue','netIncome','capex','operatingCashFlow','operatingIncome','researchDevelopment','currentAssets','currentLiabilities'];
     if(normalized&&metrics.every(metric=>normalized!.rows.some(row=>row.periodType==='3M'&&finite(row.values[metric as AnalyticsMetric]))))return normalized;
     let ts:unknown[]|null=null;
     if(options.timeseries)try{ts=await options.timeseries(symbol);}catch{/* keep fallback independent */}

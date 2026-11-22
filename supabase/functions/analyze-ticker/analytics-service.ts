@@ -13,7 +13,7 @@ export type AnalyticsServiceDependencies={
  now?:()=>number;
  interpret?:(prompt:string,key:string)=>Promise<AnalyticsInterpretation>;
  execute?:(query:AnalyticsQuery,deps:AnalyticsDependencies)=>Promise<AnalyticsResult>;
- data?:Pick<AnalyticsDependencies,'fundamentals'>;
+ data?:Pick<AnalyticsDependencies,'fundamentals'|'valuation'>;
 };
 export class AnalyticsError extends Error{status:number;constructor(message:string,status=400){super(message);this.status=status;}}
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

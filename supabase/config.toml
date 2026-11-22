@@ -1,5 +1,10 @@
 project_id = "zeimhqybhsrmfljrdkwk"
 
+[functions.terminal-access]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/terminal-access/index.ts"
+
 [functions.analyze-ticker]
 enabled = true
 verify_jwt = false

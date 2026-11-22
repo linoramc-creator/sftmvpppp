@@ -1,5 +1,5 @@
 /** Versioned, serializable Analytics contract. No expressions, SQL or code. */
-export type AnalyticsMetric = 'price'|'realizedVolatility'|'drawdown'|'rollingCorrelation'|'rollingBeta'|'relativeStrength'|'revenue'|'netIncome'|'grossProfit'|'operatingCashFlow'|'freeCashFlow'|'capex'|'capexAI'|'cash'|'totalDebt'|'equity'|'totalAssets'|'portfolioExposure';
+export type AnalyticsMetric = 'price'|'realizedVolatility'|'drawdown'|'rollingCorrelation'|'rollingBeta'|'relativeStrength'|'revenue'|'netIncome'|'grossProfit'|'operatingIncome'|'researchDevelopment'|'operatingCashFlow'|'freeCashFlow'|'capex'|'capexAI'|'cash'|'totalDebt'|'netDebt'|'equity'|'totalAssets'|'currentAssets'|'currentLiabilities'|'forwardPeCurrent'|'trailingPeCurrent'|'priceToBookCurrent'|'enterpriseToEbitdaCurrent'|'portfolioExposure';
 export type AnalyticsOperation = 'level'|'base100'|'growth_yoy'|'growth_qoq'|'ratio';
 export type AnalyticsFrequency = 'daily'|'weekly'|'monthly'|'quarterly'|'annual';
 export type AnalyticsQuery = {
@@ -12,7 +12,7 @@ export type AnalyticsQuery = {
   frequency: AnalyticsFrequency;
   currency: 'original'|'USD'|'EUR'|'GBP';
   chart: 'line'|'bar'|'scatter';
-  dataKind: 'reported';
+  dataKind: 'reported'|'estimate';
   portfolioId?: string;
   /** Daily observed-return window, independent of display frequency. */
   window?:20|60|120;
@@ -53,10 +53,14 @@ export type AnalyticsInterpretation = { query:AnalyticsQuery|null; defaults:stri
 export type AnalyticsPriceInput = {symbol:string;currency:string|null;points:{date:string;value:number}[];source:AnalyticsSource;adjustment:'split-adjusted-price'|'unadjusted-price';notes?:string[]};
 export type AnalyticsFundamentalInput = {symbol:string;rows:{date:string;currency:string|null;filingDate:string|null;periodType:'3M'|'YTD'|'12M'|'instant';values:Partial<Record<AnalyticsMetric,number|null>>;valueSourceIds?:Partial<Record<AnalyticsMetric,string>>}[];source:AnalyticsSource;sources?:AnalyticsSource[];notes?:string[]};
 export type AnalyticsPortfolioInput = {id:string;currency:string;asOf:string;positions:{symbol:string;marketValue:number|null;currency:string;quantity:number;priceAt:string|null}[];equity:number|null;cash:number|null;notes:string[]};
+export type AnalyticsValuationMetric = 'forwardPeCurrent'|'trailingPeCurrent'|'priceToBookCurrent'|'enterpriseToEbitdaCurrent';
+/** A provider snapshot, never a historical point-in-time estimate database. */
+export type AnalyticsValuationInput = {symbol:string;asOf:string;quoteAt:string|null;currency:string|null;values:Partial<Record<AnalyticsValuationMetric,number|null>>;source:AnalyticsSource;notes:string[]};
 export type AnalyticsDependencies = {
   now?:number;
   prices?:(symbol:string,from:string,to:string)=>Promise<AnalyticsPriceInput|null>;
   fundamentals?:(symbol:string,from:string,to:string)=>Promise<AnalyticsFundamentalInput|null>;
+  valuation?:(symbol:string)=>Promise<AnalyticsValuationInput|null>;
   fx?:(fromCurrency:string,toCurrency:string,dates:string[])=>Promise<{date:string;rate:number;source?:AnalyticsSource}[]>;
   portfolio?:(portfolioId?:string)=>Promise<AnalyticsPortfolioInput|null>;
 };

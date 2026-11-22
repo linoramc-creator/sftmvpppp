@@ -1,4 +1,4 @@
-import {validateAnalyticsQuery,AnalyticsValidationError,ANALYTICS_PRICE_STUDIES} from './analytics-engine.ts';
+import {validateAnalyticsQuery,AnalyticsValidationError,ANALYTICS_PRICE_STUDIES,ANALYTICS_VALUATION_METRICS} from './analytics-engine.ts';
 import type {AnalyticsMetric,AnalyticsQuery,AnalyticsResult,AnalyticsSuggestion} from './analytics-types.ts';
 
 export type AnalyticsIdeasContext={symbol?:string;kind?:'stock'|'etf'|'index'|'forex'|'crypto'|'future'|'commodity'|'bond'|'sector';sector?:string};
@@ -25,10 +25,10 @@ export function validateAnalyticsIdeasContext(input:unknown):AnalyticsIdeasConte
 type QueryOptions=Partial<Pick<AnalyticsQuery,'metric'|'operation'|'denominator'|'frequency'|'currency'|'chart'|'period'|'window'|'benchmark'>>;
 export function analyticsSuggestedQuery(assets:string[],options:QueryOptions={}):AnalyticsQuery{
  const metric=options.metric??'price',operation=options.operation??(metric==='price'?'base100':'level');
- const advanced=ANALYTICS_PRICE_STUDIES.has(metric),related=['rollingCorrelation','rollingBeta','relativeStrength'].includes(metric),selected=[...assets];
+ const snapshot=ANALYTICS_VALUATION_METRICS.has(metric),advanced=ANALYTICS_PRICE_STUDIES.has(metric),related=['rollingCorrelation','rollingBeta','relativeStrength'].includes(metric),selected=[...assets];
  if(related&&selected.length===1)selected.push(selected[0]==='^GSPC'?'^NDX':'^GSPC');
  const benchmark=related?(options.benchmark??selected.find(symbol=>symbol.startsWith('^'))??selected.at(-1)):undefined;
- return validateAnalyticsQuery({version:1,assets:selected,metric,operation,period:options.period??{range:'2y'},frequency:options.frequency??(metric==='price'||advanced?'daily':'quarterly'),currency:related?(options.currency&&options.currency!=='original'?options.currency:'USD'):options.currency??'original',chart:options.chart??(metric==='price'||advanced||operation.startsWith('growth_')?'line':'bar'),dataKind:'reported',...(options.denominator?{denominator:options.denominator}:{}),...(options.window?{window:options.window}:{}),...(benchmark?{benchmark}:{})});
+ return validateAnalyticsQuery({version:1,assets:selected,metric,operation,period:options.period??{range:'2y'},frequency:options.frequency??(metric==='price'||advanced||snapshot?'daily':'quarterly'),currency:related?(options.currency&&options.currency!=='original'?options.currency:'USD'):options.currency??'original',chart:snapshot?'bar':options.chart??(metric==='price'||advanced||operation.startsWith('growth_')?'line':'bar'),dataKind:metric==='forwardPeCurrent'?'estimate':'reported',...(options.denominator?{denominator:options.denominator}:{}),...(options.window?{window:options.window}:{}),...(benchmark?{benchmark}:{})});
 }
 /** The original request exceeded a supported period, not its metric. Retain
  * the independently validated definition and offer a shorter window by name. */
@@ -79,6 +79,9 @@ export function analyticsIdeas(input:AnalyticsIdeasContext={}):AnalyticsSuggesti
   // Fundamentals are only suggested for an explicitly identified company.
   // ETF/indices/FX do not acquire corporate revenue merely by being selected.
   if(kind==='stock')rows.push(
+   suggestion('context-valuation-'+symbol,'Valoración forward actual','PER forward publicado y fechado; contiene estimaciones, no un histórico de consensos conocidos en cada fecha.',analyticsSuggestedQuery([symbol],{metric:'forwardPeCurrent'}),'context'),
+   suggestion('context-opmargin-'+symbol,'Margen de explotación','Beneficio operativo / ingresos de la misma fecha fiscal y moneda. No se mezcla con beneficio neto ni con EBITDA.',analyticsSuggestedQuery([symbol],{metric:'operatingIncome',operation:'ratio',denominator:'revenue',chart:'line'}),'context'),
+   suggestion('context-liquidity-'+symbol,'Liquidez corriente','Activos corrientes / pasivos corrientes, en veces. No se calcula si el pasivo está ausente o no es positivo.',analyticsSuggestedQuery([symbol],{metric:'currentAssets',operation:'ratio',denominator:'currentLiabilities',chart:'line'}),'context'),
    suggestion('context-growth-'+symbol,'Crecimiento de ingresos publicados','Crecimiento interanual de trimestres independientes con la fecha fiscal real de la empresa.',analyticsSuggestedQuery([symbol],{metric:'revenue',operation:'growth_yoy'}),'context'),
    suggestion('context-cash-'+symbol,'Caja libre sobre ventas','Flujo de caja libre / ingresos del mismo periodo y moneda. No equivale a rentabilidad por valoración ni a precio objetivo.',analyticsSuggestedQuery([symbol],{metric:'freeCashFlow',operation:'ratio',denominator:'revenue',chart:'line'}),'context'),
   );
@@ -124,7 +127,11 @@ export function analyticsAlternativeSuggestions(options:{prompt:string;assets:st
   const metric=options.metric&&options.metric!=='portfolioExposure'&&options.metric!=='capexAI'?options.metric:'revenue';
   return [make('reported-'+metric,'Evolución de cifras publicadas','Datos históricos publicados; no son estimaciones ni proyecciones futuras. El periodo termina en la última observación disponible.',{metric,operation:'level',chart:'line'}),make('reported-growth','Crecimiento histórico de ingresos','Crecimiento interanual publicado; sirve de contexto y no predice los resultados futuros.',{metric:'revenue',operation:'growth_yoy'})];
  }
- if(options.category==='valuation')return [make('cash-margin','Margen de caja libre','Caja libre / ingresos publicados. Describe conversión de ventas en caja; no sustituye al PER, EV/EBITDA ni a otra valoración solicitada.',{metric:'freeCashFlow',operation:'ratio',denominator:'revenue',chart:'line'}),make('net-margin','Margen neto publicado','Beneficio neto / ingresos del mismo periodo fiscal. No es un múltiplo de valoración ni una previsión.',{metric:'netIncome',operation:'ratio',denominator:'revenue',chart:'line'})];
+ if(options.category==='valuation')return [
+  make('forward-current','PER forward · instantánea actual','Consulta distinta y actual: múltiplo de previsiones publicado, sin histórico point-in-time ni horizonte NTM acreditado. No reproduce la evolución pedida.',{metric:'forwardPeCurrent',operation:'level',frequency:'daily',chart:'bar',period:{range:'1y'}}),
+  make('trailing-current','PER TTM · instantánea actual','Múltiplo actual de beneficios de los últimos doce meses, consultado y fechado hoy. No es una serie histórica ni una estimación de beneficios futuros.',{metric:'trailingPeCurrent',operation:'level',frequency:'daily',chart:'bar',period:{range:'1y'}}),
+  make('cash-margin','Margen de caja libre publicado','Caja libre / ingresos del mismo periodo fiscal. Es una evolución fundamental distinta, no un múltiplo de valoración.',{metric:'freeCashFlow',operation:'ratio',denominator:'revenue',chart:'line'})
+ ];
  if(options.category==='unsupported-ratio')return [make('leverage','Deuda sobre patrimonio','Ratio compatible de deuda total / patrimonio publicado; no equivale a deuda neta/EBITDA, ROE o al ratio original.',{metric:'totalDebt',operation:'ratio',denominator:'equity',chart:'line'}),make('net-margin','Margen neto publicado','Beneficio neto / ingresos publicados; alternativa diferenciada y nunca sustitución del ratio solicitado.',{metric:'netIncome',operation:'ratio',denominator:'revenue',chart:'line'})];
  if(options.category==='risk')return [make('realized-volatility','Volatilidad realizada · 20 sesiones','Estudio distinto sobre 20 cambios de cierre, sin tipo libre de riesgo. No sustituye Sharpe, Sortino, volatilidad implícita, RSI ni una ventana no admitida.',{metric:'realizedVolatility',window:20,operation:'level'}),make('price','Trayectoria del precio','Cierres observados en base 100; no equivalen a una medida de riesgo solicitada.',{metric:'price',operation:'base100'})];
  return [make('price','Evolución del precio en base 100','Alternativa explícita con cierres observados; no representa una métrica desconocida ni reproduce el gráfico original.',{metric:'price',operation:'base100'}),make('revenue','Crecimiento de ingresos publicados','Consulta distinta de la petición original, con cifras publicadas y fechas fiscales verificadas.',{metric:'revenue',operation:'growth_yoy'})];
@@ -138,6 +145,7 @@ export function analyticsResultAlternatives(result:AnalyticsResult):AnalyticsSug
  if(!assets.length||query.metric==='portfolioExposure')return [];
  if(query.metric==='capexAI')return [suggestion('alternative-total-capex','CapEx total publicado','Se presenta separado del CapEx específico de IA, cuyo desglose no se ha verificado.',analyticsSuggestedQuery(assets,{...query,metric:'capex',operation:'level'}),'alternative')];
  if(query.metric==='price')return [];
+ if(ANALYTICS_VALUATION_METRICS.has(query.metric))return [suggestion('alternative-reported-operating-margin','Margen operativo publicado por separado','La instantánea de valoración no está cubierta para estos activos o fechas. Se ofrece una métrica fundamental distinta; no reemplaza el múltiplo.',analyticsSuggestedQuery(assets,{period:query.period,metric:'operatingIncome',operation:'ratio',denominator:'revenue'}),'alternative')];
  if(ANALYTICS_PRICE_STUDIES.has(query.metric))return [suggestion('alternative-observed-price','Precios observados por separado','La muestra o la referencia no permiten calcular el estudio solicitado. Se ofrece una consulta distinta de precios, sin sustituir ni estimar la métrica ausente.',analyticsSuggestedQuery(assets,{period:query.period,currency:query.currency}),'alternative')];
  return [suggestion('alternative-price','Evolución del precio en base 100','No hay cobertura suficiente para el fundamental solicitado. Esta es una consulta de precios diferente; no reemplaza la métrica original.',analyticsSuggestedQuery(assets,{period:query.period,currency:query.currency}),'alternative')];
 }

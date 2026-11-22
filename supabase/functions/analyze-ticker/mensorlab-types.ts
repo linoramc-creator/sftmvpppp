@@ -10,5 +10,5 @@ export type LabRun={runId:string;definition:LabDefinition;generatedAt:string;org
 export type LabSnapshot={id:string;created_at:string;run:LabRun};
 export type LabProjectSummary={id:string;name:string;revision:number;created_at:string;updated_at:string;study_count:number;snapshot_count:number};
 export type LabProject=LabProjectSummary&{definition:LabDefinition;snapshots:LabSnapshot[]};
-export type LabRunDependencies={now?:number;prices?:import('./analytics-types.ts').AnalyticsDependencies['prices'];fundamentals?:import('./analytics-types.ts').AnalyticsDependencies['fundamentals'];fx?:import('./analytics-types.ts').AnalyticsDependencies['fx'];execute?:(query:AnalyticsQuery,deps:import('./analytics-types.ts').AnalyticsDependencies)=>Promise<AnalyticsResult>};
+export type LabRunDependencies={now?:number;prices?:import('./analytics-types.ts').AnalyticsDependencies['prices'];fundamentals?:import('./analytics-types.ts').AnalyticsDependencies['fundamentals'];valuation?:import('./analytics-types.ts').AnalyticsDependencies['valuation'];fx?:import('./analytics-types.ts').AnalyticsDependencies['fx'];execute?:(query:AnalyticsQuery,deps:import('./analytics-types.ts').AnalyticsDependencies)=>Promise<AnalyticsResult>};
 export type LabSources=AnalyticsSource[];

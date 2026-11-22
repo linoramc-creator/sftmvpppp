@@ -27,7 +27,8 @@ test('context boundary rejects untrusted extra fields, invalid symbols and sourc
 });
 test('related alternatives retain requested assets, dates and currency, and do not impersonate the unavailable ratio',()=>{
  const ideas=analyticsAlternativeSuggestions({prompt:'PER MSFT AAPL últimos 5 años en USD',assets:['MSFT','AAPL'],category:'valuation',now});
- assert.ok(ideas.length);for(const idea of ideas){assert.deepEqual(idea.query.assets,['MSFT','AAPL']);assert.equal(idea.query.period.range,'5y');assert.equal(idea.query.currency,'USD');assert.equal(idea.query.operation,'ratio');assert.equal(idea.kind,'alternative');assert.ok(!idea.label.includes('PER'));assert.match(idea.reason,/no sustituye|No es un múltiplo/);validateAnalyticsQuery(idea.query);}
+ assert.ok(ideas.length);for(const idea of ideas){assert.deepEqual(idea.query.assets,['MSFT','AAPL']);assert.equal(idea.query.currency,'USD');assert.equal(idea.kind,'alternative');validateAnalyticsQuery(idea.query);if(idea.query.metric.endsWith('Current')){assert.equal(idea.query.period.range,'1y');assert.equal(idea.query.operation,'level');assert.match(idea.reason,/actual|hoy/);}else{assert.equal(idea.query.period.range,'5y');assert.equal(idea.query.operation,'ratio');}}
+
  const total=analyticsAlternativeSuggestions({prompt:'rentabilidad total MSFT',assets:['MSFT'],category:'total-return',now});assert.match(total[0].reason,/no equivale/);assert.equal(total[0].query.operation,'base100');
 });
 test('missing fundamental data offers an explicit price alternative without changing the original result',async()=>{

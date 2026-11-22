@@ -26,6 +26,8 @@ import {mergeEodhdPriority} from './eodhd-client.ts';
 import {eodhdTreasury} from './eodhd-bonds.ts';
 import {issuerResearch} from './issuer-research.ts';
 import {earningsPreview} from './earnings-preview.ts';
+import {earningsReview} from './earnings-review.ts';
+import {analyticsValuation} from './analytics-valuation.ts';
 import {loadStockResearchRadar} from './stock-research-radar.ts';
 import {portfolioLabResponse} from './portfolio-lab.ts';
 import {sharedStockRadar} from './stock-radar-cache.ts';
@@ -343,6 +345,8 @@ async function yfFundamentalsTimeseries(symbol: string): Promise<any[] | null> {
     "quarterlyInvestingCashFlow", "quarterlyFinancingCashFlow",
     "quarterlyCashAndCashEquivalents", "quarterlyCashCashEquivalentsAndShortTermInvestments",
     "quarterlyTotalDebt", "quarterlyStockholdersEquity", "quarterlyTotalAssets",
+    "quarterlyResearchAndDevelopment", "quarterlyCurrentAssets", "quarterlyCurrentLiabilities",
+    "annualOperatingIncome", "annualResearchAndDevelopment", "annualCurrentAssets", "annualCurrentLiabilities",
   ];
   const now = Math.floor(Date.now() / 1000);
   const start = now - 6 * 365 * 24 * 3600; // ~6 years → up to 24 quarters
@@ -4007,6 +4011,7 @@ Deno.serve((req) => secureRequest(req, async (body,user) => {
       if(body.panel==='instrumentSearch')return panelJson(await (body.scope==='quick'?quickInstrumentSearch(body.query):resolveInstrument(body.query,{type:body.kind})));
       const deps = { summary: eYahooQuoteSummary };
       if(body.panel==='issuerResearch')return panelJson(await issuerResearch(String(body.subject).trim().toUpperCase()));
+      if(body.panel==='earningsReview')return panelJson(await earningsReview(String(body.subject).trim().toUpperCase(),env,{summary:eYahooQuoteSummary,timeseries:yfFundamentalsTimeseries}));
       if(body.panel==='earningsPreview')return panelJson(await earningsPreview(String(body.subject).trim().toUpperCase(),body.eventDate,env));
       if(body.panel==='stockResearchRadar'){
         const result=await sharedStockRadar(()=>loadStockResearchRadar({fallback:createStockRadarFallback({summary:eYahooQuoteSummaryFallback,timeseries:yfFundamentalsTimeseries,history:relativeHistory,fmpRead:(path,query)=>radarFmpRead(env.FMP_KEY,path,query)})}));
@@ -4114,4 +4119,4 @@ Deno.serve((req) => secureRequest(req, async (body,user) => {
     console.error("analyze fatal error:", msg, stack);
     return jsonError("No se ha podido completar el análisis. Inténtalo más tarde.", 500);
   }
-},{fundamentals:(symbol,from,to)=>analyticsFundamentals(symbol,from,to,{timeseries:yfFundamentalsTimeseries})}));
+},{fundamentals:(symbol,from,to)=>analyticsFundamentals(symbol,from,to,{timeseries:yfFundamentalsTimeseries}),valuation:symbol=>analyticsValuation(symbol,{summary:value=>eYahooQuoteSummaryFallback(value,'quoteType,financialData,summaryDetail,defaultKeyStatistics,price')})}));
