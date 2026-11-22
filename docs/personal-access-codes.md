@@ -1,52 +1,58 @@
-# Acceso personal por código
+# Acceso personal por código numérico
 
-La entrada habitual requiere un código privado generado en el navegador con
-128 bits aleatorios. No se guarda el código en texto claro: el servidor conserva
-un HMAC con `ACCESS_CODE_PEPPER`, secreto exclusivo de Supabase Functions.
-El código equivale a una credencial; el usuario debe guardarlo antes de entrar.
+Cada usuario elige un código de **cinco dígitos** y entra con su **e-mail y
+código**. Se conservan los ceros iniciales. El e-mail identifica la cuenta y
+permite que dos usuarios elijan el mismo número sin compartir acceso.
 
-## Activación y cuentas existentes
+El código nunca se guarda en texto claro: el servidor conserva un HMAC que
+incluye e-mail normalizado y código, con `ACCESS_CODE_PEPPER` exclusivo del
+servidor. No se envían códigos, enlaces ni OTP por e-mail. Las contraseñas
+internas de Supabase siguen siendo aleatorias de 128 bits; nunca son el PIN.
+Un PIN corto tiene menos entropía que una contraseña larga; la protección
+frente a intentos de adivinación depende de los límites del servidor.
 
-En la pantalla pública, elegir **Activar mi código**, verificar el e-mail y la
-contraseña actuales una sola vez, generar el código y confirmar que se ha
-guardado. La identidad, informes, listas y rol de administrador se conservan.
-La contraseña anterior se retira y las sesiones anteriores quedan invalidadas.
-Después se entra exclusivamente con el código, también el administrador.
-Las cuentas nuevas eligen nombre y e-mail y generan su código al registrarse.
+## Activación y sustitución
 
-**Mi código** permite sustituirlo desde una sesión válida; el cambio revoca
-el código y las sesiones anteriores. No se puede consultar un código guardado.
-Si se interrumpe la activación después de guardarlo, el acceso con ese mismo
-código permite finalizarla. La recuperación de un código perdido requiere
-intervención del propietario; no existe recuperación por e-mail automática.
+- Cuenta sin código previo: **Activar mi código**, verificar e-mail y contraseña
+  actuales una sola vez, elegir cinco dígitos y repetirlos. Se retira la
+  contraseña anterior conservando identidad, informes y permisos.
+- Cuenta con el antiguo código largo: **Tengo un código anterior**, verificarlo
+  y elegir el código numérico. Esa comprobación sólo permite cambiar el código;
+  no abre datos de la terminal. El permiso de migración caduca a los diez minutos.
+- Cuenta nueva: **Crear cuenta**, nombre, e-mail, código elegido y confirmación.
+- Sesión abierta: **Mi código** permite sustituirlo e invalida las sesiones y
+  el código anteriores. El código guardado no se puede consultar.
 
-## Sesiones y aislamiento
+Si la transición se interrumpe después de guardar el nuevo código, entrar con
+el e-mail y ese código permite terminarla. Recuperar un código perdido requiere
+intervención del propietario; no se ha añadido recuperación por correo.
 
-Supabase Auth mantiene la identidad y emite sus tokens normales. La verificación
-de un enlace de acceso ocurre únicamente en el servidor y no envía correos ni
-devuelve enlaces u OTP al cliente. Cada sesión necesita además un permiso por
-`session_id`, usuario y versión del código, con un máximo de doce horas.
-Las peticiones interactivas y las políticas RLS comprueban ese permiso.
-Un JWT antiguo o una entrada directa con contraseña no obtiene acceso.
+## Sesiones y límites
 
-El navegador conserva la sesión sólo en memoria: al abrir o recargar la página
-se solicita de nuevo el código. La bienvenida existente sigue esperando a que
-el feed indique que ha terminado. Los trabajos programados conservan su
-autenticación propia y no dependen de un navegador abierto.
+Supabase Auth conserva la identidad. Las peticiones interactivas y RLS exigen
+un permiso por usuario, `session_id` y versión del código, de hasta doce horas.
+La sesión del navegador sólo vive en memoria: al abrir o recargar la página
+se pide el acceso. La bienvenida sigue esperando a que termine el feed.
+Los trabajos programados conservan su autenticación independiente.
 
-Hay límites globales, por origen de conexión y por credencial; los intentos
-rechazados también incrementan los contadores. Los RPC de códigos y sesiones
-son exclusivos del servidor. Nunca registrar códigos, tokens ni claves.
+Se permiten cinco intentos por cuenta cada quince minutos y un máximo de
+veinticinco fallidos diarios, además de límites por conexión y globales.
+Cambiar el número o la IP no reinicia el límite de cuenta. Un acceso correcto
+verificado reinicia el contador corto y descuenta sólo su intento del diario,
+para no bloquear a quien entra varias veces correctamente. Los errores no
+revelan si el e-mail está registrado.
+
+El formato anterior sólo sirve para migrar. Sus sesiones no conceden acceso
+interactivo después de aplicar la migración numérica. Los permisos temporales
+usan una versión negativa que nunca satisface las políticas de datos y se
+revocan al cambiar el código. Todos los RPC de acceso son exclusivos del servidor.
+Nunca registrar códigos, tokens ni claves.
 
 ## Publicación
 
-1. Configurar `ACCESS_CODE_PEPPER` una sola vez con al menos 32 caracteres
-   aleatorios. No reemplazarlo al volver a desplegar: invalidaría los códigos.
-2. Aplicar `202611220001_analytics_catalog.sql` y
-   `202611220002_personal_access_codes.sql`.
-3. Publicar `terminal-access`, `analyze-ticker`, `daily-brief` y `options-data`,
-   y la interfaz de `Terminal_Export`.
-4. Verificar registro, activación de cuenta anterior, aislamiento RLS,
-   sustitución y revocación con cuentas temporales; conservar el administrador.
-5. El propietario activa su propio código en la interfaz. El despliegue no
-   crea ni conoce su código personal.
+Conservar `ACCESS_CODE_PEPPER`; reemplazarlo invalidaría los códigos existentes.
+Aplicar `202611220003_numeric_access_codes.sql` después de las dos migraciones
+anteriores del 22 de noviembre. Publicar `terminal-access` y `Terminal_Export`.
+Comprobar activación, migración, PIN compartido por dos e-mails, permisos,
+rotación y bloqueos con cuentas temporales. No modificar las credenciales del
+administrador: el propietario debe elegir su código en la interfaz.

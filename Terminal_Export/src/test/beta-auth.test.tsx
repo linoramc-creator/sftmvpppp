@@ -3,37 +3,60 @@ import {BrowserRouter,MemoryRouter} from 'react-router-dom';
 import {useEffect} from 'react';
 import {useTerminalEntry,type TerminalEntry} from '@/lib/terminal-entry';
 import AuthGate from '@/components/AuthGate';
+import PersonalAccess from '@/components/PersonalAccess';
 const fake=vi.hoisted(()=>({getSession:vi.fn(),signInWithPassword:vi.fn(),signUp:vi.fn(),updateUser:vi.fn(),setSession:vi.fn(),signOut:vi.fn(),access:vi.fn(),onAuthStateChange:vi.fn()}));
 vi.mock('@/lib/access-code-api',async()=>({...await vi.importActual('@/lib/access-code-api'),accessCodeApi:fake.access}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{auth:fake},isPasswordRecovery:false}));
 beforeEach(()=>{vi.clearAllMocks();fake.access.mockReset();fake.access.mockRejectedValue(new Error('Código incorrecto.'));fake.signOut.mockResolvedValue({error:null});fake.getSession.mockResolvedValue({data:{session:null}});fake.onAuthStateChange.mockReturnValue({data:{subscription:{unsubscribe:vi.fn()}}});fake.signInWithPassword.mockResolvedValue({data:{session:null},error:{status:400}});fake.signUp.mockResolvedValue({data:{session:null},error:{status:400}});});
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 async function open(){render(<BrowserRouter><AuthGate><p>Private terminal</p></AuthGate></BrowserRouter>);await screen.findByRole('button',{name:'Entrar a la terminal'});}
-const privateCode='MNSR-0123-4567-89AB-CDEF-0123-4567-89AB-CDEF';
-it('offers only a personal code for normal entry and never signs in with the retired password flow',async()=>{
- await open();expect(screen.queryByLabelText('E-mail')).toBeNull();expect(screen.queryByLabelText('Contraseña')).toBeNull();
- fireEvent.change(screen.getByLabelText('Código personal'),{target:{value:privateCode}});fireEvent.click(screen.getByRole('button',{name:'Entrar a la terminal'}));
- expect(await screen.findByRole('alert')).toHaveTextContent('Código incorrecto');expect(fake.access).toHaveBeenCalledExactlyOnceWith('login',{code:privateCode});expect(fake.signInWithPassword).not.toHaveBeenCalled();expect(screen.queryByText('Private terminal')).toBeNull();
+const privateCode='01234';
+const legacyCode='MNSR-0123-4567-89AB-CDEF-0123-4567-89AB-CDEF';
+function enterEmail(){fireEvent.change(screen.getByLabelText('E-mail'),{target:{value:'person@example.test'}});}
+function chooseCode(code=privateCode,confirmation=code){fireEvent.change(screen.getByLabelText('Código personal nuevo'),{target:{value:code}});fireEvent.change(screen.getByLabelText('Repetir código'),{target:{value:confirmation}});}
+it('offers email and a chosen five-digit code for entry and preserves its leading zero',async()=>{
+ await open();expect(screen.queryByLabelText('Contraseña')).toBeNull();enterEmail();
+ const input=screen.getByLabelText('Código personal');expect(input).toHaveAttribute('inputmode','numeric');expect(input).toHaveAttribute('maxlength','5');
+ fireEvent.change(input,{target:{value:privateCode}});fireEvent.click(screen.getByRole('button',{name:'Entrar a la terminal'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('Código incorrecto');expect(fake.access).toHaveBeenCalledExactlyOnceWith('login',{email:'person@example.test',code:privateCode});expect(fake.signInWithPassword).not.toHaveBeenCalled();expect(screen.queryByText('Private terminal')).toBeNull();
 });
-it('requires creating and saving a private code for registration without an email/password signup',async()=>{
+it.each(['1234','123456','12a45','１２３４５',' 12345'])('rejects invalid login code %s before sending credentials',async(code)=>{
+ await open();enterEmail();fireEvent.change(screen.getByLabelText('Código personal'),{target:{value:code}});fireEvent.submit(screen.getByRole('button',{name:'Entrar a la terminal'}).closest('form')!);
+ expect(await screen.findByRole('alert')).toHaveTextContent('Introduce tu código de 5 dígitos.');expect(fake.access).not.toHaveBeenCalled();
+});
+it('requires choosing and confirming a five-digit code when registering',async()=>{
  await open();fireEvent.click(screen.getByRole('button',{name:/^Crear cuenta$/}));
- fireEvent.change(screen.getByLabelText('Nombre'),{target:{value:'María'}});fireEvent.change(screen.getByLabelText('E-mail'),{target:{value:'person@example.test'}});
- expect(screen.getByRole('button',{name:'Crear cuenta y entrar'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Generar código'}));
- const code=(screen.getByLabelText('Código personal nuevo') as HTMLInputElement).value;expect(code).toMatch(/^MNSR-(?:[A-F0-9]{4}-){7}[A-F0-9]{4}$/);
- expect(screen.getByRole('button',{name:'Crear cuenta y entrar'})).toBeDisabled();fireEvent.click(screen.getByRole('checkbox',{name:'He guardado mi código en un lugar seguro.'}));fireEvent.click(screen.getByRole('button',{name:'Crear cuenta y entrar'}));
- await waitFor(()=>expect(fake.access).toHaveBeenCalledExactlyOnceWith('register',{code,email:'person@example.test',name:'María'},''));expect(fake.signUp).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('Nombre'),{target:{value:'María'}});enterEmail();
+ expect(screen.getByRole('button',{name:'Crear cuenta y entrar'})).toBeDisabled();expect(screen.queryByRole('button',{name:'Generar código'})).toBeNull();expect(screen.queryByRole('checkbox')).toBeNull();
+ chooseCode(privateCode,'01235');expect(screen.getByRole('status')).toHaveTextContent('Los códigos no coinciden.');expect(screen.getByRole('button',{name:'Crear cuenta y entrar'})).toBeDisabled();
+ chooseCode();fireEvent.click(screen.getByRole('button',{name:'Crear cuenta y entrar'}));
+ await waitFor(()=>expect(fake.access).toHaveBeenCalledExactlyOnceWith('register',{code:privateCode,email:'person@example.test',name:'María'},''));expect(fake.signUp).not.toHaveBeenCalled();
 });
 it('uses the old credentials only for first activation and never exposes private content during setup',async()=>{
  fake.access.mockResolvedValueOnce({bootstrapToken:'legacy-setup-token'}).mockRejectedValueOnce(new Error('No se pudo activar.'));
  await open();fireEvent.click(screen.getByRole('button',{name:'Activar mi código'}));fireEvent.change(screen.getByLabelText('E-mail'),{target:{value:'person@example.test'}});fireEvent.change(screen.getByLabelText('Contraseña actual'),{target:{value:'old-password-123'}});fireEvent.click(screen.getByRole('button',{name:'Comprobar cuenta'}));
- expect(await screen.findByRole('button',{name:'Generar código'})).toBeVisible();expect(fake.access).toHaveBeenNthCalledWith(1,'bootstrap',{email:'person@example.test',password:'old-password-123'});
+ expect(await screen.findByLabelText('Código personal nuevo')).toBeVisible();expect(fake.access).toHaveBeenNthCalledWith(1,'bootstrap',{email:'person@example.test',password:'old-password-123'});
  expect(fake.setSession).not.toHaveBeenCalled();expect(screen.queryByText('Private terminal')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Generar código'}));const code=(screen.getByLabelText('Código personal nuevo') as HTMLInputElement).value;fireEvent.click(screen.getByRole('checkbox'));fireEvent.click(screen.getByRole('button',{name:'Activar y entrar'}));await screen.findByRole('alert');expect(fake.access).toHaveBeenNthCalledWith(2,'activate',{code},'legacy-setup-token');
+ chooseCode();fireEvent.click(screen.getByRole('button',{name:'Guardar código y entrar'}));await screen.findByRole('alert');expect(fake.access).toHaveBeenNthCalledWith(2,'activate',{code:privateCode},'legacy-setup-token');
+ fireEvent.click(screen.getByRole('button',{name:'Ya tengo código'}));expect(screen.getByLabelText('E-mail')).toHaveValue('person@example.test');
+});
+it('migrates an earlier long code before it can establish a terminal session',async()=>{
+ const onEnter=vi.fn().mockResolvedValue(undefined),tokens={access_token:'new-code-session',refresh_token:'refresh'};
+ fake.access.mockResolvedValueOnce({bootstrapToken:'legacy-migration-token'}).mockResolvedValueOnce(tokens);
+ render(<PersonalAccess onEnter={onEnter}/>);fireEvent.click(screen.getByRole('button',{name:'Tengo un código anterior'}));
+ expect(screen.queryByLabelText('E-mail')).toBeNull();fireEvent.change(screen.getByLabelText('Código anterior'),{target:{value:legacyCode}});fireEvent.click(screen.getByRole('button',{name:'Comprobar código anterior'}));
+ expect(await screen.findByLabelText('Código personal nuevo')).toBeVisible();expect(fake.access).toHaveBeenNthCalledWith(1,'legacy',{code:legacyCode});expect(onEnter).not.toHaveBeenCalled();expect(fake.setSession).not.toHaveBeenCalled();
+ chooseCode();fireEvent.click(screen.getByRole('button',{name:'Guardar código y entrar'}));await waitFor(()=>expect(onEnter).toHaveBeenCalledExactlyOnceWith(tokens));expect(fake.access).toHaveBeenNthCalledWith(2,'rotate',{code:privateCode},'legacy-migration-token');
+});
+it('lets an authenticated user choose and confirm a replacement code',async()=>{
+ const onEnter=vi.fn().mockResolvedValue(undefined),onClose=vi.fn(),tokens={access_token:'new-code-session',refresh_token:'refresh'};fake.access.mockResolvedValue(tokens);
+ render(<PersonalAccess token="active-session" onEnter={onEnter} onClose={onClose}/>);expect(screen.queryByLabelText('E-mail')).toBeNull();expect(screen.getByRole('button',{name:'Guardar código nuevo'})).toBeDisabled();
+ chooseCode('00000');fireEvent.click(screen.getByRole('button',{name:'Guardar código nuevo'}));await waitFor(()=>expect(onEnter).toHaveBeenCalledExactlyOnceWith(tokens));expect(fake.access).toHaveBeenCalledExactlyOnceWith('rotate',{code:'00000'},'active-session');expect(onClose).toHaveBeenCalledOnce();
 });
 it('starts the existing complete-feed welcome only after a successful code session is established',async()=>{
  const session={access_token:'code-session',user:{id:'person-id',user_metadata:{display_name:'María'}}};fake.access.mockResolvedValue({access_token:'code-session',refresh_token:'refresh'});fake.setSession.mockResolvedValue({data:{session},error:null});
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>({id:'person-id',email:'person@example.test',displayName:'María',isAdmin:false})}));
- await open();fireEvent.change(screen.getByLabelText('Código personal'),{target:{value:privateCode}});fireEvent.click(screen.getByRole('button',{name:'Entrar a la terminal'}));
+ await open();enterEmail();fireEvent.change(screen.getByLabelText('Código personal'),{target:{value:privateCode}});fireEvent.click(screen.getByRole('button',{name:'Entrar a la terminal'}));
  expect(await screen.findByRole('dialog')).toHaveTextContent('Bienvenido, María');expect(fake.setSession).toHaveBeenCalledExactlyOnceWith({access_token:'code-session',refresh_token:'refresh'});expect(screen.queryByRole('button',{name:'Open market'})).toBeNull();
 });
 it('returns expired code grants to code entry instead of a permanently failed welcome',async()=>{

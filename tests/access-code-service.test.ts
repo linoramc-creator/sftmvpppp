@@ -2,34 +2,37 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {accessHandler} from '../supabase/functions/analyze-ticker/access-code-service.ts';
-import {generateAccessCode,normalizeAccessCode} from '../supabase/functions/analyze-ticker/access-code-format.ts';
+import {generateAccessCode,normalizeAccessCode,normalizeLegacyAccessCode} from '../supabase/functions/analyze-ticker/access-code-format.ts';
 import {accessSessionId,requireCodeSession,AccessCodeError} from '../supabase/functions/analyze-ticker/access-code-session.ts';
 import {secureRequest} from '../supabase/functions/analyze-ticker/beta-security.ts';
 import {testAccessToken} from './access-fixture.ts';
 
 const uid='11111111-1111-4111-8111-111111111111',foreign='22222222-2222-4222-8222-222222222222',legacySid='33333333-3333-4333-8333-333333333333';
-const code='MNSR-0123-4567-89AB-CDEF-0123-4567-89AB-CDEF',nextCode='MNSR-FEDC-BA98-7654-3210-FEDC-BA98-7654-3210';
+const code='01234',nextCode='56789',legacyCode='MNSR-0123-4567-89AB-CDEF-0123-4567-89AB-CDEF';
 const pepper='test-only-pepper-at-least-thirty-two-characters',url='https://access-fixture.example.test';
 const legacyToken=testAccessToken(uid,legacySid),email='fixture@example.test';
 type Call={path:string;method:string;body:any;headers:Headers};
 
 async function digest(value:string){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(pepper),{name:'HMAC',hash:'SHA-256'},false,['sign']);return Buffer.from(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(value))).toString('hex');}
-async function fixture(options:{hasCode?:boolean;pending?:boolean;active?:boolean;rateAllowed?:boolean;adminUid?:string;linkUid?:string;verifyUid?:string;tokenUid?:string;failPasswords?:number;logoutMissing?:boolean}={}){
- const calls:Call[]=[],grants=new Set<string>(),state={hasCode:options.hasCode??true,pending:options.pending??false,active:options.active??true,rateAllowed:options.rateAllowed??true,version:1,hash:await digest('code:'+normalizeAccessCode(code)),failPasswords:options.failPasswords??0,minted:0};
+async function fixture(options:{hasCode?:boolean;credentialKind?:'pin'|'legacy';pending?:boolean;active?:boolean;rateAllowed?:boolean;adminUid?:string;linkUid?:string;verifyUid?:string;tokenUid?:string;failPasswords?:number;logoutMissing?:boolean}={}){
+ const kind=options.credentialKind??'pin';
+ const calls:Call[]=[],grants=new Set<string>(),leases=new Set<string>(),state={hasCode:options.hasCode??true,credentialKind:kind,pending:options.pending??false,active:options.active??true,rateAllowed:options.rateAllowed??true,version:1,hash:await digest(kind==='pin'?'pin:'+email+':'+code:'code:'+normalizeLegacyAccessCode(legacyCode)),failPasswords:options.failPasswords??0,minted:0};
  const user=(id=uid)=>({id,email:id===uid?email:'foreign@example.test',email_confirmed_at:'2026-11-22T07:00:00Z'});
  const fetcher:typeof fetch=async(input,init)=>{
   const target=new URL(String(input)),path=target.pathname+target.search,method=init?.method??'GET',body=typeof init?.body==='string'?JSON.parse(init.body):null,headers=new Headers(init?.headers);calls.push({path,method,body,headers});
   if(path==='/rest/v1/rpc/beta_access_attempt')return Response.json(state.rateAllowed);
   if(path==='/rest/v1/rpc/beta_active_user')return Response.json(state.active);
   if(path==='/rest/v1/rpc/beta_access_session')return Response.json(body.uid===uid&&grants.has(body.sid));
+  if(path==='/rest/v1/rpc/beta_access_login_success'){assert.equal(body.uid,uid);assert.ok(grants.has(body.sid));assert.match(body.account_hash,/^[0-9a-f]{64}$/);return Response.json(true);}
   if(path==='/rest/v1/rpc/beta_access_store'){
    assert.equal(headers.get('apikey'),'service-fixture');assert.equal(headers.get('Authorization'),'Bearer service-fixture');
-   if(body.operation==='find')return Response.json(state.hasCode&&body.payload.digest===state.hash?{userId:uid,version:state.version,state:state.pending?'pending':'active'}:null);
+   if(body.operation==='find')return Response.json(state.hasCode&&body.payload.digest===state.hash?{userId:uid,version:state.version,state:state.pending?'pending':'active',credentialKind:state.credentialKind}:null);
    assert.equal(body.uid,uid);
-   if(body.operation==='status')return Response.json({hasCode:state.hasCode,pending:state.pending,version:state.version});
-   if(body.operation==='prepare'){state.hash=body.payload.digest;state.version++;state.pending=true;state.hasCode=true;return Response.json({version:state.version});}
+   if(body.operation==='status')return Response.json({hasCode:state.hasCode,pending:state.pending,credentialKind:state.hasCode?state.credentialKind:null,canMigrate:state.credentialKind==='legacy'&&leases.has(body.payload.sessionId)});
+   if(body.operation==='prepare'){assert.equal(body.payload.credentialKind,'pin');state.hash=body.payload.digest;state.credentialKind='pin';state.version++;state.pending=true;state.hasCode=true;leases.clear();return Response.json({version:state.version});}
    if(body.operation==='activate'){assert.equal(body.payload.digest,state.hash);assert.equal(body.payload.version,state.version);state.pending=false;state.hasCode=true;grants.clear();return Response.json({ok:true});}
    if(body.operation==='grant'){assert.equal(body.payload.digest,state.hash);assert.equal(body.payload.version,state.version);grants.add(body.payload.sessionId);return Response.json({ok:true});}
+   if(body.operation==='legacyBootstrap'){assert.equal(state.credentialKind,'legacy');assert.equal(body.payload.digest,state.hash);assert.equal(body.payload.version,state.version);leases.add(body.payload.sessionId);return Response.json({ok:true});}
    if(body.operation==='logout'){grants.delete(body.payload.sessionId);return Response.json({ok:true});}
    throw Error('Unexpected store operation in isolated fixture');
   }
@@ -51,13 +54,14 @@ async function fixture(options:{hasCode?:boolean;pending?:boolean;active?:boolea
  const handler=accessHandler({url,serviceKey:'service-fixture',anonKey:'anon-fixture',pepper,fetcher});
  const post=(body:unknown,token?:string,headers:Record<string,string>={})=>handler(new Request(url+'/functions/v1/access-code',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...headers},body:JSON.stringify(body)}));
  const operations=()=>calls.filter(call=>call.path==='/rest/v1/rpc/beta_access_store').map(call=>call.body.operation);
- return {handler,post,calls,grants,state,fetcher,operations};
+ return {handler,post,calls,grants,leases,state,fetcher,operations};
 }
 
-test('personal codes normalize only full high-entropy credentials, and generator supplies unique usable codes',()=>{
- assert.equal(normalizeAccessCode(code),normalizeAccessCode('  mnsr 0123 4567 89ab cdef 0123 4567 89ab cdef  '));
- for(const invalid of [null,1234,'123456','MNSR-'+'0'.repeat(32),'MNSR-'+ '0123456'.repeat(4)+'0123','MNSR-'+ 'Z'.repeat(32),code+'extra','x'.repeat(101)])assert.equal(normalizeAccessCode(invalid),null);
- const generated=new Set<string>();for(let i=0;i<100;i++){const value=generateAccessCode();assert.ok(normalizeAccessCode(value));assert.match(value,/^MNSR-(?:[A-F0-9]{4}-){7}[A-F0-9]{4}$/);generated.add(value);}assert.equal(generated.size,100);
+test('personal PINs preserve all five ASCII digits and server-only password generation retains high entropy',()=>{
+ for(const value of ['00000','01234','99999'])assert.equal(normalizeAccessCode('  '+value+'  '),value);
+ for(const invalid of [null,12345,'1234','123456','12 34','12-34','１２３４５','١٢٣٤٥',legacyCode,code+'extra','x'.repeat(101)])assert.equal(normalizeAccessCode(invalid),null);
+ assert.equal(normalizeLegacyAccessCode(legacyCode),normalizeLegacyAccessCode('  mnsr 0123 4567 89ab cdef 0123 4567 89ab cdef  '));assert.equal(normalizeLegacyAccessCode(code),null);
+ const generated=new Set<string>();for(let i=0;i<100;i++){const value=generateAccessCode();assert.ok(normalizeLegacyAccessCode(value));assert.match(value,/^MNSR-(?:[A-F0-9]{4}-){7}[A-F0-9]{4}$/);assert.ok(Buffer.byteLength(value)>=40&&Buffer.byteLength(value)<=72);generated.add(value);}assert.equal(generated.size,100);
 });
 
 test('session claims are owner-bound and a GoTrue-verified legacy JWT without a grant cannot enter paid handlers or reserve credit',async t=>{
@@ -72,17 +76,50 @@ test('session claims are owner-bound and a GoTrue-verified legacy JWT without a 
 
 test('wrong, malformed and unknown access codes return the same denial without minting sessions; valid login grants only the minted owner session',async()=>{
  const f=await fixture();
- for(const candidate of ['123456',nextCode]){const response=await f.post({action:'login',code:candidate});assert.equal(response.status,401);assert.equal((await response.json()).error,'Código incorrecto o acceso no disponible.');}
+ for(const candidate of ['123456',nextCode]){const response=await f.post({action:'login',email,code:candidate});assert.equal(response.status,401);assert.equal((await response.json()).error,'Código incorrecto o acceso no disponible.');}
  assert.equal(f.state.minted,0);
- const response=await f.post({action:'login',code});assert.equal(response.status,200);const result=await response.json(),sid=accessSessionId('Bearer '+result.access_token,uid)!;assert.ok(f.grants.has(sid));assert.equal(f.grants.size,1);assert.equal(f.state.minted,1);assert.deepEqual(f.operations().slice(-2),['find','grant']);
+ const response=await f.post({action:'login',email,code});assert.equal(response.status,200);const result=await response.json(),sid=accessSessionId('Bearer '+result.access_token,uid)!;assert.ok(f.grants.has(sid));assert.equal(f.grants.size,1);assert.equal(f.state.minted,1);assert.deepEqual(f.operations().slice(-2),['find','grant']);
  assert.deepEqual(Object.keys(result).sort(),['access_token','refresh_token']);assert.doesNotMatch(JSON.stringify(result),/otp|12345678|service-fixture|pepper|hashed_token|password|MNSR/);
  assert.equal(f.calls.find(call=>call.path==='/auth/v1/verify')!.body.token_hash,'private-otp-hash-fixture');
  for(const call of f.calls.filter(call=>call.path.includes('/rest/v1/rpc/'))){assert.doesNotMatch(JSON.stringify(call.body),/MNSR|fixture@example|12345678/);if(call.body.payload?.digest)assert.match(call.body.payload.digest,/^[0-9a-f]{64}$/);}
 });
 
 test('rate-denied committed attempt RPC stops auth and credential lookup even when HTTP itself succeeded',async()=>{
- const f=await fixture({rateAllowed:false}),response=await f.post({action:'login',code});assert.equal(response.status,429);assert.equal(f.calls.length,1);assert.equal(f.calls[0].path,'/rest/v1/rpc/beta_access_attempt');assert.equal(f.state.minted,0);
+ const f=await fixture({rateAllowed:false}),response=await f.post({action:'login',email,code});assert.equal(response.status,429);assert.equal(f.calls.length,1);assert.equal(f.calls[0].path,'/rest/v1/rpc/beta_access_attempt');assert.equal(f.state.minted,0);
  assert.match(f.calls[0].body.ip_hash,/^[0-9a-f]{64}$/);assert.match(f.calls[0].body.code_hash,/^[0-9a-f]{64}$/);assert.equal(JSON.stringify(f.calls[0].body).includes(pepper),false);
+});
+
+test('email identifies a PIN account, normalization preserves leading zeroes and wrong PINs share one account rate bucket',async()=>{
+ const f=await fixture();
+ for(const body of [{action:'login',code},{action:'login',email:'foreign@example.test',code},{action:'login',email,code:nextCode}])assert.equal((await f.post(body)).status,401);
+ assert.equal(f.state.minted,0);
+ const response=await f.post({action:'login',email:'  FIXTURE@EXAMPLE.TEST  ',code:' 01234 '});assert.equal(response.status,200);
+ const lookups=f.calls.filter(call=>call.body?.operation==='find');
+ assert.equal(lookups[0].body.payload.digest,await digest('pin:foreign@example.test:01234'));
+ assert.notEqual(lookups[0].body.payload.digest,f.state.hash);
+ assert.equal(lookups.at(-1)!.body.payload.digest,await digest('pin:'+email+':01234'));
+ const rates=f.calls.filter(call=>call.path==='/rest/v1/rpc/beta_access_attempt');assert.equal(rates[2].body.code_hash,rates[3].body.code_hash);assert.notEqual(rates[1].body.code_hash,rates[3].body.code_hash);
+ const successes=f.calls.filter(call=>call.path==='/rest/v1/rpc/beta_access_login_success');assert.equal(successes.length,1);assert.equal(successes[0].body.account_hash,rates[3].body.code_hash);
+ assert.equal(f.calls.some(call=>call.path==='/auth/v1/token?grant_type=password'),false);
+});
+
+test('old long codes only issue a migration bootstrap, and choosing a PIN replaces that credential and revokes the lease',async()=>{
+ const f=await fixture({credentialKind:'legacy'});
+ assert.equal((await f.post({action:'login',email,code:legacyCode})).status,401);
+ const response=await f.post({action:'legacy',code:'  '+legacyCode.toLowerCase()+'  '});assert.equal(response.status,200);const result=await response.json();
+ assert.deepEqual(Object.keys(result),['bootstrapToken']);assert.equal(f.grants.size,0);assert.equal(f.leases.size,1);assert.equal(f.operations().includes('grant'),false);
+ const sid=accessSessionId('Bearer '+result.bootstrapToken,uid)!;assert.ok(f.leases.has(sid));
+ const status=await f.post({action:'status'},result.bootstrapToken);assert.deepEqual(await status.json(),{hasCode:true,pending:false,credentialKind:'legacy',canMigrate:true});
+ await assert.rejects(requireCodeSession('Bearer '+result.bootstrapToken,uid,async()=>false),error=>error instanceof AccessCodeError&&error.status===401);
+ const rotate=await f.post({action:'rotate',code:nextCode},result.bootstrapToken);assert.equal(rotate.status,200);assert.equal(f.state.credentialKind,'pin');assert.equal(f.leases.size,0);assert.equal(f.grants.size,1);
+ assert.equal((await f.post({action:'legacy',code:legacyCode})).status,401);assert.equal((await f.post({action:'login',email,code:nextCode})).status,200);
+});
+
+test('a legacy credential does not migrate through an unrelated or expired bootstrap session',async()=>{
+ const f=await fixture({credentialKind:'legacy'});const response=await f.post({action:'legacy',code:legacyCode});assert.equal(response.status,200);const {bootstrapToken}=await response.json();
+ assert.equal((await f.post({action:'rotate',code:nextCode},legacyToken)).status,401);
+ f.leases.clear();assert.equal((await f.post({action:'rotate',code:nextCode},bootstrapToken)).status,401);assert.equal(f.operations().includes('prepare'),false);assert.equal(f.grants.size,0);
+ const pin=await fixture();assert.equal((await pin.post({action:'legacy',code:legacyCode})).status,401);assert.equal(pin.state.minted,0);
 });
 
 test('legacy password bootstrap is available only to an existing account without a code and never creates a paid-access grant',async()=>{
@@ -95,24 +132,24 @@ test('activation retires old password and all refresh sessions, stores only HMAC
  assert.equal(accessSessionId('Bearer '+result.access_token,foreign),null);assert.ok(f.grants.has(accessSessionId('Bearer '+result.access_token,uid)!));assert.equal(f.state.pending,false);assert.deepEqual(f.operations(),['status','prepare','activate','grant']);
  const update=f.calls.find(call=>call.path==='/auth/v1/admin/users/'+uid&&call.method==='PUT')!;assert.deepEqual(Object.keys(update.body),['password']);assert.equal(typeof update.body.password,'string');assert.ok(update.body.password.length>=40&&Buffer.byteLength(update.body.password)<=72);assert.notEqual(update.body.password,nextCode);assert.notEqual(update.body.password,normalizeAccessCode(nextCode));
  assert.ok(f.calls.findIndex(call=>call.path==='/auth/v1/logout?scope=global')<f.calls.findIndex(call=>call.body?.operation==='activate'));assert.equal(f.calls.some(call=>call.path==='/auth/v1/admin/users'&&call.method==='POST'),false);
- assert.deepEqual(f.calls.filter(call=>call.body?.operation==='prepare').map(call=>Object.keys(call.body.payload)),[['digest']]);assert.doesNotMatch(JSON.stringify(result),/password|MNSR|otp|private-otp|12345678/);
+ assert.deepEqual(f.calls.filter(call=>call.body?.operation==='prepare').map(call=>Object.keys(call.body.payload).sort()),[['credentialKind','digest']]);assert.doesNotMatch(JSON.stringify(result),/password|MNSR|otp|private-otp|12345678/);
  assert.equal(f.calls.some(call=>/portfolio|profiles|reports|usage|reserve/.test(call.path)),false);
 });
 
 test('rotation requires an existing granted code session and replaces its credential without accepting a legacy session',async()=>{
  const denied=await fixture(),blocked=await denied.post({action:'rotate',code:nextCode},legacyToken);assert.equal(blocked.status,401);assert.equal(denied.operations().includes('prepare'),false);assert.equal(denied.state.minted,0);
  const f=await fixture();f.grants.add(legacySid);const response=await f.post({action:'rotate',code:nextCode},legacyToken);assert.equal(response.status,200);const result=await response.json(),newSid=accessSessionId('Bearer '+result.access_token,uid)!;assert.notEqual(newSid,legacySid);assert.equal(f.grants.has(legacySid),false);assert.equal(f.grants.has(newSid),true);assert.ok(f.calls.some(call=>call.path==='/auth/v1/logout?scope=global'));assert.equal(f.calls.find(call=>call.body?.operation==='prepare')!.body.payload.sessionId,legacySid);
- const old=await f.post({action:'login',code});assert.equal(old.status,401);const next=await f.post({action:'login',code:nextCode});assert.equal(next.status,200);
+ const old=await f.post({action:'login',email,code});assert.equal(old.status,401);const next=await f.post({action:'login',email,code:nextCode});assert.equal(next.status,200);
 });
 
 test('pending login is recoverable after an interrupted password transition without granting the temporary bootstrap session',async()=>{
- const f=await fixture({pending:true,failPasswords:1}),failed=await f.post({action:'login',code});assert.equal(failed.status,503);assert.equal(f.state.pending,true);assert.equal(f.grants.size,0);assert.doesNotMatch(JSON.stringify(await failed.json()),/secret-upstream|otp|MNSR/);
- const retried=await f.post({action:'login',code});assert.equal(retried.status,200);assert.equal(f.state.pending,false);assert.equal(f.grants.size,1);assert.equal(f.state.minted,3);assert.ok(f.calls.some(call=>call.path==='/auth/v1/logout?scope=global'));assert.equal(f.operations().filter(operation=>operation==='activate').length,1);assert.equal(f.operations().filter(operation=>operation==='grant').length,1);
+ const f=await fixture({pending:true,failPasswords:1}),failed=await f.post({action:'login',email,code});assert.equal(failed.status,503);assert.equal(f.state.pending,true);assert.equal(f.grants.size,0);assert.doesNotMatch(JSON.stringify(await failed.json()),/secret-upstream|otp|MNSR/);
+ const retried=await f.post({action:'login',email,code});assert.equal(retried.status,200);assert.equal(f.state.pending,false);assert.equal(f.grants.size,1);assert.equal(f.state.minted,3);assert.ok(f.calls.some(call=>call.path==='/auth/v1/logout?scope=global'));assert.equal(f.operations().filter(operation=>operation==='activate').length,1);assert.equal(f.operations().filter(operation=>operation==='grant').length,1);
 });
 
 test('revoked users and foreign identities cannot mint or receive a code-session grant, and wrong minted sessions are locally revoked',async()=>{
- const revoked=await fixture({active:false}),denied=await revoked.post({action:'login',code});assert.equal(denied.status,403);assert.equal(revoked.state.minted,0);assert.equal(revoked.operations().includes('grant'),false);assert.equal(revoked.calls.some(call=>call.path.includes('generate_link')),false);
- for(const options of [{adminUid:foreign},{linkUid:foreign},{verifyUid:foreign},{tokenUid:foreign}]){const f=await fixture(options),response=await f.post({action:'login',code});assert.equal(response.status,503);assert.equal(f.grants.size,0);assert.equal(f.operations().includes('grant'),false);if(options.verifyUid||options.tokenUid)assert.ok(f.calls.some(call=>call.path==='/auth/v1/logout?scope=local'));}
+ const revoked=await fixture({active:false}),denied=await revoked.post({action:'login',email,code});assert.equal(denied.status,403);assert.equal(revoked.state.minted,0);assert.equal(revoked.operations().includes('grant'),false);assert.equal(revoked.calls.some(call=>call.path.includes('generate_link')),false);
+ for(const options of [{adminUid:foreign},{linkUid:foreign},{verifyUid:foreign},{tokenUid:foreign}]){const f=await fixture(options),response=await f.post({action:'login',email,code});assert.equal(response.status,503);assert.equal(f.grants.size,0);assert.equal(f.operations().includes('grant'),false);if(options.verifyUid||options.tokenUid)assert.ok(f.calls.some(call=>call.path==='/auth/v1/logout?scope=local'));}
 });
 
 test('unauthenticated settings, activation and rotation return401, malformed/oversized payloads never call credential storage',async()=>{

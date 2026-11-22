@@ -13,7 +13,7 @@ import { RevenueGrowthSection } from "@/components/charts/RevenueGrowthChart";
 import { buildGrowthChartData } from "@/lib/revenue-growth";
 import { BusinessView, FeedView, InstitutionalView, NewsView } from "@/components/MarketPanels";
 import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
-import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search } from "lucide-react";
+import { AlertCircle, Loader2, ChevronDown, Bookmark, Trash2, Search, FileText } from "lucide-react";
 import { streamAnalysis, streamSectorAnalysis, fetchMarketData, type QuarterlyPeriod, type MarketData, type QuarterlyDebug, type CatalystCalendar } from "@/lib/analyze";
 import { useToast } from "@/hooks/use-toast";
 import IndexChartsPanel from '@/components/IndexChartsPanel';
@@ -68,8 +68,8 @@ const DailyBrief = lazy(() => import('@/components/DailyBrief'));
 // ── Section configs ────────────────────────────────────────────────────
 
 const SECTION_CONFIG: Record<string, { label: string; category: string }> = {
-  "Últimos resultados": {label:"ÚLTIMOS RESULTADOS",category:"LATEST EARNINGS"},
   "Resumen Ejecutivo":      { label: "RESUMEN EJECUTIVO",     category: "EXECUTIVE SUMMARY"     },
+  "Últimos resultados": {label:"ÚLTIMOS RESULTADOS",category:"LATEST EARNINGS"},
   "Finanzas":               { label: "FUNDAMENTALES",          category: "VALUATION & FINANCIALS" },
   "Desglose de ingresos": { label: "DESGLOSE DE INGRESOS", category: "BUSINESS SEGMENTS" },
   "Opciones":               { label: "OPCIONES",               category: "OPTIONS FLOW"           },
@@ -272,6 +272,7 @@ const Index = () => {
   const [tickerIsEtf, setTickerIsEtf]     = useState<string | null>(null);
   const [researchCount,setResearchCount] = useState(0);
   const [activeSection, setActiveSection] = useState<string>(EXPECTED_TABS[0]);
+  const stockSearchIntent = useRef<'analysis'|'earnings'>('analysis');
 
 
 
@@ -374,6 +375,7 @@ const Index = () => {
   };
 
   const handleAnalyze = useCallback(async (symbol?:string) => {
+    stockSearchIntent.current='analysis';
     const resolved=await stockSearch.resolve(symbol??ticker);if(!resolved)return;
     const clean=resolved.symbol;setTicker(clean);
     if(resolved.type==='etf'||resolved.type==='fund'){setTickerIsEtf(clean);return;}
@@ -431,6 +433,18 @@ const Index = () => {
       setError(msg);
     }
   }, [ticker, toast,stockSearch.resolve]);
+
+  const openLatestEarnings = async (symbol?:string) => {
+    stockSearchIntent.current='earnings';
+    const resolved=await stockSearch.resolve(symbol??ticker);if(!resolved)return;
+    const clean=resolved.symbol;setTicker(clean);
+    if(resolved.type==='etf'||resolved.type==='fund'){setTickerIsEtf(clean);return;}
+    if(clean!==currentTicker){
+      abortRef.current?.abort();setIsLoading(false);setAnalysis('');
+      setQuarterlyData([]);setQuarterlyDebug(null);setCatalystCalendar(null);
+    }
+    setCurrentTicker(clean);setTickerIsEtf(null);setError('');setActiveSection('Últimos resultados');
+  };
 
   // ETF apartado: verifies the symbol IS a fund, then streams the ETF-mode
   // report (basic valuation only) while the deterministic deep-dive loads.
@@ -648,7 +662,7 @@ const Index = () => {
           <div className="flex-1 min-w-0">
 
           {/* Search row */}
-          <div className="flex gap-2 mb-5">
+          <div className="flex flex-wrap gap-2 mb-3">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground/30" />
               <input
@@ -682,7 +696,13 @@ const Index = () => {
             )}
           </div>
 
-          <InstrumentSearchResults state={stockSearch} onSelect={symbol=>void handleAnalyze(symbol)}/>
+          <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <button type="button" onClick={()=>void openLatestEarnings()} disabled={stockSearch.busy||!ticker.trim()} className="inline-flex min-h-9 items-center gap-2 rounded border border-section-heading/40 px-3 py-2 text-[11px] font-semibold tracking-wide text-section-heading transition-colors hover:bg-section-heading/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
+              <FileText className="h-3.5 w-3.5"/>ÚLTIMOS RESULTADOS
+            </button>
+            <p className="font-sans text-[11px] text-muted-foreground">Introduce una empresa y consulta sus cifras publicadas y gráficos.</p>
+          </div>
+          <InstrumentSearchResults state={stockSearch} onSelect={symbol=>void (stockSearchIntent.current==='earnings'?openLatestEarnings(symbol):handleAnalyze(symbol))}/>
           {/* Error */}
           {error && (
             <div className="mb-4 p-3 border border-destructive/40 bg-destructive/5 flex items-start gap-2">
@@ -711,7 +731,7 @@ const Index = () => {
           {isLoading && <ReportLoading subject={activeTicker} streaming={Boolean(activeAnalysis)} />}
 
           {/* Report */}
-          {activeAnalysis && (
+          {(activeAnalysis||(activeTicker&&!tickerIsEtf&&(!isLoading||activeSection==='Últimos resultados'))) && (
             <ReportView
               content={activeAnalysis}
               quarterlyData={activeQuarterly}
@@ -1007,7 +1027,7 @@ function MarketTickerBar({
 
 // ── Report View (ticker horizontal tabs) ──────────────────────────────
 
-function ReportView({
+export function ReportView({
   content, quarterlyData, quarterlyDebug, catalystCalendar, ticker, isLoading, activeSection, onSelectSection,
 }: {
   content: string;
@@ -1024,7 +1044,7 @@ function ReportView({
 
   // Sections appear progressively while the report streams; a tab shows up
   // as soon as its content (or structured data) exists. Order never changes.
-  const available = [EXPECTED_TABS[0],"Últimos resultados",...EXPECTED_TABS.slice(1)].filter((key) => {
+  const available = EXPECTED_TABS.filter((key) => {
     if(key==="Últimos resultados"&&ticker)return true;
     if (["Desglose de ingresos", "Institucional", "Noticias", "Sector"].includes(key) && ticker) return true;
     if (sections[key]) return true;
@@ -1043,26 +1063,29 @@ function ReportView({
     <div>
       {/* Ticker header strip */}
       {ticker && (
-        <div className="flex items-center gap-4 px-4 py-3 border border-border bg-card mb-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border border-border bg-card mb-3">
           <span className="w-2 h-2 rounded-full bg-section-heading shrink-0" />
           <span className="text-base font-bold text-section-heading tracking-[0.15em]">{ticker}</span>
           <span className="text-[10px] text-muted-foreground/40 tracking-widest">INFORME DE ANÁLISIS FINANCIERO</span>
+          <button type="button" onClick={()=>onSelectSection('Últimos resultados')} aria-label={`Ver últimos resultados de ${ticker}`} className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded border border-section-heading/30 px-2.5 py-1.5 text-[10px] font-semibold tracking-wide text-section-heading hover:bg-section-heading/[0.08]"><FileText className="h-3 w-3"/>Ver últimos resultados</button>
           {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 ml-auto" />}
         </div>
       )}
 
       {available.length > 0 && (
         <>
-          {/* Horizontal scrollable tab bar (mobile: swipe sideways) */}
-          <div className="border border-border bg-card overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            <div className="flex min-w-max">
+          {/* Wrap sections so results remain visible on narrow screens. */}
+          <div className="border border-border bg-card">
+            <nav className="flex flex-wrap" aria-label={`Secciones del informe de ${ticker}`}>
               {available.map((key) => {
                 const cfg = SECTION_CONFIG[key];
                 const isActive = key === active;
                 return (
                   <button
                     key={key}
+                    type="button"
                     onClick={() => onSelectSection(key)}
+                    aria-current={isActive?'page':undefined}
                     className={`px-4 py-2.5 text-[11px] tracking-widest whitespace-nowrap shrink-0 border-b-2 transition-colors font-semibold ${
                       isActive
                         ? "text-section-heading border-section-heading bg-secondary/30"
@@ -1073,7 +1096,7 @@ function ReportView({
                   </button>
                 );
               })}
-            </div>
+            </nav>
           </div>
 
           {/* Active section content */}

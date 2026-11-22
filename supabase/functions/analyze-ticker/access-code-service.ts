@@ -1,10 +1,11 @@
-import {normalizeAccessCode,generateAccessCode} from './access-code-format.ts';
+import {normalizeAccessCode,normalizeLegacyAccessCode,generateAccessCode} from './access-code-format.ts';
 import {AccessCodeError,accessSessionId,requireCodeSession} from './access-code-session.ts';
 import {normalizeProfileName} from './profile-name.ts';
 type User={id:string;email:string;email_confirmed_at:string};
 type Tokens={access_token:string;refresh_token:string};
 export type AccessDependencies={url:string;serviceKey:string;anonKey:string;pepper:string;fetcher?:typeof fetch};
 const uuid=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(v);
+const normalizeEmail=(value:unknown)=>typeof value==='string'&&value.trim().length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())?value.trim().toLowerCase():null;
 const SITE='https://sftmvpppp.vercel.app',origins=new Set([SITE,'http://localhost:5173','http://127.0.0.1:4173']);
 export function accessHandler(deps:AccessDependencies){
  const fetcher=deps.fetcher??fetch;
@@ -70,41 +71,53 @@ export function accessHandler(deps:AccessDependencies){
    for(;;){const p=await reader.read();if(p.done)break;size+=p.value.length;if(size>4096){await reader.cancel();throw new AccessCodeError(413,'Petición demasiado grande.');}text+=decoder.decode(p.value,{stream:true});}text+=decoder.decode();
    let body:Record<string,unknown>;try{body=JSON.parse(text);}catch{throw new AccessCodeError(400,'Petición inválida.');}
    if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!['action','code','email','password','name'].includes(k)))throw new AccessCodeError(400,'Petición inválida.');
-   const action=body.action;if(!['login','register','bootstrap','activate','rotate','status','logout'].includes(String(action)))throw new AccessCodeError(400,'Operación inválida.');
-   const code=normalizeAccessCode(body.code),hash=await digest('code:'+(code??'invalid'));
+   const action=body.action;if(!['login','legacy','register','bootstrap','activate','rotate','status','logout'].includes(String(action)))throw new AccessCodeError(400,'Operación inválida.');
+   const code=normalizeAccessCode(body.code),email=normalizeEmail(body.email);
    const ip=(req.headers.get('x-forwarded-for')?.split(',').at(-1)?.trim()??req.headers.get('cf-connecting-ip')??'unknown').slice(0,160);
    // Global + credential buckets remain effective even if forwarded IP headers are spoofed.
-   const rateCredential=code??(typeof body.email==='string'?body.email.trim().toLowerCase():req.headers.get('authorization')??'none');
+   // A changing guess or IP must never reset the five-digit account limit.
+   const rateCredential=action==='login'||action==='bootstrap'?email??String(body.email??'none').trim().toLowerCase():action==='legacy'?normalizeLegacyAccessCode(body.code)??'invalid':email??req.headers.get('authorization')??'none';
    if(await rpc('beta_access_attempt',{kind:action,ip_hash:await digest('ip:'+ip),code_hash:await digest('rate:'+rateCredential)})!==true)throw new AccessCodeError(429,'Demasiados intentos. Espera unos minutos.');
    if(action==='login'){
-    if(!code)throw new AccessCodeError(401,'Código incorrecto o acceso no disponible.');
-    const found=await store('find',null,{digest:hash});if(!found)throw new AccessCodeError(401,'Código incorrecto o acceso no disponible.');
+    if(!code||!email)throw new AccessCodeError(401,'Código incorrecto o acceso no disponible.');
+    const hash=await digest('pin:'+email+':'+code),found=await store('find',null,{digest:hash});if(!found||found.credentialKind!=='pin')throw new AccessCodeError(401,'Código incorrecto o acceso no disponible.');
     if(found.state==='pending')await finishPending(found.userId,hash,found.version);
-    return json(await enter(found.userId,hash,found.version));
+    const tokens=await enter(found.userId,hash,found.version);
+    await rpc('beta_access_login_success',{uid:found.userId,sid:accessSessionId('Bearer '+tokens.access_token,found.userId),account_hash:await digest('rate:'+email)}).catch(()=>{});
+    return json(tokens);
+   }
+   if(action==='legacy'){
+    const previous=normalizeLegacyAccessCode(body.code);if(!previous)throw new AccessCodeError(401,'Código incorrecto o acceso no disponible.');
+    const hash=await digest('code:'+previous),found=await store('find',null,{digest:hash});
+    if(!found||found.credentialKind!=='legacy')throw new AccessCodeError(401,'Código incorrecto o acceso no disponible.');
+    const tokens=await mint(found.userId),sessionId=accessSessionId('Bearer '+tokens.access_token,found.userId)!;
+    try{await store('legacyBootstrap',found.userId,{digest:hash,version:found.version,sessionId});}catch(error){await logoutAuth(tokens.access_token).catch(()=>{});throw error;}
+    return json({bootstrapToken:tokens.access_token});
    }
    if(action==='register'||action==='bootstrap'){
-    const email=typeof body.email==='string'?body.email.trim().toLowerCase():'';
-    if(email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessCodeError(400,'Introduce un e-mail válido.');
+    if(!email)throw new AccessCodeError(400,'Introduce un e-mail válido.');
     if(action==='bootstrap'){
      if(typeof body.password!=='string'||body.password.length<1||body.password.length>128)throw new AccessCodeError(400,'Introduce tu contraseña actual.');
      const session=await http('/auth/v1/token?grant_type=password',{email,password:body.password});
      try{const user=await validUser(session?.user),state=await store('status',user.id);if(state.hasCode)throw new AccessCodeError(409,'Esta cuenta ya tiene un código. Entra con tu código personal.');return json({bootstrapToken:session.access_token});}
      catch(error){if(session?.access_token)await logoutAuth(session.access_token).catch(()=>{});throw error;}
     }
-    const name=normalizeProfileName(body.name);if(!code||!name)throw new AccessCodeError(400,'Indica tu nombre y genera un código privado.');
+    const name=normalizeProfileName(body.name);if(!code||!name)throw new AccessCodeError(400,'Indica tu nombre y elige un código de cinco dígitos.');
+    const hash=await digest('pin:'+email+':'+code);
     let user:User;try{user=await validUser(await http('/auth/v1/admin/users',{email,password:generateAccessCode(),email_confirm:true,user_metadata:{display_name:name}},true));}catch{throw new AccessCodeError(400,'No se pudo crear la cuenta. Si ya tienes una, activa su código.');}
     let prepared=false;
-    try{const row=await store('prepare',user.id,{digest:hash});prepared=true;await store('activate',user.id,{digest:hash,version:row.version});return json(await enter(user.id,hash,row.version));}
+    try{const row=await store('prepare',user.id,{digest:hash,credentialKind:'pin'});prepared=true;await store('activate',user.id,{digest:hash,version:row.version});return json(await enter(user.id,hash,row.version));}
     catch(error){if(!prepared)await http('/auth/v1/admin/users/'+user.id,{},true,undefined,'DELETE').catch(()=>{});throw error;}
    }
    const token=(req.headers.get('authorization')??'').replace(/^Bearer\s+/i,''),user=await userFrom(token);
-   if(action==='status')return json(await store('status',user.id));
+   if(action==='status')return json(await store('status',user.id,{sessionId:accessSessionId('Bearer '+token,user.id)}));
    if(action==='logout'){await store('logout',user.id,{sessionId:accessSessionId('Bearer '+token,user.id)});await logoutAuth(token).catch(()=>{});return json({ok:true});}
-   if(!code)throw new AccessCodeError(400,'Genera un código privado válido.');
-   const state=await store('status',user.id);
+   if(!code)throw new AccessCodeError(400,'Elige un código numérico de cinco dígitos.');
+   const hash=await digest('pin:'+user.email.trim().toLowerCase()+':'+code),sid=accessSessionId('Bearer '+token,user.id);
+   const state=await store('status',user.id,{sessionId:sid});
    if(action==='activate'&&state.hasCode&&!state.pending)throw new AccessCodeError(409,'Esta cuenta ya tiene un código.');
-   const sessionId=action==='rotate'?await requireCodeSession('Bearer '+token,user.id,rpc):undefined;
-   const row=await store('prepare',user.id,{digest:hash,...(sessionId?{sessionId}:{})});
+   const sessionId=action==='rotate'?state.credentialKind==='legacy'&&state.canMigrate===true?sid:await requireCodeSession('Bearer '+token,user.id,rpc):undefined;
+   const row=await store('prepare',user.id,{digest:hash,credentialKind:'pin',...(sessionId?{sessionId}:{})});
    await finishPending(user.id,hash,row.version,token);
    return json(await enter(user.id,hash,row.version));
   }catch(error){return json({error:error instanceof AccessCodeError?error.message:'No se ha podido completar el acceso. Vuelve a intentarlo.'},error instanceof AccessCodeError?error.status:503);}
